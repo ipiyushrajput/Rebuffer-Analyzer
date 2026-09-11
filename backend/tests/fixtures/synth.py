@@ -443,8 +443,11 @@ def render_master_playlist(
     *,
     audio_renditions: list[tuple[str, str, str]] | None = None,
     independent_segments: bool = True,
-    version: int = 3,
+    version: int | None = None,
 ) -> str:
+    # EXT-X-INDEPENDENT-SEGMENTS requires version 6, so the default follows the tags used.
+    if version is None:
+        version = 6 if independent_segments else 3
     lines = ["#EXTM3U", f"#EXT-X-VERSION:{version}"]
     if independent_segments:
         lines.append("#EXT-X-INDEPENDENT-SEGMENTS")

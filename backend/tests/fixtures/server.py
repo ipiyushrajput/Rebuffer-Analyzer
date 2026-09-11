@@ -177,10 +177,11 @@ def build_simple_channel(
         render_media_playlist,
     )
 
+    # Bitrates step by less than max_adjacent_rung_ratio so a clean channel stays clean.
     rungs = [
         ("low", 600_000, "640x360", 640, 360),
-        ("mid", 1_500_000, "1280x720", 1280, 720),
-        ("high", 3_500_000, "1920x1080", 1920, 1080),
+        ("mid", 1_100_000, "1280x720", 1280, 720),
+        ("high", 2_000_000, "1920x1080", 1920, 1080),
     ][:variant_count]
 
     variants = [

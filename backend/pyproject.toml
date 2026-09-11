@@ -59,6 +59,9 @@ ignore = [
     "RUF012",  # Rule metadata on classes is intentionally a plain mutable default.
     "UP042",   # str+Enum keeps the values JSON-serialisable for the API and the DB.
     "SIM117",  # Nested `with` keeps socket and TLS lifetimes readable in tls_inspect.
+    "RUF001",  # Report text uses real typography (en dash, multiplication sign).
+    "RUF002",
+    "RUF003",
 ]
 
 [tool.ruff.lint.per-file-ignores]
