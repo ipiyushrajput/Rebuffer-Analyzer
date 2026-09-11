@@ -72,7 +72,7 @@ async def generate(
     records: list[dict[str, Any]] = []
     async with db_session.session_scope() as session:
         for kind, path in written:
-            row = Report(
+            report_row = Report(
                 job_id=handle.id,
                 channel_name=handle.channel_name,
                 job_type=handle.type,
@@ -83,15 +83,15 @@ async def generate(
                 risk_score=float(verdict.risk_score),
                 size_bytes=path.stat().st_size,
             )
-            session.add(row)
+            session.add(report_row)
             await session.flush()
             records.append(
                 {
-                    "id": row.id,
+                    "id": report_row.id,
                     "format": kind,
                     "path": str(path),
-                    "url": f"/api/reports/{row.id}/download",
-                    "size_bytes": row.size_bytes,
+                    "url": f"/api/reports/{report_row.id}/download",
+                    "size_bytes": report_row.size_bytes,
                 }
             )
 
@@ -140,7 +140,7 @@ async def generate_bulk(
             bundle.write(path, arcname=f"channels/{path.name}")
 
     async with db_session.session_scope() as session:
-        row = Report(
+        bulk_row = Report(
             job_id=parent.id,
             channel_name=f"Bulk — {len(rows)} channel(s)",
             job_type="bulk",
@@ -150,9 +150,9 @@ async def generate_bulk(
             risk_score=max((r.get("risk_score") or 0 for r in rows), default=0.0),
             size_bytes=consolidated.stat().st_size,
         )
-        session.add(row)
+        session.add(bulk_row)
         await session.flush()
-        report_id = row.id
+        report_id = bulk_row.id
 
     return {
         "id": report_id,

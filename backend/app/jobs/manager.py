@@ -271,7 +271,7 @@ class JobManager:
     def get(self, job_id: str) -> JobHandle | None:
         return self.jobs.get(job_id)
 
-    def list(self, *, job_type: JobType | None = None) -> list[JobHandle]:
+    def list_jobs(self, *, job_type: JobType | None = None) -> list[JobHandle]:
         jobs = [h for h in self.jobs.values() if job_type is None or h.type == job_type]
         return sorted(jobs, key=lambda h: h.created_at, reverse=True)
 
@@ -449,14 +449,15 @@ class JobManager:
         async with db_session.session_scope() as session:
             for model in (PlaylistSample, SegmentSample, VirtualBufferSample):
                 result = await session.execute(delete(model).where(model.ts < cutoff))
-                removed += result.rowcount or 0
+                removed += int(getattr(result, "rowcount", 0) or 0)
+
             # Snapshots kept around an incident are pinned and survive the purge.
-            result = await session.execute(
+            snapshot_result = await session.execute(
                 delete(PlaylistSnapshot).where(
                     PlaylistSnapshot.ts < cutoff, PlaylistSnapshot.pinned.is_(False)
                 )
             )
-            removed += result.rowcount or 0
+            removed += int(getattr(snapshot_result, "rowcount", 0) or 0)
         return removed
 
 

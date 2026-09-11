@@ -354,9 +354,9 @@ def enrich_codec_details(analysis: TsAnalysis) -> None:
         elif track.stream_type == 0x24:
             units = hevc_sps.iter_nal_units(head)
             track.nal_types = [t for t, _ in units]
-            sps = next((hevc_sps.parse_sps(p) for t, p in units if t == hevc_sps.NAL_SPS), None)
+            hevc = next((hevc_sps.parse_sps(p) for t, p in units if t == hevc_sps.NAL_SPS), None)
             track.codec_details = {
-                "sps": sps.as_dict() if sps else None,
+                "sps": hevc.as_dict() if hevc else None,
                 "has_vps": any(t == hevc_sps.NAL_VPS for t, _ in units),
                 "has_sps": any(t == hevc_sps.NAL_SPS for t, _ in units),
                 "has_pps": any(t == hevc_sps.NAL_PPS for t, _ in units),
@@ -367,5 +367,5 @@ def enrich_codec_details(analysis: TsAnalysis) -> None:
             config = adts.parse_adts(head)
             track.codec_details = {"aac": config.as_dict() if config else None}
         elif track.stream_type in (0x81, 0x87):
-            config = adts.parse_ac3(head)
-            track.codec_details = {"ac3": config.as_dict() if config else None}
+            ac3 = adts.parse_ac3(head)
+            track.codec_details = {"ac3": ac3.as_dict() if ac3 else None}

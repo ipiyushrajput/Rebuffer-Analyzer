@@ -186,16 +186,13 @@ def _parse_stsd(payload: bytes, track: Fmp4Track) -> None:
             track.height = struct.unpack_from(">H", body, 26)[0]
             for config in iter_boxes(body, start=78):
                 if config.type == b"avcC":
-                    sps = _sps_from_avcc(config.payload)
-                    if sps:
-                        track.sps = (
-                            h264_sps.parse_sps(sps).as_dict() if h264_sps.parse_sps(sps) else None
-                        )
+                    raw = _sps_from_avcc(config.payload)
+                    parsed = h264_sps.parse_sps(raw) if raw else None
+                    track.sps = parsed.as_dict() if parsed else None
                 elif config.type == b"hvcC":
-                    sps = _sps_from_hvcc(config.payload)
-                    if sps:
-                        parsed = hevc_sps.parse_sps(sps)
-                        track.sps = parsed.as_dict() if parsed else None
+                    raw = _sps_from_hvcc(config.payload)
+                    parsed_hevc = hevc_sps.parse_sps(raw) if raw else None
+                    track.sps = parsed_hevc.as_dict() if parsed_hevc else None
         elif entry.type in (b"mp4a", b"ac-3", b"ec-3", b"ac-4") and len(body) >= 28:
             track.channels = struct.unpack_from(">H", body, 16)[0]
             track.sample_rate = struct.unpack_from(">I", body, 24)[0] >> 16

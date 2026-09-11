@@ -44,7 +44,7 @@ async def create_session(payload: RealtimeSessionIn) -> dict[str, Any]:
 
 @router.get("/sessions")
 async def list_sessions() -> dict[str, Any]:
-    return {"sessions": [h.summary() for h in job_manager.list(job_type="realtime")]}
+    return {"sessions": [h.summary() for h in job_manager.list_jobs(job_type="realtime")]}
 
 
 @router.get("/sessions/{session_id}")

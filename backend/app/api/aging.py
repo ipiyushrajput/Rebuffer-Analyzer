@@ -51,7 +51,7 @@ async def create_job(payload: AgingJobIn) -> dict[str, Any]:
 
 @router.get("/jobs")
 async def list_jobs(include_finished: bool = Query(default=True)) -> dict[str, Any]:
-    live = {h.id: h.summary() for h in job_manager.list(job_type="aging")}
+    live = {h.id: h.summary() for h in job_manager.list_jobs(job_type="aging")}
 
     # Jobs from an earlier process run are read back from the database.
     try:

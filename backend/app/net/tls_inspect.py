@@ -102,11 +102,20 @@ def _blocking_inspect(host: str, port: int) -> TlsResult:
                 if der:
                     result.chain_length = 1
                 if cert:
-                    result.subject = _rdn_to_str(cert.get("subject", ()))
-                    result.issuer = _rdn_to_str(cert.get("issuer", ()))
-                    result.not_before = cert.get("notBefore")
-                    result.not_after = cert.get("notAfter")
-                    result.san = [v for k, v in cert.get("subjectAltName", ()) if k == "DNS"]
+                    # `getpeercert()` returns a loosely typed mapping; every field read here
+                    # is a string or a tuple of pairs, so the values are narrowed explicitly.
+                    fields: dict[str, Any] = dict(cert)
+                    result.subject = _rdn_to_str(fields.get("subject", ()))
+                    result.issuer = _rdn_to_str(fields.get("issuer", ()))
+                    not_before = fields.get("notBefore")
+                    not_after = fields.get("notAfter")
+                    result.not_before = str(not_before) if not_before else None
+                    result.not_after = str(not_after) if not_after else None
+                    result.san = [
+                        str(value)
+                        for kind, value in tuple(fields.get("subjectAltName", ()))
+                        if kind == "DNS"
+                    ]
                     result.san_matches_host = any(_host_matches(s, host) for s in result.san)
                     if result.not_after:
                         try:

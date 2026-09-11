@@ -237,7 +237,9 @@ def test_an_aging_job_result_is_readable_from_the_database(origin: FixtureServer
             "/api/aging/jobs",
             json={"playback_url": url, "channel_name": "Stored HD", "duration_minutes": 1},
         ).json()["id"]
-        _wait_for(client, f"/api/aging/jobs/{job_id}", lambda b: b["status"] == "RUNNING", timeout=20)
+        _wait_for(
+            client, f"/api/aging/jobs/{job_id}", lambda b: b["status"] == "RUNNING", timeout=20
+        )
         client.delete(f"/api/aging/jobs/{job_id}")
 
         result = client.get(f"/api/aging/jobs/{job_id}/result").json()
@@ -265,12 +267,7 @@ def test_the_bulk_templates_download_in_every_format() -> None:
 
 
 def test_bulk_validation_reports_row_level_errors() -> None:
-    csv = (
-        "channel_name,playback_url\n"
-        "Good,https://cdn/a.m3u8\n"
-        "Bad,not-a-url\n"
-        ",https://cdn/c.m3u8\n"
-    )
+    csv = "channel_name,playback_url\nGood,https://cdn/a.m3u8\nBad,not-a-url\n,https://cdn/c.m3u8\n"
     with TestClient(create_app()) as client:
         response = client.post(
             "/api/bulk/validate", files={"file": ("channels.csv", csv, "text/csv")}

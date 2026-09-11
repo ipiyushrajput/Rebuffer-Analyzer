@@ -1,0 +1,49 @@
+[Unit]
+Description=TV Plus Rebuffer Analyzer — backend
+Documentation=https://github.com/ipiyushrajput/Rebuffer-Analyzer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=rba
+Group=rba
+WorkingDirectory=/opt/rba/backend
+
+# Credentials live only in this file, which is root-owned and mode 0600.
+EnvironmentFile=/opt/rba/backend/.env
+
+ExecStart=/opt/rba/backend/.venv/bin/uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port ${RBA_PORT} \
+    --workers 1 \
+    --timeout-graceful-shutdown 30 \
+    --no-access-log
+
+# One worker on purpose: jobs are held in process and resumed from the database on
+# restart, so a second worker would run each aging job twice.
+
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=45
+
+# Twenty concurrent aging jobs fit inside this comfortably; the cap stops a runaway job
+# from taking the host down with it.
+MemoryMax=6G
+MemoryHigh=5G
+TasksMax=4096
+LimitNOFILE=65535
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/var/lib/rba
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rba-backend
+
+[Install]
+WantedBy=multi-user.target

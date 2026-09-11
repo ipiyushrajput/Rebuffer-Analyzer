@@ -115,13 +115,22 @@ export function UrlForm({ value, onChange, disabled }: Props) {
         </div>
       </div>
 
-      <button
-        type="button"
-        className="text-xs font-semibold text-brand-700 hover:underline"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        {expanded ? 'Hide' : 'Add'} origin, CDN and SSAI URLs for layer attribution
-      </button>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <button
+          type="button"
+          className="text-xs font-semibold text-brand-700 hover:underline"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? 'Hide' : 'Add'} origin, CDN and SSAI URLs for layer attribution
+        </button>
+        <button
+          type="button"
+          className="text-xs font-semibold text-brand-700 hover:underline"
+          onClick={() => setShowOptions((v) => !v)}
+        >
+          {showOptions ? 'Hide' : 'Show'} job options
+        </button>
+      </div>
 
       {expanded && (
         <div className="grid gap-3 rounded-md border border-[var(--rba-line)] bg-slate-50 p-3 lg:grid-cols-3">
@@ -153,14 +162,6 @@ export function UrlForm({ value, onChange, disabled }: Props) {
           </p>
         </div>
       )}
-
-      <button
-        type="button"
-        className="text-xs font-semibold text-brand-700 hover:underline"
-        onClick={() => setShowOptions((v) => !v)}
-      >
-        {showOptions ? 'Hide' : 'Show'} job options
-      </button>
 
       {showOptions && (
         <div className="space-y-3 rounded-md border border-[var(--rba-line)] bg-slate-50 p-3">

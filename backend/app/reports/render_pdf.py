@@ -9,13 +9,40 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PDF_MARGIN = {"top": "12mm", "bottom": "14mm", "left": "10mm", "right": "10mm"}
+# Typed loosely on purpose: Playwright declares this as a TypedDict that mypy cannot
+# match against a plain literal without repeating the import at module scope.
+PDF_MARGIN: Any = {"top": "12mm", "bottom": "14mm", "left": "10mm", "right": "10mm"}
 RENDER_TIMEOUT_MS = 60_000
+
+
+def chromium_executable() -> str | None:
+    """Locate a Chromium the host already has.
+
+    Playwright refuses to launch when the installed browser build differs from the one its
+    Python package pins, which happens on a host where the browsers were provisioned
+    separately. When that is the case the binary is named explicitly instead.
+    """
+    configured = os.environ.get("RBA_CHROMIUM_EXECUTABLE")
+    if configured and Path(configured).exists():
+        return configured
+
+    roots = [Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"))]
+    for root in roots:
+        if not root.is_dir():
+            continue
+        candidates = sorted(root.glob("chromium-*/chrome-linux/chrome"), reverse=True)
+        candidates += sorted(root.glob("chromium_headless_shell-*/chrome-linux/*"), reverse=True)
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+    return None
 
 
 class PdfUnavailable(RuntimeError):
@@ -40,7 +67,18 @@ async def render_pdf(html: str, destination: Path) -> Path:
 
     try:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(args=["--no-sandbox"])
+            launch: dict[str, object] = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+            try:
+                browser = await playwright.chromium.launch(**launch)  # type: ignore[arg-type]
+            except Exception:  # Retry once with an explicitly named binary.
+                executable = chromium_executable()
+                if executable is None:
+                    raise
+                logger.info("launching the Chromium found at %s", executable)
+                browser = await playwright.chromium.launch(
+                    executable_path=executable,
+                    **launch,  # type: ignore[arg-type]
+                )
             try:
                 page = await browser.new_page()
                 await page.goto(

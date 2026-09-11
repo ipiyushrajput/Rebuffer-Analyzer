@@ -380,10 +380,10 @@ def check_segment_pair(
     before_sps = previous.sps or {}
     after_sps = current.sps or {}
     if before_sps and after_sps:
-        keys = ("resolution", "profile", "level", "max_num_ref_frames", "chroma_format")
+        sps_keys = ("resolution", "profile", "level", "max_num_ref_frames", "chroma_format")
         changed = {
             k: (before_sps.get(k), after_sps.get(k))
-            for k in keys
+            for k in sps_keys
             if before_sps.get(k) != after_sps.get(k)
         }
         if changed:

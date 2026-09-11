@@ -84,7 +84,7 @@ async def resolve(url_or_host: str, *, probe_reachability: bool = True) -> DnsRe
     result.resolve_ms = (time.perf_counter() - t0) * 1000
 
     for family, _type, _proto, _canon, sockaddr in infos:
-        addr = sockaddr[0]
+        addr = str(sockaddr[0])
         if family == socket.AF_INET and addr not in result.a_records:
             result.a_records.append(addr)
         elif family == socket.AF_INET6 and addr not in result.aaaa_records:

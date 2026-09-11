@@ -44,9 +44,9 @@ def _build_map(headers: list[str]) -> dict[str, str]:
         for alias in aliases:
             lookup[_normalise(alias)] = canonical
     for header in headers:
-        canonical = lookup.get(_normalise(header))
-        if canonical:
-            mapping[header] = canonical
+        resolved = lookup.get(_normalise(header))
+        if resolved:
+            mapping[header] = resolved
     return mapping
 
 
@@ -145,13 +145,14 @@ def _validate(row: BulkRow) -> None:
 
 def _parse_csv(data: bytes, *, delimiter: str | None) -> tuple[list[BulkRow], dict[str, str]]:
     text = data.decode("utf-8-sig", errors="replace")
-    if delimiter is None:
+    separator = delimiter
+    if separator is None:
         try:
-            delimiter = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|").delimiter
+            separator = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|").delimiter
         except csv.Error:
-            delimiter = ","
-    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-    headers = reader.fieldnames or []
+            separator = ","
+    reader = csv.DictReader(io.StringIO(text), delimiter=separator)
+    headers = list(reader.fieldnames or [])
     mapping = _build_map(headers)
     _require_columns(mapping, headers)
     return _records_to_rows([dict(record) for record in reader], mapping), mapping

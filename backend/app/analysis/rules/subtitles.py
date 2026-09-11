@@ -117,7 +117,7 @@ def check_caption_consistency(
         carried = captions_by_variant.get(variant)
         if carried is None:
             continue
-        declares = bool(declared) and declared.upper() != "NONE"
+        declares = declared is not None and declared.upper() not in ("", "NONE")
         if declares and not carried:
             findings.append(
                 R.SUB_CEA_ABSENT.raise_finding(

@@ -302,7 +302,7 @@ async def _build_rows(bulk_job_id: str, children: list[JobHandle]) -> list[dict[
 
 @router.get("/jobs")
 async def list_jobs() -> dict[str, Any]:
-    jobs = [h.summary() for h in job_manager.list(job_type="bulk") if h.parent_job_id is None]
+    jobs = [h.summary() for h in job_manager.list_jobs(job_type="bulk") if h.parent_job_id is None]
     return {"jobs": jobs, "count": len(jobs)}
 
 
