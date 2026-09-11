@@ -48,3 +48,7 @@ backend/tests/fixtures/_generated/
 .idea/
 .vscode/
 *.swp
+
+# Frontend build tooling
+frontend/node_modules/
+frontend/dist/

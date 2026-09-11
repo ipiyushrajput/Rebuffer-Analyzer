@@ -1,0 +1,138 @@
+/**
+ * WebSocket message types.
+ *
+ * The mirror of `backend/app/ws/schemas.py`. Both sides are kept in step by hand; a message
+ * whose `type` this file does not know is ignored rather than rendered.
+ */
+
+export type ServerMessageType =
+  | 'status'
+  | 'playlist_snapshot'
+  | 'segment_result'
+  | 'metric'
+  | 'player_event'
+  | 'finding'
+  | 'verdict'
+  | 'event'
+  | 'error'
+
+export type StreamLayer = 'PLAYBACK' | 'ORIGIN' | 'CDN' | 'SSAI'
+
+export interface ServerMessage<T = Record<string, unknown>> {
+  type: ServerMessageType
+  session_id: string
+  ts: string
+  layer?: StreamLayer | null
+  variant_id?: string | null
+  data: T
+}
+
+export interface FindingData {
+  rule_id: string
+  title: string
+  layer: string
+  stream_layer: StreamLayer
+  severity: 'CRITICAL' | 'ERROR' | 'WARN' | 'INFO' | 'PASS'
+  owner: string
+  owner_label: string
+  variant: string | null
+  detail: string
+  root_cause: string
+  fix: string
+  rebuffer_impact: 'direct' | 'indirect' | 'none'
+  count: number
+  first_seen: string
+  last_seen: string
+  evidence: Record<string, unknown>[]
+  layer_presence: Record<string, boolean>
+  reference: string
+}
+
+export interface PlaylistSnapshotData {
+  at: string
+  variant: string
+  url: string
+  status: number
+  msn: number | null
+  last_msn: number | null
+  dsn: number | null
+  segments: number
+  window_s: number
+  target_duration: number | null
+  ttfb_ms: number | null
+  total_ms: number
+  bytes: number
+  headers: Record<string, string>
+}
+
+export interface SegmentResultData {
+  variant: string
+  msn: number
+  uri: string
+  at: string
+  status: number
+  bytes: number
+  download_ms: number
+  ttfb_ms: number | null
+  declared_duration: number | null
+  actual_duration: number | null
+  measured_kbps: number | null
+  av_skew_ms: number | null
+  container: string
+  starts_with_keyframe: boolean | null
+}
+
+export interface VerdictData {
+  status: string
+  headline: string
+  risk_score: number
+  owner: string | null
+  owner_label: string | null
+  required_fix: string | null
+  measured_rebuffer_ratio: number | null
+  worst_variant: string | null
+  incident_count: number
+  incident_seconds: number
+  counts: Record<string, number>
+  window_seconds: number
+  playlists_checked: number
+  segments_checked: number
+  primary: (FindingData & { rank_score: number; stall_correlations: number }) | null
+  contributing: (FindingData & { rank_score: number })[]
+  risk_formula: string
+}
+
+export interface EventData {
+  kind: string
+  [key: string]: unknown
+}
+
+/** Telemetry the player sends back on the same socket. */
+export interface PlayerEventOut {
+  event:
+    | 'level_switched'
+    | 'frag_loaded'
+    | 'buffer'
+    | 'stall_start'
+    | 'stall_end'
+    | 'error'
+    | 'dropped_frames'
+    | 'startup'
+  ts?: string
+  variant?: string
+  level?: number
+  bitrate?: number
+  buffer_s?: number
+  stall_duration_s?: number
+  dropped?: number
+  total_frames?: number
+  error_type?: string
+  details?: string
+  fatal?: boolean
+  startup_ms?: number
+}
+
+export interface ClientMessage {
+  type: 'player_event' | 'ping' | 'subscribe'
+  data: Record<string, unknown>
+}

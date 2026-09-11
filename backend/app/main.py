@@ -40,9 +40,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await settings_api.load_thresholds_from_db()
 
+    from app.jobs.manager import job_manager
+    from app.ws.hub import hub
+
+    async def publish(job_id: str, kind: str, payload: dict[str, object]) -> None:
+        await hub.publish(job_id, kind, dict(payload))
+
+    job_manager.set_event_sink(publish)
+    await job_manager.start()
+    await job_manager.resume_persisted_jobs()
+
     try:
         yield
     finally:
+        from app.api import proxy as proxy_api
+
+        await job_manager.shutdown()
+        await proxy_api.aclose()
         await db_session.dispose()
 
 
@@ -69,10 +83,18 @@ def create_app() -> FastAPI:
         expose_headers=["Content-Disposition"],
     )
 
+    from app.api import aging, bulk, proxy, realtime, reports
     from app.api import settings as settings_api
+    from app.ws import routes as ws_routes
 
     app.include_router(health.router, prefix="/api")
     app.include_router(settings_api.router, prefix="/api")
+    app.include_router(realtime.router, prefix="/api")
+    app.include_router(aging.router, prefix="/api")
+    app.include_router(bulk.router, prefix="/api")
+    app.include_router(reports.router, prefix="/api")
+    app.include_router(proxy.router, prefix="/api")
+    app.include_router(ws_routes.router)
 
     return app
 

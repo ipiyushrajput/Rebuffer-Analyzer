@@ -1,0 +1,438 @@
+{#
+  Channel report. One template renders both HTML and PDF: Playwright prints this exact page,
+  so the two carry identical content and identical charts.
+
+  The HTML is self-contained — CSS, the chart library data, and the logo are inlined — so the
+  file can be emailed as a single attachment.
+#}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ channel_name }} — TV Plus Rebuffer Analyzer report</title>
+<style>
+  :root {
+    --ink: #10131c; --muted: #5c6478; --line: #e4e7ef; --ground: #f6f7fb;
+    --brand: #1428A0; --critical: #b4151b; --error: #d4581a; --warn: #9a6700;
+    --info: #1f6feb; --pass: #1a7f37;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 13px; line-height: 1.5;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 24px 20px 64px; }
+  code, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+  h1 { font-size: 22px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  h2 { font-size: 16px; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+  h3 { font-size: 13.5px; margin: 16px 0 6px; }
+  p { margin: 0 0 8px; }
+  a { color: var(--brand); }
+  header.masthead { display: flex; gap: 14px; align-items: center; background: #fff;
+    border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  header.masthead img { width: 44px; height: 44px; border-radius: 8px; }
+  .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 18px; margin-top: 12px; }
+  .meta div { font-size: 12px; }
+  .meta dt { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+  .meta dd { margin: 2px 0 0; font-weight: 600; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+  .verdict { border-left: 6px solid var(--brand); }
+  .verdict.critical { border-left-color: var(--critical); }
+  .verdict.warn { border-left-color: var(--warn); }
+  .verdict.pass { border-left-color: var(--pass); }
+  .status { display: inline-block; font-weight: 700; font-size: 14px; padding: 4px 10px; border-radius: 999px; }
+  .status.critical { background: #fdeaea; color: var(--critical); }
+  .status.warn { background: #fdf3e0; color: var(--warn); }
+  .status.pass { background: #e8f6ec; color: var(--pass); }
+  .chip { display: inline-block; border: 1px solid var(--line); border-radius: 999px;
+    padding: 1px 8px; font-size: 11px; font-weight: 600; background: #fff; }
+  .chip.CRITICAL { border-color: var(--critical); color: var(--critical); background: #fdeaea; }
+  .chip.ERROR { border-color: var(--error); color: var(--error); background: #fdf0e8; }
+  .chip.WARN { border-color: var(--warn); color: var(--warn); background: #fdf3e0; }
+  .chip.INFO { border-color: var(--info); color: var(--info); background: #e8f1fd; }
+  .chip.PASS { border-color: var(--pass); color: var(--pass); background: #e8f6ec; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; }
+  .kpi { background: var(--ground); border-radius: 8px; padding: 8px 10px; }
+  .kpi .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .kpi .value { font-size: 18px; font-weight: 700; font-family: "IBM Plex Mono", monospace; }
+  .kpi .value.over { color: var(--critical); }
+  .kpi .value.under { color: var(--pass); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { background: var(--ground); text-align: left; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--muted); padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .evidence { background: var(--ground); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px; margin-top: 6px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+  .escalation { background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; white-space: pre-wrap; word-break: break-word; }
+  .copy { float: right; font-size: 11px; padding: 3px 9px; border: 1px solid var(--line);
+    border-radius: 6px; background: #fff; cursor: pointer; font-family: inherit; }
+  .chain { border-left: 3px solid var(--brand); padding-left: 10px; margin: 6px 0; font-size: 12px; }
+  .chart { width: 100%; height: 220px; }
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 12px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 11px; }
+  footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid var(--line);
+    font-size: 11px; color: var(--muted); }
+  @media print {
+    body { background: #fff; }
+    .page { max-width: none; padding: 0; }
+    .card { break-inside: avoid; box-shadow: none; }
+    h2 { break-after: avoid; }
+    .copy { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+{# 1. Header #}
+<header class="masthead">
+  {% if logo_data_uri %}<img src="{{ logo_data_uri }}" alt="">{% endif %}
+  <div>
+    <h1>{{ channel_name }}</h1>
+    <p class="muted small">
+      TV Plus Rebuffer Analyzer {{ version }} · {{ job_type }} analysis
+    </p>
+  </div>
+</header>
+
+<dl class="meta">
+  {% if channel_ref %}<div><dt>Channel ID</dt><dd>{{ channel_ref }}</dd></div>{% endif %}
+  {% if country %}<div><dt>Country</dt><dd>{{ country }}</dd></div>{% endif %}
+  <div><dt>Window start</dt><dd>{{ started_at }}</dd></div>
+  <div><dt>Window end</dt><dd>{{ ended_at }}</dd></div>
+  <div><dt>Duration</dt><dd>{{ window_human }}</dd></div>
+  <div><dt>Playlists checked</dt><dd>{{ verdict.playlists_checked }}</dd></div>
+  <div><dt>Segments checked</dt><dd>{{ verdict.segments_checked }}</dd></div>
+  <div><dt>Layers analysed</dt><dd>{{ layers|join(', ') }}</dd></div>
+</dl>
+
+<p class="small muted" style="margin-top:8px">
+  URLs analysed (tokens masked; the appendix carries them in full):
+  {% for name, url in masked_urls.items() %}{% if url %}<br><code>{{ name }}: {{ url }}</code>{% endif %}{% endfor %}
+</p>
+
+{# 2. Executive verdict #}
+<h2>Executive verdict</h2>
+<div class="card verdict {{ verdict_tone }}">
+  <span class="status {{ verdict_tone }}">{{ verdict.status }}</span>
+  <h3 style="margin-top:10px">Primary root cause</h3>
+  <p>{{ verdict.headline }}</p>
+  {% if verdict.owner_label %}
+  <h3>Responsible party</h3>
+  <p><span class="chip">{{ verdict.owner_label }}</span></p>
+  {% endif %}
+  {% if verdict.required_fix %}
+  <h3>Required fix</h3>
+  <p>{{ verdict.required_fix }}</p>
+  {% endif %}
+
+  <div class="kpis">
+    <div class="kpi">
+      <div class="label">Rebuffer ratio {{ 'measured' if player_ratio is not none else 'simulated' }}</div>
+      <div class="value {{ 'over' if ratio_over else 'under' }}">
+        {{ '%.3f'|format(verdict.measured_rebuffer_ratio or 0) }}
+      </div>
+      <div class="small muted">threshold {{ thresholds.rebuffer_ratio_threshold }}{% if verdict.worst_variant %} · {{ verdict.worst_variant }}{% endif %}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Risk score</div>
+      <div class="value">{{ verdict.risk_score }}<span class="small muted">/100</span></div>
+    </div>
+    <div class="kpi">
+      <div class="label">Incidents</div>
+      <div class="value">{{ verdict.incident_count }}</div>
+      <div class="small muted">{{ '%.0f'|format(verdict.incident_seconds) }} s total</div>
+    </div>
+    {% for severity in ['CRITICAL', 'ERROR', 'WARN'] %}
+    <div class="kpi">
+      <div class="label">{{ severity }}</div>
+      <div class="value">{{ verdict.counts.get(severity, 0) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if vpb_summary %}
+  <h3>Simulated rebuffering ratio per rung</h3>
+  <table>
+    <thead><tr><th>Rung</th><th>Ratio</th><th>Stalls</th><th>Stall time</th><th>Playing time</th><th>Mode</th></tr></thead>
+    <tbody>
+      {% for row in vpb_summary %}
+      <tr>
+        <td><code>{{ row.variant }}</code></td>
+        <td class="mono" style="{{ 'color:var(--critical);font-weight:700' if row.rebuffer_ratio > thresholds.rebuffer_ratio_threshold else 'color:var(--pass)' }}">
+          {{ '%.3f'|format(row.rebuffer_ratio) }}
+        </td>
+        <td>{{ row.stall_count }}</td>
+        <td class="mono">{{ '%.1f'|format(row.stall_s) }} s</td>
+        <td class="mono">{{ '%.1f'|format(row.playing_s) }} s</td>
+        <td class="small">{{ row.mode }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+{# 3. Escalation blocks #}
+{% if escalations %}
+<h2>Escalation — ready to send</h2>
+{% for block in escalations %}
+<div class="card">
+  <button class="copy" type="button" data-copy="esc-{{ loop.index }}">Copy</button>
+  <h3>{{ block.owner_label }} <span class="chip {{ block.worst_severity }}">{{ block.worst_severity }}</span>
+    <span class="small muted">{{ block.finding_count }} finding(s)</span></h3>
+  <p class="small muted">Subject</p>
+  <div class="escalation mono">{{ block.subject }}</div>
+  <p class="small muted" style="margin-top:8px">Body</p>
+  <div class="escalation mono" id="esc-{{ loop.index }}">{{ block.subject }}
+
+{{ block.body }}</div>
+</div>
+{% endfor %}
+{% endif %}
+
+{# 4. Findings #}
+<h2>Findings</h2>
+{% if findings_by_owner %}
+{% for owner_label, items in findings_by_owner.items() %}
+<h3>{{ owner_label }} — {{ items|length }} finding(s)</h3>
+<div class="card">
+<table>
+  <thead>
+    <tr><th style="width:70px">ID</th><th style="width:78px">Severity</th><th style="width:90px">Layer</th>
+      <th>Title and evidence</th><th style="width:72px">Count</th><th style="width:110px">First / last</th></tr>
+  </thead>
+  <tbody>
+  {% for finding in items %}
+    <tr>
+      <td><code>{{ finding.rule_id }}</code></td>
+      <td><span class="chip {{ finding.severity }}">{{ finding.severity }}</span></td>
+      <td class="small">{{ finding.stream_layer }}<br><span class="muted">{{ finding.variant or 'ladder' }}</span></td>
+      <td>
+        <strong>{{ finding.title }}</strong>
+        <div>{{ finding.detail }}</div>
+        <div class="small muted" style="margin-top:4px"><strong>Root cause.</strong> {{ finding.root_cause }}</div>
+        <div class="small muted"><strong>Fix.</strong> {{ finding.fix }}</div>
+        {% if finding.evidence %}
+        <details>
+          <summary class="small muted" style="cursor:pointer;margin-top:4px">Evidence ({{ finding.evidence|length }})</summary>
+          <pre class="evidence mono">{{ finding.evidence | tojson(indent=2) }}</pre>
+        </details>
+        {% endif %}
+      </td>
+      <td class="mono">{{ finding.count }}</td>
+      <td class="small mono">{{ finding.first_seen[11:19] }}<br>{{ finding.last_seen[11:19] }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endfor %}
+{% else %}
+<div class="card"><p>No finding above INFO was raised during the analysis window.</p></div>
+{% endif %}
+
+{# 5. Incidents and stall correlation #}
+<h2>Incidents and stall correlation</h2>
+<div class="card">
+{% if incidents %}
+<table>
+  <thead><tr><th>Start</th><th>End</th><th>Duration</th><th>Rendition</th><th>Kind</th><th>Cause chain</th></tr></thead>
+  <tbody>
+  {% for incident in incidents %}
+    <tr>
+      <td class="mono small">{{ incident.started_at[11:19] }}</td>
+      <td class="mono small">{{ incident.ended_at[11:19] if incident.ended_at else 'open' }}</td>
+      <td class="mono">{{ '%.1f'|format(incident.duration_s) }} s</td>
+      <td class="small">{{ incident.variant or 'ladder' }}</td>
+      <td class="small">{{ incident.kind }}</td>
+      <td class="small">
+        {% for chain in incident.cause_chain %}<div class="chain">{{ chain }}</div>{% endfor %}
+        {% if not incident.cause_chain %}<span class="muted">Rules: {{ incident.cause_rule_ids|join(', ') or 'none recorded' }}</span>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No condition persisted long enough to open an incident.</p>
+{% endif %}
+
+{% if chains %}
+<h3>Every stall and its cause</h3>
+{% for chain in chains %}
+<div class="chain">{{ chain.chain }}</div>
+{% endfor %}
+{% endif %}
+</div>
+
+{# 6. Charts #}
+{% if charts %}
+<h2>Charts</h2>
+<div class="chart-grid">
+  {% for chart in charts %}
+  <div class="card">
+    <h3>{{ chart.title }}</h3>
+    <div class="chart" id="chart-{{ loop.index }}" data-option='{{ chart.option | tojson }}'></div>
+    <p class="small muted">{{ chart.note }}</p>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# 7. Ladder audit #}
+<h2>Ladder audit</h2>
+<div class="card">
+{% if ladder %}
+<table>
+  <thead>
+    <tr><th>Rung</th><th>Declared bandwidth</th><th>Declared / measured resolution</th>
+      <th>Declared / measured frame rate</th><th>Profile · level</th><th>Ref frames</th><th>Scan</th><th>Peak measured</th></tr>
+  </thead>
+  <tbody>
+  {% for row in ladder %}
+    <tr>
+      <td><code>{{ row.variant }}</code></td>
+      <td class="mono">{{ (row.declared.bandwidth or 0) // 1000 }} kbit/s</td>
+      <td class="mono">{{ row.declared.resolution or '—' }}<br><span class="muted">{{ row.measured.resolution or '—' }}</span></td>
+      <td class="mono">{{ row.declared.frame_rate or '—' }}<br><span class="muted">{{ '%.3f'|format(row.measured.frame_rate) if row.measured.frame_rate else '—' }}</span></td>
+      <td class="mono small">{{ row.measured.profile or '—' }} {{ row.measured.level or '' }}</td>
+      <td class="mono" {% if ref_frames_differ %}style="background:#fdeaea;color:var(--critical)"{% endif %}>{{ row.measured.max_num_ref_frames if row.measured.max_num_ref_frames is not none else '—' }}</td>
+      <td class="small">{{ row.measured.scan_type or '—' }}</td>
+      <td class="mono">{{ '%.0f'|format(row.measured.peak_kbps) ~ ' kbit/s' if row.measured.peak_kbps else '—' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="small muted">The upper value is the manifest declaration; the lower value is what the bitstream carries.</p>
+{% else %}
+<p>No rung was sampled deeply enough to build the ladder audit.</p>
+{% endif %}
+</div>
+
+{# 8. Checks passed #}
+<h2>Checks passed</h2>
+<div class="card">
+{% if passes %}
+<table>
+  <thead><tr><th style="width:70px">ID</th><th style="width:110px">Rendition</th><th>Verified clean</th></tr></thead>
+  <tbody>
+  {% for finding in passes %}
+    <tr>
+      <td><code>{{ finding.rule_id }}</code></td>
+      <td class="small">{{ finding.variant or 'ladder' }}</td>
+      <td>{{ finding.detail }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No check completed cleanly during this window.</p>
+{% endif %}
+</div>
+
+{# 9. Appendix #}
+<h2>Appendix</h2>
+
+<h3>URLs analysed, in full</h3>
+<div class="card"><pre class="evidence mono">{% for name, url in urls.items() %}{% if url %}{{ name }}: {{ url }}
+{% endif %}{% endfor %}</pre></div>
+
+<h3>Redirect chains</h3>
+<div class="card"><pre class="evidence mono">{{ redirect_chains | tojson(indent=2) }}</pre></div>
+
+{% if layer_diffs %}
+<h3>Layer attribution</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Rule</th><th>Rendition</th><th>Present on</th><th>Statement</th></tr></thead>
+  <tbody>
+  {% for diff in layer_diffs %}
+    <tr><td><code>{{ diff.rule_id }}</code></td><td class="small">{{ diff.variant or 'ladder' }}</td>
+      <td class="small">{{ diff.present_on|join(', ') }}</td><td class="small">{{ diff.statement }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if snapshots %}
+<h3>Manifest snapshots around each incident</h3>
+{% for snapshot in snapshots %}
+<div class="card">
+  <h3>{{ snapshot.variant }} at {{ snapshot.at }}</h3>
+  <pre class="evidence mono">{{ snapshot.raw }}</pre>
+</div>
+{% endfor %}
+{% endif %}
+
+<h3>Thresholds used</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Threshold</th><th>Value</th></tr></thead>
+  <tbody>
+  {% for name, value in thresholds.items() %}
+    <tr><td><code>{{ name }}</code></td><td class="mono">{{ value }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h3>Rebuffer Risk Score formula</h3>
+<div class="card"><p class="mono small">{{ verdict.risk_formula }}</p></div>
+
+<h3>Glossary</h3>
+<div class="card">
+<table>
+  <tbody>
+    <tr><td><strong>MSN</strong></td><td>Media sequence number — the position of the first segment in the playlist window.</td></tr>
+    <tr><td><strong>DSN</strong></td><td>Discontinuity sequence number — how many discontinuities have passed. The Tizen player holds one counter for the whole ladder.</td></tr>
+    <tr><td><strong>PDT</strong></td><td>Program date time — the wall-clock anchor a playlist publishes for its media.</td></tr>
+    <tr><td><strong>IDR</strong></td><td>Instantaneous decoder refresh — the H.264 picture a decoder can start from. HEVC calls it an IRAP.</td></tr>
+    <tr><td><strong>GOP</strong></td><td>Group of pictures — the span between two random access points.</td></tr>
+    <tr><td><strong>DPB</strong></td><td>Decoded picture buffer — the frames a decoder holds. Rungs that disagree on its size force a reallocation on every ABR switch.</td></tr>
+    <tr><td><strong>SSAI</strong></td><td>Server-side ad insertion — ad creatives spliced into the stream before it reaches the device.</td></tr>
+    <tr><td><strong>VPB</strong></td><td>Virtual Player Buffer — a Tizen-like player modelled against the delivery timings measured here.</td></tr>
+    <tr><td><strong>Rebuffering ratio</strong></td><td>Stall time divided by presentation time. This channel is flagged above {{ thresholds.rebuffer_ratio_threshold }}.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  Generated by the TV Plus Rebuffer Analyzer {{ version }} on {{ generated_at }}.
+  Player metrics are measured from the analyzer host and reflect its network path.
+  Every finding in this report is a rule that fired on a measurement recorded in the evidence.
+</footer>
+
+</div>
+
+{% if charts %}
+<script>{{ echarts_js }}</script>
+<script>
+(function () {
+  document.querySelectorAll('.chart').forEach(function (element) {
+    var option = JSON.parse(element.getAttribute('data-option'));
+    var chart = echarts.init(element, null, { renderer: 'svg' });
+    chart.setOption(option);
+  });
+})();
+</script>
+{% endif %}
+<script>
+document.querySelectorAll('.copy').forEach(function (button) {
+  button.addEventListener('click', function () {
+    var target = document.getElementById(button.getAttribute('data-copy'));
+    if (!target) return;
+    navigator.clipboard.writeText(target.innerText).then(function () {
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = 'Copy'; }, 1500);
+    });
+  });
+});
+</script>
+</body>
+</html>
