@@ -2,14 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Light theme, consistent with the earlier Metanalyser design. */
+/*
+ * Signal Clarity.
+ *
+ * Broad white fields separate decisions from measurements; a stable dark rail anchors the
+ * operator. Monospace is reserved for machine evidence — manifests, timestamps, HTTP
+ * information, identifiers and raw system output — and never used for navigation or prose.
+ */
+
 :root {
   color-scheme: light;
-  --rba-surface: #ffffff;
-  --rba-ground: #f6f7fb;
-  --rba-line: #e4e7ef;
-  --rba-ink: #10131c;
-  --rba-muted: #5c6478;
+  --rail-width: 232px;
+  --rail-width-collapsed: 72px;
+  --header-height: 76px;
 }
 
 html,
@@ -20,85 +25,208 @@ body,
 
 body {
   margin: 0;
-  background: var(--rba-ground);
-  color: var(--rba-ink);
-  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  background: theme('colors.surface.sunken');
+  color: theme('colors.ink.DEFAULT');
+  font-family: theme('fontFamily.sans');
+  font-size: 14px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+*:focus-visible {
+  outline: 2px solid theme('colors.brand.600');
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Dense panels scroll often; a quiet scrollbar keeps the evidence in focus. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.surface.lineStrong') transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: theme('colors.surface.lineStrong');
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
 }
 
 @layer components {
+  /* --- surfaces ---------------------------------------------------------- */
+
   .card {
-    @apply rounded-lg border border-[var(--rba-line)] bg-white shadow-card;
+    @apply rounded-card border border-surface-line bg-white shadow-card;
+  }
+
+  .card-pad {
+    @apply px-5 py-4;
   }
 
   .card-header {
-    @apply flex items-center justify-between gap-3 border-b border-[var(--rba-line)] px-4 py-3;
+    @apply flex flex-wrap items-start justify-between gap-3 px-5 pb-3 pt-4;
   }
 
   .card-title {
-    @apply text-sm font-semibold tracking-tight text-[var(--rba-ink)];
+    @apply text-card text-ink;
   }
 
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md border border-transparent px-3 py-2
-      text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  .card-subtitle {
+    @apply text-small text-ink-muted;
   }
 
-  .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700 focus-visible:outline focus-visible:outline-2
-      focus-visible:outline-offset-2 focus-visible:outline-brand-600;
+  .card-divider {
+    @apply border-t border-surface-line;
   }
 
-  .btn-secondary {
-    @apply btn border-[var(--rba-line)] bg-white text-[var(--rba-ink)] hover:bg-slate-50;
-  }
-
-  .btn-danger {
-    @apply btn bg-critical text-white hover:bg-red-800;
-  }
-
-  .input {
-    @apply w-full rounded-md border border-[var(--rba-line)] bg-white px-3 py-2 text-sm
-      text-[var(--rba-ink)] placeholder:text-slate-400 focus:border-brand-600 focus:outline-none
-      focus:ring-2 focus:ring-brand-600/20;
-  }
+  /* --- typography -------------------------------------------------------- */
 
   .label {
-    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--rba-muted)];
+    @apply text-label uppercase text-ink-muted;
+  }
+
+  .metric {
+    @apply font-mono text-metric tabular-nums text-ink;
   }
 
   .mono {
-    @apply font-mono text-[12.5px] leading-relaxed;
+    @apply font-mono text-micro;
   }
+
+  .section-title {
+    @apply text-section text-ink;
+  }
+
+  /* --- controls ---------------------------------------------------------- */
+
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-tile border
+      border-transparent px-3.5 py-2 text-small font-semibold transition-colors duration-150
+      disabled:cursor-not-allowed disabled:opacity-45;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+  }
+
+  .btn-accent {
+    @apply btn bg-pink-500 text-white hover:bg-pink-600;
+  }
+
+  .btn-ghost {
+    @apply btn border-surface-line bg-white text-ink hover:border-surface-lineStrong
+      hover:bg-surface-sunken;
+  }
+
+  .btn-quiet {
+    @apply btn px-2.5 py-1.5 text-micro font-semibold text-brand-600 hover:bg-brand-50;
+  }
+
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-micro;
+  }
+
+  .input {
+    @apply w-full rounded-tile border border-surface-line bg-white px-3 py-2 text-body text-ink
+      transition-colors duration-150 placeholder:text-ink-faint
+      hover:border-surface-lineStrong focus:border-brand-600 focus:outline-none
+      focus:ring-4 focus:ring-brand-600/10 disabled:bg-surface-sunken disabled:text-ink-muted;
+  }
+
+  .input-mono {
+    @apply input font-mono text-small;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-label uppercase text-ink-muted;
+  }
+
+  /* --- chips ------------------------------------------------------------- */
 
   .chip {
-    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold;
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-pill border px-2 py-0.5
+      text-label uppercase;
   }
 
-  .tab-button {
-    @apply rounded-md px-3 py-2 text-sm font-semibold text-[var(--rba-muted)] transition-colors
-      hover:bg-white hover:text-[var(--rba-ink)];
+  .chip-neutral {
+    @apply chip border-surface-line bg-surface-sunken text-ink-muted;
   }
 
-  .tab-button-active {
-    @apply bg-white text-brand-700 shadow-card;
+  .chip-blue {
+    @apply chip border-brand-200 bg-brand-50 text-brand-600;
   }
 
-  .table-head {
-    @apply sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide
-      text-[var(--rba-muted)];
+  .chip-violet {
+    @apply chip border-violet-200 bg-violet-50 text-violet-500;
+  }
+
+  .chip-pink {
+    @apply chip border-pink-200 bg-pink-50 text-pink-600;
+  }
+
+  .chip-clean {
+    @apply chip border-clean-100 bg-clean-50 text-clean-600;
+  }
+
+  /* --- tables ------------------------------------------------------------ */
+
+  .table {
+    @apply w-full border-collapse text-body;
+  }
+
+  .table thead th {
+    @apply whitespace-nowrap border-b border-surface-line bg-white px-5 py-2.5 text-left
+      text-label uppercase text-ink-muted;
+  }
+
+  .table tbody td {
+    @apply border-b border-surface-line px-5 py-3.5 align-middle;
+  }
+
+  .table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .table tbody tr {
+    @apply transition-colors duration-150;
+  }
+
+  .table-hover tbody tr:hover {
+    @apply bg-surface-sunken;
+  }
+
+  /* --- evidence ---------------------------------------------------------- */
+
+  .evidence {
+    @apply rounded-tile border border-surface-line bg-surface-raised p-3 font-mono text-micro
+      leading-relaxed text-ink-soft;
+  }
+
+  .manifest-pane {
+    resize: vertical;
+    overflow: auto;
+    min-height: 180px;
+  }
+
+  /* Panels are hidden rather than unmounted, so the video element and its socket survive. */
+  .panel-hidden {
+    display: none !important;
   }
 }
 
-/* Manifest viewers are resizable and keep their own scroll. */
-.manifest-pane {
-  resize: vertical;
-  overflow: auto;
-  min-height: 160px;
-}
+@layer utilities {
+  .text-gradient {
+    background: theme('backgroundImage.spectrum');
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
 
-/* Results panels are hidden with CSS rather than unmounted, so the video element ref
-   survives a tab change and playback is not restarted. */
-.panel-hidden {
-  display: none !important;
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
 }

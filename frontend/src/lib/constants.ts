@@ -21,22 +21,50 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   PASS: 0,
 }
 
-/** Colour is never the only signal: every severity also carries an icon and a label. */
+/**
+ * Severity runs along the brand spectrum — green clean, blue informational, purple warning,
+ * pink error, pink filled critical. Colour is never the only signal: every severity also
+ * carries its own word, and findings additionally carry a coloured rail on the card edge.
+ */
 export const SEVERITY_STYLE: Record<
   Severity,
-  { text: string; bg: string; border: string; icon: string; label: string }
+  { chip: string; text: string; rail: string; dot: string; label: string }
 > = {
   CRITICAL: {
-    text: 'text-critical',
-    bg: 'bg-red-50',
-    border: 'border-critical',
-    icon: '■',
+    chip: 'border-pink-300 bg-pink-500 text-white',
+    text: 'text-pink-600',
+    rail: 'bg-pink-500',
+    dot: '#FF2D55',
     label: 'Critical',
   },
-  ERROR: { text: 'text-error', bg: 'bg-orange-50', border: 'border-error', icon: '▲', label: 'Error' },
-  WARN: { text: 'text-warn', bg: 'bg-amber-50', border: 'border-warn', icon: '◆', label: 'Warning' },
-  INFO: { text: 'text-info', bg: 'bg-blue-50', border: 'border-info', icon: '●', label: 'Info' },
-  PASS: { text: 'text-pass', bg: 'bg-green-50', border: 'border-pass', icon: '✓', label: 'Passed' },
+  ERROR: {
+    chip: 'border-pink-200 bg-pink-50 text-pink-600',
+    text: 'text-pink-600',
+    rail: 'bg-pink-300',
+    dot: '#E01142',
+    label: 'Error',
+  },
+  WARN: {
+    chip: 'border-violet-200 bg-violet-50 text-violet-500',
+    text: 'text-violet-500',
+    rail: 'bg-violet-300',
+    dot: '#7B2CBF',
+    label: 'Warning',
+  },
+  INFO: {
+    chip: 'border-brand-200 bg-brand-50 text-brand-600',
+    text: 'text-brand-600',
+    rail: 'bg-brand-300',
+    dot: '#1428A0',
+    label: 'Info',
+  },
+  PASS: {
+    chip: 'border-clean-100 bg-clean-50 text-clean-600',
+    text: 'text-clean-600',
+    rail: 'bg-clean-500',
+    dot: '#12864C',
+    label: 'Passed',
+  },
 }
 
 export const OWNER_LABEL: Record<string, string> = {
@@ -44,7 +72,7 @@ export const OWNER_LABEL: Record<string, string> = {
   PACKAGER: 'Packager',
   CDN: 'CDN',
   SSAI: 'SSAI vendor',
-  SAMSUNG_PLAYER: 'Samsung player / device team',
+  SAMSUNG_PLAYER: 'Samsung player',
   NETWORK: 'Network',
 }
 
@@ -57,11 +85,11 @@ export const CHECK_SETS = [
 ] as const
 
 export const UA_PROFILES = [
-  { id: 'tizen5', label: 'Tizen 5.0 (TV Plus default)' },
+  { id: 'tizen5', label: 'Tizen 5.0 (TV Plus)' },
   { id: 'tizen4', label: 'Tizen 4.0' },
   { id: 'tizen6', label: 'Tizen 6.0' },
   { id: 'tizen7', label: 'Tizen 7.0' },
-  { id: 'desktop', label: 'Desktop Chrome (for comparison)' },
+  { id: 'desktop', label: 'Desktop Chrome (comparison)' },
 ] as const
 
 export const AGING_PRESETS = [
@@ -75,10 +103,25 @@ export const AGING_PRESETS = [
 ] as const
 
 export const VPB_MODES = [
-  { id: 'STRICT', label: 'Strict — any time at zero buffer counts' },
-  { id: 'NORMAL', label: 'Normal — summed outage above the threshold' },
+  { id: 'STRICT', label: 'Strict — any time at zero buffer' },
+  { id: 'NORMAL', label: 'Normal — summed outage' },
   { id: 'OUTAGE_ONLY', label: 'Outage only — no segment downloadable' },
 ] as const
 
 /** Player metrics come from the analyzer's network path, not a TV's. Say so everywhere. */
-export const PLAYER_METRICS_NOTE = 'Measured from the analyzer host'
+export const PLAYER_METRICS_NOTE = 'Analyzer host'
+
+/** The operator identity shown in the page header. Configurable per deployment. */
+export const OPERATOR = {
+  name: import.meta.env.VITE_OPERATOR_NAME ?? 'Piyush Singh',
+  team: import.meta.env.VITE_OPERATOR_TEAM ?? 'Stream Quality',
+}
+
+export function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('')
+}

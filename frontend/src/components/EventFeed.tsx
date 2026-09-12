@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { localTime, ms, utcTitle } from '../lib/format'
 import type { EventData } from '../ws/messages'
+import { EmptyState, cx } from './ui'
 
 const KIND_LABEL: Record<string, string> = {
   dns: 'Hostname resolved',
@@ -19,12 +20,12 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 const KIND_TONE: Record<string, string> = {
-  dns: 'border-pass bg-green-50 text-pass',
-  tls: 'border-pass bg-green-50 text-pass',
-  resolve: 'border-info bg-blue-50 text-info',
-  master: 'border-info bg-blue-50 text-info',
-  playlist_state: 'border-warn bg-amber-50 text-warn',
-  proxy_fetch: 'border-slate-200 bg-slate-50 text-[var(--rba-muted)]',
+  dns: 'chip-clean',
+  tls: 'chip-clean',
+  resolve: 'chip-blue',
+  master: 'chip-blue',
+  playlist_state: 'chip-violet',
+  proxy_fetch: 'chip-neutral',
 }
 
 function summarise(event: EventData): string {
@@ -58,30 +59,33 @@ export function EventFeed({ events }: { events: (EventData & { ts: string })[] }
 
   if (events.length === 0) {
     return (
-      <p className="px-4 py-6 text-sm text-[var(--rba-muted)]">
-        Network events appear here as the analysis resolves and fetches each layer.
-      </p>
+      <EmptyState
+        title="No network event has been recorded yet"
+        detail="Every resolution, redirect, TLS negotiation and fetch is listed here as the analysis walks each layer."
+      />
     )
   }
 
   return (
-    <ul className="divide-y divide-[var(--rba-line)]">
+    <ul className="divide-y divide-surface-line">
       {events.map((event, index) => (
-        <li key={`${event.ts}-${index}`} className="px-4 py-2">
-          <div className="flex items-start gap-3">
+        <li key={`${event.ts}-${index}`} className="px-5 py-2.5">
+          <div className="flex items-center gap-3">
             <span
-              className="w-16 shrink-0 font-mono text-[11px] text-[var(--rba-muted)]"
+              className="w-16 shrink-0 font-mono text-micro text-ink-faint"
               title={utcTitle(event.ts)}
             >
               {localTime(event.ts)}
             </span>
-            <span className={`chip shrink-0 ${KIND_TONE[event.kind] ?? 'border-slate-200 bg-slate-50'}`}>
+            <span className={cx('shrink-0', KIND_TONE[event.kind] ?? 'chip-neutral')}>
               {KIND_LABEL[event.kind] ?? event.kind}
             </span>
-            <span className="min-w-0 flex-1 truncate text-sm">{summarise(event)}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-micro text-ink-soft">
+              {summarise(event)}
+            </span>
             <button
               type="button"
-              className="btn-secondary shrink-0 !px-2 !py-1 text-xs"
+              className="btn-quiet shrink-0"
               onClick={() => setOpenIndex(openIndex === index ? null : index)}
               aria-expanded={openIndex === index}
             >
@@ -89,7 +93,7 @@ export function EventFeed({ events }: { events: (EventData & { ts: string })[] }
             </button>
           </div>
           {openIndex === index && (
-            <pre className="manifest-pane mono mt-2 max-h-56 rounded border border-[var(--rba-line)] bg-slate-50 p-2">
+            <pre className="evidence manifest-pane mt-2 max-h-56">
               {JSON.stringify(event, null, 2)}
             </pre>
           )}

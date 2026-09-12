@@ -132,7 +132,13 @@ async def read_report(report_id: int) -> dict[str, Any]:
 
 
 @router.get("/reports/{report_id}/download")
-async def download_report(report_id: int) -> FileResponse:
+async def download_report(report_id: int, inline: bool = Query(default=False)) -> FileResponse:
+    """
+    Serve a stored report.
+
+    ``inline=1`` drops the attachment disposition so the Reports tab renders the document in
+    place. The bytes are identical either way; only the disposition header changes.
+    """
     found = await service.get_report(report_id)
     if found is None:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -140,6 +146,12 @@ async def download_report(report_id: int) -> FileResponse:
     if not path.exists():
         raise HTTPException(
             status_code=410, detail="The report file has been removed from the analyzer host"
+        )
+    if inline:
+        return FileResponse(
+            path=path,
+            media_type=media,
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
         )
     return FileResponse(path=path, media_type=media, filename=filename)
 

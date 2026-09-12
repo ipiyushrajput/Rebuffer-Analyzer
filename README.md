@@ -199,6 +199,29 @@ row-level errors shown for correction.
 
 ![Bulk tab](docs/screenshots/bulk.png)
 
+## Interface
+
+The application follows one design system, **Signal Clarity**, and the report templates
+follow it too, so a PDF sent to a vendor looks like the screen the operator read it on.
+
+- **Structure.** A collapsible dark rail carries the five sections and the host's health.
+  Every screen opens with a page header — what this is, what state it is in, who is
+  operating it — then a row of measurements, then the evidence. Opening a finding replaces
+  the body with its investigation: the causal chain, the request evidence, the failing
+  manifest line, and a decision card naming the root cause, the responsible party and the
+  required fix, with the escalation text one click away.
+- **Colour.** Samsung blue `#1428A0`, violet `#7B2CBF`, TV Plus pink `#FF2D55`, and one
+  green `#12864C` for a clean result, on white. The three-stop gradient is reserved for the
+  executive verdict and the report header. Severity runs green → blue → violet → pink, and
+  colour is never the only signal — every severity carries its own word, and findings carry
+  a coloured rail on the card edge.
+- **Type.** One UI Sans → SamsungOne → Inter → Arial for the interface. JetBrains Mono →
+  Roboto Mono for machine evidence only: manifests, URLs, timestamps, HTTP information,
+  identifiers and measured numbers.
+
+Tokens live in `frontend/tailwind.config.js`, component classes in `frontend/src/theme/index.css`,
+and primitives in `frontend/src/components/ui/`.
+
 ## Documentation
 
 - [`docs/RULES.md`](docs/RULES.md) — the full rule catalogue, generated from the registry by
