@@ -1,0 +1,54 @@
+# The database is the existing external server configured in backend/.env, not a container.
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: rba-backend:1.0.0
+    container_name: rba-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      RBA_HOST: 0.0.0.0
+      RBA_PORT: "8010"
+      RBA_DATA_DIR: /var/lib/rba
+      RBA_REPORTS_DIR: /var/lib/rba/reports
+      RBA_EVIDENCE_DIR: /var/lib/rba/evidence
+    volumes:
+      - rba-data:/var/lib/rba
+    ports:
+      - "8010:8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/api/health/live').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://107.109.131.68:8080/api}
+        VITE_WS_BASE: ${VITE_WS_BASE:-ws://107.109.131.68:8080/ws}
+    image: rba-frontend:1.0.0
+    container_name: rba-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rba-data:

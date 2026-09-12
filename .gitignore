@@ -1,0 +1,54 @@
+# Secrets and local configuration
+.env
+*.env
+!.env.example
+backend/.env
+backend/*.env
+!backend/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Runtime artifacts — never committed
+data/
+reports_out/
+evidence/
+*.db
+*.sqlite3
+*.sqlite
+backend/var/
+backend/reports_out/
+backend/evidence/
+
+# Generated reports and evidence bundles
+*.report.html
+*.report.pdf
+evidence-*.zip
+
+# Fixture media produced by tests
+backend/tests/fixtures/_generated/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Frontend build tooling
+frontend/node_modules/
+frontend/dist/

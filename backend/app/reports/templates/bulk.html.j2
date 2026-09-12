@@ -1,0 +1,113 @@
+{# Consolidated bulk report: every channel ranked, with an owner summary and per-channel anchors. #}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bulk analysis {{ job_id }} — TV Plus Rebuffer Analyzer</title>
+<style>
+  :root { --ink:#10131c; --muted:#5c6478; --line:#e4e7ef; --ground:#f6f7fb; --brand:#1428A0;
+    --critical:#b4151b; --error:#d4581a; --warn:#9a6700; --info:#1f6feb; --pass:#1a7f37; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-size:13px; line-height:1.5;
+    font-family:"Space Grotesk","Segoe UI",system-ui,sans-serif; }
+  .page { max-width:1180px; margin:0 auto; padding:24px 20px 64px; }
+  code,.mono { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; }
+  h1 { font-size:22px; margin:0 0 2px; }
+  h2 { font-size:16px; margin:26px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--line); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  header.masthead { display:flex; gap:14px; align-items:center; background:#fff;
+    border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  header.masthead img { width:44px; height:44px; border-radius:8px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th { background:var(--ground); text-align:left; font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--muted); padding:7px 8px; border-bottom:1px solid var(--line); }
+  td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .chip { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px;
+    font-size:11px; font-weight:600; background:#fff; }
+  .status-defect { border-color:var(--critical); color:var(--critical); background:#fdeaea; }
+  .status-risk { border-color:var(--warn); color:var(--warn); background:#fdf3e0; }
+  .status-clean { border-color:var(--pass); color:var(--pass); background:#e8f6ec; }
+  .risk { font-family:"IBM Plex Mono",monospace; font-weight:700; }
+  .risk.high { color:var(--critical); } .risk.mid { color:var(--warn); } .risk.low { color:var(--pass); }
+  .muted { color:var(--muted); } .small { font-size:11px; }
+  footer { margin-top:28px; padding-top:10px; border-top:1px solid var(--line); font-size:11px; color:var(--muted); }
+  @media print { body { background:#fff; } .page { max-width:none; padding:0; } .card { break-inside:avoid; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="masthead">
+  {% if logo_data_uri %}<img src="{{ logo_data_uri }}" alt="">{% endif %}
+  <div>
+    <h1>Bulk analysis — {{ total }} channel(s)</h1>
+    <p class="muted small">TV Plus Rebuffer Analyzer {{ version }} · job {{ job_id }} ·
+      {{ started_at }} to {{ ended_at }}</p>
+  </div>
+</header>
+
+<h2>Owner summary</h2>
+<div class="card">
+{% if owner_summary %}
+<table>
+  <thead><tr><th>Responsible party</th><th style="width:120px">Channels</th></tr></thead>
+  <tbody>
+  {% for owner, count in owner_summary.items() %}
+    <tr><td>{{ owner }}</td><td class="mono">{{ count }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No channel in this batch produced a finding above INFO.</p>
+{% endif %}
+</div>
+
+<h2>Ranking</h2>
+<div class="card">
+<table>
+  <thead>
+    <tr>
+      <th style="width:36px">#</th><th>Channel</th><th style="width:190px">Verdict</th>
+      <th style="width:150px">Responsible party</th><th style="width:70px">Risk</th>
+      <th style="width:90px">Worst ratio</th><th style="width:80px">Incidents</th>
+      <th>Primary root cause</th><th style="width:90px">Report</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr id="channel-{{ loop.index }}">
+      <td class="mono">{{ loop.index }}</td>
+      <td><strong>{{ row.channel_name }}</strong>{% if row.error %}<div class="small muted">{{ row.error }}</div>{% endif %}</td>
+      <td>
+        {% if row.verdict_status and row.verdict_status.startswith('REBUFFERING —') %}
+          <span class="chip status-defect">{{ row.verdict_status }}</span>
+        {% elif row.verdict_status and row.verdict_status.startswith('REBUFFERING RISK') %}
+          <span class="chip status-risk">{{ row.verdict_status }}</span>
+        {% elif row.verdict_status %}
+          <span class="chip status-clean">{{ row.verdict_status }}</span>
+        {% else %}
+          <span class="chip">{{ row.status }}</span>
+        {% endif %}
+      </td>
+      <td class="small">{{ row.owner_label or '—' }}</td>
+      <td class="risk {{ 'high' if (row.risk_score or 0) >= 70 else 'mid' if (row.risk_score or 0) >= 40 else 'low' }}">
+        {{ row.risk_score if row.risk_score is not none else '—' }}
+      </td>
+      <td class="mono">{{ '%.3f'|format(row.worst_ratio) if row.worst_ratio is not none else '—' }}</td>
+      <td class="mono">{{ row.incident_count if row.incident_count is not none else '—' }}</td>
+      <td class="small">{{ row.headline or '—' }}</td>
+      <td class="small">{% if row.report_path %}<a href="{{ row.report_path }}">Open</a>{% else %}—{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<footer>
+  Generated by the TV Plus Rebuffer Analyzer {{ version }} on {{ generated_at }}.
+  Every per-channel report in the accompanying ZIP carries the full evidence for its channel.
+</footer>
+
+</div>
+</body>
+</html>

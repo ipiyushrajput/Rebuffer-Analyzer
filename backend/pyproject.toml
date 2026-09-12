@@ -1,0 +1,86 @@
+[project]
+name = "rba"
+version = "1.0.0"
+description = "TV Plus Rebuffer Analyzer — HLS stream defect analysis and root-cause attribution"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx[http2]>=0.28",
+    "m3u8>=6.0",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "aiomysql>=0.2",
+    "pymysql>=1.1",
+    "jinja2>=3.1",
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+    "python-multipart>=0.0.12",
+    "websockets>=13",
+    "dnspython>=2.7",
+    "playwright>=1.49",
+    "urllib3>=2.0",
+    "aiosqlite>=0.20",
+]
+
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.30"]
+mysql = ["asyncmy>=0.2.9"]
+mongo = ["motor>=3.6", "beanie>=1.27"]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-PyMySQL",
+]
+
+[project.scripts]
+rba = "app.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "B008",    # FastAPI dependency defaults are declared in the signature.
+    "RUF012",  # Rule metadata on classes is intentionally a plain mutable default.
+    "UP042",   # str+Enum keeps the values JSON-serialisable for the API and the DB.
+    "SIM117",  # Nested `with` keeps socket and TLS lifetimes readable in tls_inspect.
+    "RUF001",  # Report text uses real typography (en dash, multiplication sign).
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+files = ["app"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
