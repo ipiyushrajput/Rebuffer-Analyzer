@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,19 @@ logger = logging.getLogger(__name__)
 # match against a plain literal without repeating the import at module scope.
 PDF_MARGIN: Any = {"top": "12mm", "bottom": "14mm", "left": "10mm", "right": "10mm"}
 RENDER_TIMEOUT_MS = 60_000
+
+
+def _browser_roots() -> list[Path]:
+    """The directories Playwright keeps its browsers in, per platform."""
+    configured = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if configured:
+        return [Path(configured)]
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        return [Path(local) / "ms-playwright"] if local else []
+    if sys.platform == "darwin":
+        return [Path.home() / "Library" / "Caches" / "ms-playwright"]
+    return [Path("/opt/pw-browsers"), Path.home() / ".cache" / "ms-playwright"]
 
 
 def chromium_executable() -> str | None:
@@ -33,15 +47,27 @@ def chromium_executable() -> str | None:
     if configured and Path(configured).exists():
         return configured
 
-    roots = [Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"))]
-    for root in roots:
+    # Playwright names the directory after the platform it built for.
+    if sys.platform == "win32":
+        patterns = [
+            "chromium-*/chrome-win/chrome.exe",
+            "chromium_headless_shell-*/chrome-win/*.exe",
+        ]
+    elif sys.platform == "darwin":
+        patterns = [
+            "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+            "chromium_headless_shell-*/chrome-mac/*",
+        ]
+    else:
+        patterns = ["chromium-*/chrome-linux/chrome", "chromium_headless_shell-*/chrome-linux/*"]
+
+    for root in _browser_roots():
         if not root.is_dir():
             continue
-        candidates = sorted(root.glob("chromium-*/chrome-linux/chrome"), reverse=True)
-        candidates += sorted(root.glob("chromium_headless_shell-*/chrome-linux/*"), reverse=True)
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
+        for pattern in patterns:
+            for candidate in sorted(root.glob(pattern), reverse=True):
+                if candidate.is_file():
+                    return str(candidate)
     return None
 
 
