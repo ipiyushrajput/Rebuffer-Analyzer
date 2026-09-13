@@ -86,11 +86,30 @@ each incident, the thresholds used, the risk-score formula and a glossary.
 
 ## Quick start
 
+Python 3.11+ and Node 20+ are the only prerequisites. ffmpeg is optional — without it the
+decode-error and quality detectors do not run and every other check does. Full instructions,
+including the `.env` file and the troubleshooting list, are in
+[`docs/SETUP.md`](docs/SETUP.md).
+
+**Linux and macOS**
+
 ```bash
-make install        # backend venv + frontend node_modules
-cp backend/.env.example backend/.env    # fill in DB_* from the deployment
-make dev            # backend on :8010, frontend on :5173
+make install                            # backend venv + frontend node_modules
+cp backend/.env.example backend/.env    # fill in DB_*, or set DB_ENGINE=sqlite
+make dev                                # backend on :8010, frontend on :5173
 ```
+
+**Windows**
+
+```powershell
+.\deploy\windows\setup.cmd -Dev         # venv, backend, Playwright, node_modules, .env
+.\deploy\windows\rba.cmd dev            # backend on :8010, frontend on :5173
+```
+
+`rba.cmd` is the Makefile's counterpart — `dev`, `serve`, `build`, `test`, `lint`, `rules`,
+`analyse`, `clean`, `help`. `serve` builds the bundle and serves it on :8080 next to the
+backend, which is the Windows stand-in for nginx. Neither script changes the machine's
+execution policy, and both refuse port 8001.
 
 Headless, without the UI:
 
@@ -101,10 +120,14 @@ cd backend
 .venv/bin/python -m app.cli rules --markdown > ../docs/RULES.md   # or: make rules
 ```
 
-`analyse` exits `0` when no stream-side defect was found and `2` when one was, so it drops
-into a monitoring cron without further glue.
+```powershell
+.\deploy\windows\rba.cmd analyse "https://cdn.example/live/ch1/master.m3u8" --duration 5m --html out.html
+```
 
-With Docker:
+`analyse` exits `0` when no stream-side defect was found and `2` when one was, so it drops
+into a monitoring cron — or a Windows scheduled task — without further glue.
+
+With Docker, on either platform:
 
 ```bash
 make up             # backend :8010, frontend :8080
@@ -224,6 +247,8 @@ and primitives in `frontend/src/components/ui/`.
 
 ## Documentation
 
+- [`docs/SETUP.md`](docs/SETUP.md) — setup and run instructions for Linux, macOS and
+  Windows, the `.env` variables, and what to do when something does not start.
 - [`docs/RULES.md`](docs/RULES.md) — the full rule catalogue, generated from the registry by
   `make rules`. CI fails if it drifts from the code.
 - [`docs/REFERENCE_TOOLS.md`](docs/REFERENCE_TOOLS.md) — coverage matrix against

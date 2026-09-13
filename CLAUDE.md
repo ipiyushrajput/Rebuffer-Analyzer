@@ -38,6 +38,19 @@ make up / make down   # docker compose
 make rules        # regenerate docs/RULES.md from the rule registry
 ```
 
+On Windows the same tasks run through PowerShell, since there is no `make`:
+
+```
+deploy\windows\setup.cmd -Dev       # venv, backend, Playwright, node_modules, .env
+deploy\windows\rba.cmd dev          # backend :8010 + Vite dev server :5173
+deploy\windows\rba.cmd serve        # build the bundle, serve it on :8080 with the backend
+deploy\windows\rba.cmd test|lint|build|rules|analyse|clean|help
+```
+
+`rba.cmd` mirrors the Makefile target for target; add a target to one and add it to the
+other. Both installers refuse port 8001, and `tests/test_deploy_scripts.py` fails the build
+if either stops doing so. Setup for every platform is documented in `docs/SETUP.md`.
+
 Backend CLI for headless use:
 
 ```

@@ -13,6 +13,17 @@ export default defineConfig({
       '/ws': { target: 'ws://127.0.0.1:8010', ws: true },
     },
   },
+  preview: {
+    // `vite preview` serves the production bundle where nginx is not available — the
+    // Windows run, and any local check of the built output. It proxies the same two paths,
+    // so the built app talks to the backend exactly as it does behind nginx.
+    port: 8080,
+    host: true,
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8010', changeOrigin: true },
+      '/ws': { target: 'ws://127.0.0.1:8010', ws: true },
+    },
+  },
   build: {
     outDir: 'dist',
     sourcemap: false,
