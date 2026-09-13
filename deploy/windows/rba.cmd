@@ -6,4 +6,9 @@ REM   rba              start backend and frontend together
 REM   rba serve        build the bundle and serve it next to the backend
 REM   rba test         pytest + vitest
 REM   rba help         every command
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run.ps1" %*
+setlocal
+REM PowerShell 7 when it is installed, Windows PowerShell 5.1 otherwise. Both are supported.
+set "PSEXE=powershell"
+where pwsh >nul 2>&1 && set "PSEXE=pwsh"
+"%PSEXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0run.ps1" %*
+exit /b %ERRORLEVEL%

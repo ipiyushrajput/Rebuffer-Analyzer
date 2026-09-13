@@ -121,13 +121,15 @@ switch ($Command) {
     }
 
     'setup' {
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup.ps1') @Rest
+        # Called in process rather than through a fresh powershell.exe, so it inherits the
+        # execution policy this script is already running under.
+        & (Join-Path $PSScriptRoot 'setup.ps1') @Rest
     }
 
     'backend' {
         $python = Get-VenvPython
         Assert-PortFree -Port $BackendPort -Role 'backend'
-        Write-Step "Backend on http://127.0.0.1:$BackendPort — health at /api/health"
+        Write-Step "Backend on http://127.0.0.1:$BackendPort - health at /api/health"
         Push-Location (Join-Path $RepoRoot 'backend')
         try {
             & $python -m uvicorn app.main:app --host 0.0.0.0 --port $BackendPort --reload
@@ -257,8 +259,13 @@ switch ($Command) {
         Push-Location (Join-Path $RepoRoot 'backend')
         try {
             $output = Join-Path $RepoRoot 'docs\RULES.md'
-            & $python -m app.cli rules --markdown | Set-Content -Path $output -Encoding utf8
+            $markdown = & $python -m app.cli rules --markdown
             Assert-LastExit 'Generating the rule catalogue failed.'
+            # Written through .NET rather than Set-Content: `-Encoding utf8` emits a BOM on
+            # Windows PowerShell 5.1, and the generated file is compared against the
+            # registry byte for byte.
+            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+            [System.IO.File]::WriteAllText($output, ($markdown -join "`n") + "`n", $utf8NoBom)
         } finally {
             Pop-Location
         }

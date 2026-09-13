@@ -50,7 +50,7 @@ function Assert-Command {
 }
 
 <#
-    Windows ships three ways to start Python — `py -3`, `python`, and a Store stub that only
+    Windows ships three ways to start Python - `py -3`, `python`, and a Store stub that only
     opens the Store. This returns the first one that actually reports a version, as a file
     plus its leading arguments, so callers can splat it.
 #>
@@ -68,7 +68,9 @@ function Get-PythonLauncher {
         } catch {
             continue
         }
-        if ($LASTEXITCODE -eq 0 -and "$version" -match 'Python 3\.(\d+)') {
+        # The version string is the test, not $LASTEXITCODE: under Set-StrictMode that
+        # automatic variable does not exist until a native command has run in the session.
+        if ("$version" -match 'Python 3\.(\d+)') {
             if ([int]$Matches[1] -lt 11) {
                 Write-Fail "Python 3.11 or newer is required; $version was found. Install it from https://python.org or with: winget install Python.Python.3.12"
             }
@@ -110,5 +112,5 @@ function Assert-PortFree {
         $process = Get-Process -Id $owner.OwningProcess -ErrorAction SilentlyContinue
         if ($process) { $who = "$($process.ProcessName) (PID $($process.Id))" }
     }
-    Write-Fail "Port $Port ($Role) is already bound by $who. Take the next free port — set RBA_PORT or RBA_FRONTEND_PORT — and record it in README.md and backend\.env."
+    Write-Fail "Port $Port ($Role) is already bound by $who. Take the next free port - set RBA_PORT or RBA_FRONTEND_PORT - and record it in README.md and backend\.env."
 }

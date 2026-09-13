@@ -246,6 +246,15 @@ Advanced app settings → App execution aliases, or install Python from python.o
 (`setup.cmd`, `rba.cmd`) rather than calling the `.ps1` files directly; they bypass the policy
 for that one invocation without changing the machine.
 
+**`The string is missing the terminator` / `Missing closing '}'`.** Windows PowerShell 5.1
+reads a `.ps1` file without a byte-order mark as ANSI rather than UTF-8, so any non-ASCII
+character — an em dash, a curly quote, an arrow — turns into three characters, the last of
+which can close a string and break the parse hundreds of lines further down. The scripts in
+`deploy\windows\` are kept to plain ASCII for exactly this reason, and
+`tests/test_deploy_scripts.py` fails the build if a non-ASCII byte gets in. If you edit one,
+keep it ASCII; `git diff` after saving is the quickest way to spot an editor that helpfully
+replaced `-` with `—`.
+
 **`Port 8010 is already bound by …`.** The script names the process. Stop it, or set
 `$env:RBA_PORT` to the next free port and record it.
 
