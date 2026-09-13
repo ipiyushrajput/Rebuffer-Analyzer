@@ -92,10 +92,10 @@ def _chart_specs(result: AnalysisResult) -> list[dict[str, Any]]:
     base = {
         "animation": False,
         "grid": {"left": 48, "right": 16, "top": 26, "bottom": 30, "containLabel": True},
-        "textStyle": {"fontFamily": "Space Grotesk, sans-serif", "fontSize": 10},
+        "textStyle": {"fontFamily": "JetBrains Mono, Roboto Mono, monospace", "fontSize": 10},
         "tooltip": {"trigger": "axis"},
         "legend": {"top": 0, "itemWidth": 10, "itemHeight": 7, "textStyle": {"fontSize": 9}},
-        "color": ["#1428A0", "#1f9d55", "#c2410c", "#7c3aed", "#0891b2", "#a16207"],
+        "color": ["#1428A0", "#7B2CBF", "#FF2D55", "#12864C", "#4B63D6", "#A66CE0"],
     }
 
     for key, vpb_result in result.vpb_results.items():
@@ -180,11 +180,11 @@ def _chart_specs(result: AnalysisResult) -> list[dict[str, Any]]:
                                 "value": count,
                                 "itemStyle": {
                                     "color": {
-                                        "CRITICAL": "#b4151b",
-                                        "ERROR": "#d4581a",
-                                        "WARN": "#9a6700",
-                                        "INFO": "#1f6feb",
-                                        "PASS": "#1a7f37",
+                                        "CRITICAL": "#FF2D55",
+                                        "ERROR": "#E01142",
+                                        "WARN": "#7B2CBF",
+                                        "INFO": "#1428A0",
+                                        "PASS": "#12864C",
                                     }[severity]
                                 },
                             }

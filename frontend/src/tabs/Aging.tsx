@@ -1,56 +1,62 @@
 /**
  * Aging tab.
  *
- * Jobs run server-side and survive the browser closing and a backend restart. Clicking a
- * job renders the same charts from the stored samples.
+ * Jobs run server-side and survive the browser closing and a backend restart. Opening a job
+ * shows the verdict issued from its stored samples, and opening a finding inside it shows the
+ * same investigation the Realtime tab does.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, endpoints, type JobSummary } from '../api/client'
-import { FindingsFeed } from '../components/FindingCard'
+import { FindingsList } from '../components/FindingCard'
+import { FindingInvestigation } from '../components/FindingInvestigation'
+import { PageBody, PageHeader } from '../components/layout/PageHeader'
+import { SessionVerdict } from '../components/SessionVerdict'
 import { UrlForm, emptyForm, toPayload, type UrlFormValue } from '../components/UrlForm'
-import { VerdictBanner } from '../components/VerdictBanner'
-import { AGING_PRESETS, REBUFFER_RATIO_THRESHOLD_DEFAULT } from '../lib/constants'
+import {
+  Card,
+  CardHeader,
+  EmptyState,
+  Field,
+  InlineAlert,
+  MetricRow,
+  MetricTile,
+  ProgressBar,
+  SegmentedControl,
+  SeverityChip,
+  cx,
+} from '../components/ui'
+import { IconDownload, IconFile, IconPulse, IconStop } from '../components/ui/icons'
+import { AGING_PRESETS, REBUFFER_RATIO_THRESHOLD_DEFAULT, type Severity } from '../lib/constants'
 import { duration, localDateTime, utcTitle } from '../lib/format'
 import type { FindingData, VerdictData } from '../ws/messages'
 
 const ACTIVE = new Set(['PENDING', 'RUNNING', 'CANCELLING'])
 
-function StatusChip({ status }: { status: string }) {
-  const tone =
-    status === 'RUNNING'
-      ? 'border-info bg-blue-50 text-info'
-      : status === 'COMPLETED'
-        ? 'border-pass bg-green-50 text-pass'
-        : status === 'FAILED'
-          ? 'border-critical bg-red-50 text-critical'
-          : 'border-slate-200 bg-slate-50 text-[var(--rba-muted)]'
-  return <span className={`chip ${tone}`}>{status}</span>
+const STATUS_CHIP: Record<string, string> = {
+  RUNNING: 'chip-blue',
+  PENDING: 'chip-violet',
+  CANCELLING: 'chip-violet',
+  COMPLETED: 'chip-clean',
+  FAILED: 'chip-pink',
+  CANCELLED: 'chip-neutral',
 }
 
-function ProgressBar({ value }: { value: number }) {
-  return (
-    <div
-      className="h-2 w-full rounded-full bg-slate-200"
-      role="progressbar"
-      aria-valuenow={Math.round(value * 100)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      <div
-        className="h-2 rounded-full bg-brand-600 transition-[width]"
-        style={{ width: `${Math.min(100, value * 100)}%` }}
-      />
-    </div>
-  )
+function JobStatusChip({ status }: { status: string }) {
+  return <span className={STATUS_CHIP[status] ?? 'chip-neutral'}>{status}</span>
 }
 
-export function AgingTab() {
+interface Props {
+  thresholds: Record<string, number>
+}
+
+export function AgingTab({ thresholds }: Props) {
   const [form, setForm] = useState<UrlFormValue>(emptyForm(true))
   const [durationMinutes, setDurationMinutes] = useState(60)
   const [custom, setCustom] = useState('')
-  const [openJob, setOpenJob] = useState<string | null>(null)
+  const [openJob, setOpenJob] = useState<JobSummary | null>(null)
+  const [openFinding, setOpenFinding] = useState<FindingData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
@@ -80,111 +86,182 @@ export function AgingTab() {
   })
 
   const jobs = jobsQuery.data?.jobs ?? []
+  const active = jobs.filter((job) => ACTIVE.has(job.status))
+
+  if (openFinding && openJob) {
+    return (
+      <>
+        <PageHeader
+          title={openFinding.title}
+          subtitle={`${openFinding.rule_id} · ${openJob.channel_name}`}
+          onBack={() => setOpenFinding(null)}
+          backLabel="Back to job"
+          status={<SeverityChip severity={openFinding.severity as Severity} />}
+        />
+        <PageBody>
+          <FindingInvestigation finding={openFinding} />
+        </PageBody>
+      </>
+    )
+  }
+
+  if (openJob) {
+    return (
+      <>
+        <PageHeader
+          title={openJob.channel_name}
+          subtitle={`Aging job · ${duration(openJob.elapsed_s)} elapsed`}
+          onBack={() => setOpenJob(null)}
+          backLabel="Back to jobs"
+          status={<JobStatusChip status={openJob.status} />}
+          actions={
+            !ACTIVE.has(openJob.status) && (
+              <>
+                <a
+                  className="btn-ghost btn-sm"
+                  href={api.url(`/aging/jobs/${openJob.id}/report.html`)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <IconFile size={14} />
+                  HTML report
+                </a>
+                <a
+                  className="btn-ghost btn-sm"
+                  href={api.url(`/aging/jobs/${openJob.id}/report.pdf`)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <IconDownload size={14} />
+                  PDF report
+                </a>
+              </>
+            )
+          }
+        />
+        <PageBody>
+          <JobDetail
+            jobId={openJob.id}
+            status={openJob.status}
+            threshold={thresholds.rebuffer_ratio_threshold ?? REBUFFER_RATIO_THRESHOLD_DEFAULT}
+            onOpenFinding={setOpenFinding}
+          />
+        </PageBody>
+      </>
+    )
+  }
 
   return (
-    <div className="space-y-4">
-      <section className="card px-4 py-4">
-        <UrlForm value={form} onChange={setForm} disabled={create.isPending} />
-
-        <fieldset className="mt-3">
-          <legend className="label">Duration</legend>
-          <div className="flex flex-wrap items-center gap-2">
-            {AGING_PRESETS.map((preset) => (
-              <button
-                key={preset.minutes}
-                type="button"
-                className={`btn-secondary ${
-                  !custom && durationMinutes === preset.minutes
-                    ? '!border-brand-600 !bg-brand-50 !text-brand-700'
-                    : ''
-                }`}
-                onClick={() => {
-                  setDurationMinutes(preset.minutes)
-                  setCustom('')
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
-            <label className="flex items-center gap-2 text-sm">
-              <span className="text-[var(--rba-muted)]">Custom</span>
-              <input
-                className="input max-w-[110px]"
-                type="number"
-                min={1}
-                max={1440}
-                placeholder="minutes"
-                value={custom}
-                onChange={(e) => setCustom(e.target.value)}
-              />
-            </label>
-          </div>
-        </fieldset>
-
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => create.mutate()}
-            disabled={create.isPending || form.playback_url.trim().length < 8}
-          >
-            Start aging analysis
-          </button>
-          <span className="text-xs text-[var(--rba-muted)]">
-            The job runs on the server. Closing this browser does not stop it, and it resumes
-            after a backend restart.
+    <>
+      <PageHeader
+        title="Aging analysis"
+        subtitle="Long-running jobs held on the server. Closing this browser does not stop them."
+        status={
+          <span className={active.length > 0 ? 'chip-blue' : 'chip-neutral'}>
+            {active.length} running
           </span>
-        </div>
+        }
+      />
 
-        {error && (
-          <p className="mt-3 rounded border border-critical bg-red-50 px-3 py-2 text-sm text-critical">
-            {error}
-          </p>
-        )}
-      </section>
+      <PageBody>
+        <Card>
+          <div className="px-5 pb-4 pt-4">
+            <UrlForm value={form} onChange={setForm} disabled={create.isPending} />
 
-      <section className="card">
-        <div className="card-header">
-          <h2 className="card-title">Jobs</h2>
-          <span className="text-xs text-[var(--rba-muted)]">{jobs.length} job(s)</span>
-        </div>
-        {jobs.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-[var(--rba-muted)]">
-            No aging job has been started yet.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="table-head">
-                  <th className="px-3 py-2">Channel</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2 w-48">Progress</th>
-                  <th className="px-3 py-2">Remaining</th>
-                  <th className="px-3 py-2">Severity counts</th>
-                  <th className="px-3 py-2">Verdict</th>
-                  <th className="px-3 py-2">Started</th>
-                  <th className="px-3 py-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--rba-line)]">
-                {jobs.map((job) => (
-                  <JobRow
-                    key={job.id}
-                    job={job}
-                    onCancel={() => cancel.mutate(job.id)}
-                    onOpen={() => setOpenJob(openJob === job.id ? null : job.id)}
-                    open={openJob === job.id}
-                  />
-                ))}
-              </tbody>
-            </table>
+            <div className="mt-4 grid gap-3 border-t border-surface-line pt-4 lg:grid-cols-[1fr_160px]">
+              <Field label="Duration">
+                <SegmentedControl
+                  ariaLabel="Job duration"
+                  value={custom ? -1 : durationMinutes}
+                  onChange={(minutes) => {
+                    setDurationMinutes(minutes)
+                    setCustom('')
+                  }}
+                  options={AGING_PRESETS.map((preset) => ({
+                    value: preset.minutes,
+                    label: preset.label,
+                  }))}
+                />
+              </Field>
+              <Field label="Custom minutes" htmlFor="custom-minutes">
+                <input
+                  id="custom-minutes"
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={1440}
+                  placeholder="minutes"
+                  value={custom}
+                  onChange={(e) => setCustom(e.target.value)}
+                />
+              </Field>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => create.mutate()}
+                disabled={create.isPending || form.playback_url.trim().length < 8}
+              >
+                <IconPulse size={15} />
+                Start aging run
+              </button>
+              <span className="text-micro text-ink-muted">
+                The job resumes from its own state after a backend restart.
+              </span>
+            </div>
+
+            {error && (
+              <div className="mt-3">
+                <InlineAlert tone="error">{error}</InlineAlert>
+              </div>
+            )}
           </div>
-        )}
-      </section>
+        </Card>
 
-      {openJob && <JobDetail jobId={openJob} />}
-    </div>
+        <Card>
+          <CardHeader
+            title="Jobs"
+            subtitle="Every run this deployment holds, newest first."
+            actions={<span className="chip-neutral">{jobs.length}</span>}
+          />
+          {jobs.length === 0 ? (
+            <EmptyState
+              title="No aging job has been started yet"
+              detail="Start a run above; it appears here immediately and keeps running on the server."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table table-hover">
+                <thead>
+                  <tr>
+                    <th>Channel</th>
+                    <th>Status</th>
+                    <th className="w-52">Progress</th>
+                    <th>Remaining</th>
+                    <th>Severity counts</th>
+                    <th>Verdict</th>
+                    <th>Started</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobs.map((job) => (
+                    <JobRow
+                      key={job.id}
+                      job={job}
+                      onCancel={() => cancel.mutate(job.id)}
+                      onOpen={() => setOpenJob(job)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </PageBody>
+    </>
   )
 }
 
@@ -192,72 +269,62 @@ function JobRow({
   job,
   onCancel,
   onOpen,
-  open,
 }: {
   job: JobSummary
   onCancel: () => void
   onOpen: () => void
-  open: boolean
 }) {
   const verdict = job.verdict as VerdictData | null
-  const counts = Object.entries(job.counts ?? {})
-    .filter(([, count]) => count > 0)
-    .map(([severity, count]) => `${severity} ${count}`)
-    .join(' · ')
+  const counts = Object.entries(job.counts ?? {}).filter(([, count]) => count > 0)
 
   return (
-    <tr className={open ? 'bg-brand-50/40' : ''}>
-      <td className="px-3 py-2 font-semibold">{job.channel_name}</td>
-      <td className="px-3 py-2">
-        <StatusChip status={job.status} />
+    <tr>
+      <td>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="text-left text-body font-semibold text-ink hover:text-brand-600 hover:underline"
+        >
+          {job.channel_name}
+        </button>
+        <p className="font-mono text-[11px] text-ink-faint">{job.id}</p>
       </td>
-      <td className="px-3 py-2">
+      <td>
+        <JobStatusChip status={job.status} />
+      </td>
+      <td>
         <ProgressBar value={job.progress} />
-        <span className="text-xs text-[var(--rba-muted)]">
+        <span className="mt-1 block font-mono text-[11px] text-ink-faint">
           {duration(job.elapsed_s)} elapsed
         </span>
       </td>
-      <td className="px-3 py-2 font-mono text-xs">{duration(job.remaining_s)}</td>
-      <td className="px-3 py-2 text-xs">{counts || '—'}</td>
-      <td className="px-3 py-2 text-xs">{verdict?.status ?? '—'}</td>
-      <td className="px-3 py-2 text-xs" title={utcTitle(job.started_at)}>
+      <td className="font-mono text-micro text-ink-soft">{duration(job.remaining_s)}</td>
+      <td>
+        <div className="flex flex-wrap gap-1">
+          {counts.length === 0 && <span className="text-micro text-ink-faint">—</span>}
+          {counts.map(([severity, count]) => (
+            <SeverityCount key={severity} severity={severity} count={count} />
+          ))}
+        </div>
+      </td>
+      <td className="text-micro text-ink-soft">{verdict?.status ?? '—'}</td>
+      <td className="font-mono text-micro text-ink-soft" title={utcTitle(job.started_at)}>
         {localDateTime(job.started_at)}
       </td>
-      <td className="px-3 py-2">
-        <div className="flex flex-wrap gap-1">
-          <button type="button" className="btn-secondary !px-2 !py-1 text-xs" onClick={onOpen}>
-            {open ? 'Hide' : 'Open'}
+      <td>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <button type="button" className="btn-ghost btn-sm" onClick={onOpen}>
+            Open
           </button>
-          {ACTIVE.has(job.status) && (
-            <button type="button" className="btn-danger !px-2 !py-1 text-xs" onClick={onCancel}>
+          {ACTIVE.has(job.status) ? (
+            <button type="button" className="btn-accent btn-sm" onClick={onCancel}>
+              <IconStop size={12} />
               Cancel
             </button>
-          )}
-          {!ACTIVE.has(job.status) && (
-            <>
-              <a
-                className="btn-secondary !px-2 !py-1 text-xs"
-                href={api.url(`/aging/jobs/${job.id}/report.html`)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                HTML
-              </a>
-              <a
-                className="btn-secondary !px-2 !py-1 text-xs"
-                href={api.url(`/aging/jobs/${job.id}/report.pdf`)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                PDF
-              </a>
-              <a
-                className="btn-secondary !px-2 !py-1 text-xs"
-                href={api.url(`/jobs/${job.id}/evidence.zip`)}
-              >
-                Evidence
-              </a>
-            </>
+          ) : (
+            <a className="btn-ghost btn-sm" href={api.url(`/jobs/${job.id}/evidence.zip`)}>
+              Evidence
+            </a>
           )}
         </div>
       </td>
@@ -265,7 +332,33 @@ function JobRow({
   )
 }
 
-function JobDetail({ jobId }: { jobId: string }) {
+function SeverityCount({ severity, count }: { severity: string; count: number }) {
+  const tone =
+    severity === 'CRITICAL' || severity === 'ERROR'
+      ? 'chip-pink'
+      : severity === 'WARN'
+        ? 'chip-violet'
+        : severity === 'INFO'
+          ? 'chip-blue'
+          : 'chip-clean'
+  return (
+    <span className={cx(tone, 'tabular')}>
+      {severity} {count}
+    </span>
+  )
+}
+
+function JobDetail({
+  jobId,
+  status,
+  threshold,
+  onOpenFinding,
+}: {
+  jobId: string
+  status: string
+  threshold: number
+  onOpenFinding: (finding: FindingData) => void
+}) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['aging-result', jobId],
     queryFn: () => api.get<Record<string, unknown>>(`/aging/jobs/${jobId}/result`),
@@ -274,58 +367,124 @@ function JobDetail({ jobId }: { jobId: string }) {
 
   if (isLoading) {
     return (
-      <section className="card px-4 py-6 text-sm text-[var(--rba-muted)]">
-        Loading the stored samples for this job.
-      </section>
+      <Card>
+        <EmptyState
+          title="Reading the stored samples"
+          detail="The job's playlist polls, segment fetches and virtual buffer series are loading."
+        />
+      </Card>
     )
   }
   if (error) {
-    return (
-      <section className="card px-4 py-6 text-sm text-critical">
-        {error instanceof Error ? error.message : String(error)}
-      </section>
-    )
+    return <InlineAlert tone="error">{error instanceof Error ? error.message : String(error)}</InlineAlert>
   }
 
   const verdict = (data?.verdict as VerdictData | null) ?? null
   const findings = (data?.findings as FindingData[]) ?? []
   const vpb = (data?.vpb as Record<string, { series?: { at: string; level_s: number }[] }>) ?? {}
+  const active = findings.filter((finding) => finding.severity !== 'PASS')
+  /* Samples are written when the job settles, so a running job reports its live counts only. */
+  const settled = !ACTIVE.has(status)
 
   return (
     <div className="space-y-4">
-      <VerdictBanner
+      <SessionVerdict
         verdict={verdict}
-        threshold={REBUFFER_RATIO_THRESHOLD_DEFAULT}
+        threshold={threshold}
         elapsed={verdict?.window_seconds ?? 0}
       />
 
-      {Object.keys(vpb).length > 0 && (
-        <section className="card">
-          <div className="card-header">
-            <h3 className="card-title">Virtual Player Buffer — stored samples</h3>
-            <span className="text-xs text-[var(--rba-muted)]">
-              {Object.keys(vpb).length} rendition(s)
-            </span>
-          </div>
-          <div className="px-4 py-3 text-xs text-[var(--rba-muted)]">
-            {Object.entries(vpb).map(([variant, series]) => (
-              <div key={variant}>
-                {variant}: {series.series?.length ?? 0} sample(s)
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      <MetricRow>
+        <MetricTile
+          label="Active findings"
+          value={active.length}
+          note={`${findings.length} rules recorded`}
+          tone={active.length > 0 ? 'pink' : 'clean'}
+        />
+        <MetricTile
+          label="Incidents"
+          value={verdict?.incident_count ?? 0}
+          note={duration(verdict?.incident_seconds ?? 0)}
+        />
+        <MetricTile
+          label="Playlists checked"
+          value={verdict?.playlists_checked ?? 0}
+          note="across every rendition"
+        />
+        <MetricTile
+          label="Segments checked"
+          value={verdict?.segments_checked ?? 0}
+          note="fetched and demuxed"
+        />
+        <MetricTile
+          label="Virtual buffer"
+          value={Object.keys(vpb).length}
+          note="renditions modelled"
+        />
+        <MetricTile
+          label="Window"
+          value={duration(verdict?.window_seconds ?? 0)}
+          note={verdict?.worst_variant ?? 'every rendition'}
+        />
+      </MetricRow>
 
-      <section className="card">
-        <div className="card-header">
-          <h3 className="card-title">Findings</h3>
-          <span className="text-xs text-[var(--rba-muted)]">{findings.length}</span>
+      <Card>
+        <CardHeader
+          title="Prioritized findings"
+          subtitle="Ranked by viewer impact, then by how often the rule fired."
+          actions={<span className="chip-neutral">{findings.length}</span>}
+        />
+        <div className="px-4 pb-4">
+          <FindingsList
+            findings={findings}
+            onOpen={onOpenFinding}
+            emptyTitle={
+              settled ? 'This job recorded no finding' : 'No finding has been stored yet'
+            }
+            emptyDetail={
+              settled
+                ? 'Every check that ran returned clean for the whole window.'
+                : 'The job writes its findings and samples as each window settles. The counts in the jobs table are live.'
+            }
+          />
         </div>
-        <div className="max-h-[60vh] space-y-2 overflow-y-auto p-2">
-          <FindingsFeed findings={findings} />
-        </div>
-      </section>
+      </Card>
+
+      {Object.keys(vpb).length > 0 && (
+        <Card>
+          <CardHeader
+            title="Virtual Player Buffer"
+            subtitle="Stored samples, one series per rendition."
+          />
+          <div className="overflow-x-auto">
+            <table className="table table-hover">
+              <thead>
+                <tr>
+                  <th>Rendition</th>
+                  <th>Samples</th>
+                  <th>Lowest level</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(vpb).map(([variant, series]) => {
+                  const levels = (series.series ?? []).map((point) => point.level_s)
+                  return (
+                    <tr key={variant}>
+                      <td className="font-mono text-micro text-ink">{variant}</td>
+                      <td className="font-mono text-micro tabular-nums text-ink-soft">
+                        {series.series?.length ?? 0}
+                      </td>
+                      <td className="font-mono text-micro tabular-nums text-ink-soft">
+                        {levels.length > 0 ? `${Math.min(...levels).toFixed(1)} s` : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </div>
   )
 }

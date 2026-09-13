@@ -74,9 +74,22 @@ frontend/src/
   in the Settings tab, and are persisted in the DB.
 - Every rule needs a positive and a negative test driven by the fault-injecting fixture
   server in `tests/fixtures/`.
-- Frontend: React 18 + Vite + TypeScript, Tailwind, light theme, Space Grotesk (UI) and
-  IBM Plex Mono (manifests/evidence), ECharts via `echarts-for-react`, Zustand + TanStack
-  Query. `MSN_GAP_TOLERANCE = 5` is shared from `src/lib/constants.ts`.
+- Frontend: React 18 + Vite + TypeScript, Tailwind, ECharts via `echarts-for-react`,
+  Zustand + TanStack Query. `MSN_GAP_TOLERANCE = 5` is shared from `src/lib/constants.ts`.
+- Design system — **Signal Clarity**. White is the dominant ground; a collapsible dark rail
+  (`#0D1430`) anchors navigation. The palette is Samsung blue `#1428A0`, violet `#7B2CBF`
+  and TV Plus pink `#FF2D55`, plus one green `#12864C` for a clean result; the gradient
+  `#1428A0 → #7B2CBF → #FF2D55` is reserved for the executive verdict and the report header.
+  No colour outside that range enters the product, charts and report templates included.
+  Severity runs green → blue → violet → pink → filled pink, and colour is never the only
+  signal: every severity also carries its word.
+- Typography: One UI Sans → SamsungOne → Inter → Arial for the interface; JetBrains Mono →
+  Roboto Mono for machine evidence only — manifests, URLs, timestamps, HTTP information,
+  identifiers and measured numbers. Never monospace for navigation, headings or prose.
+- Tokens live in `frontend/tailwind.config.js`; component classes in `src/theme/index.css`;
+  primitives in `src/components/ui/`. The rail and page header are in `src/components/layout/`.
+  The same tokens are mirrored in `backend/app/reports/templates/` so a report looks like the
+  screen it came from.
 - Results panels are hidden with CSS, never unmounted, so video element refs survive.
 
 ## Deployment

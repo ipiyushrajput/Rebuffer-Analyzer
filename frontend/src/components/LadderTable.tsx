@@ -1,6 +1,7 @@
 /** Ladder audit: what the manifest declares against what the bitstream carries. */
 
 import { kbps } from '../lib/format'
+import { EmptyState, cx } from './ui'
 
 export interface LadderRow {
   layer: string
@@ -34,13 +35,16 @@ function Cell({
 }) {
   const shown = (value: string | number | null | undefined) =>
     value === null || value === undefined || value === '' ? '—' : String(value)
-  const differs =
-    declared != null && measured != null && String(declared) !== String(measured)
+  const differs = declared != null && measured != null && String(declared) !== String(measured)
   return (
-    <td className={`px-3 py-2 ${differs ? 'bg-red-50 text-critical' : ''}`}>
-      <div className="font-mono text-[12px]">{shown(declared)}</div>
+    <td className={cx(differs && 'bg-pink-50')}>
+      <div className={cx('font-mono text-micro', differs ? 'text-pink-600' : 'text-ink')}>
+        {shown(declared)}
+      </div>
       {measured !== undefined && (
-        <div className="font-mono text-[11px] text-[var(--rba-muted)]">{shown(measured)}</div>
+        <div className={cx('font-mono text-[11px]', differs ? 'text-pink-600' : 'text-ink-faint')}>
+          {shown(measured)}
+        </div>
       )}
     </td>
   )
@@ -49,9 +53,10 @@ function Cell({
 export function LadderTable({ rows }: { rows: LadderRow[] }) {
   if (rows.length === 0) {
     return (
-      <p className="px-4 py-6 text-sm text-[var(--rba-muted)]">
-        The ladder table fills in once a segment has been sampled on each rung.
-      </p>
+      <EmptyState
+        title="No rung has been sampled yet"
+        detail="The ladder table fills in once a segment has been fetched and demuxed on each rung."
+      />
     )
   }
 
@@ -61,58 +66,64 @@ export function LadderTable({ rows }: { rows: LadderRow[] }) {
   const refFramesDiffer = new Set(refFrames).size > 1
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="table-head">
-            <th className="px-3 py-2">Rung</th>
-            <th className="px-3 py-2">Bandwidth</th>
-            <th className="px-3 py-2">Resolution</th>
-            <th className="px-3 py-2">Frame rate</th>
-            <th className="px-3 py-2">Codecs</th>
-            <th className="px-3 py-2">Profile / level</th>
-            <th className="px-3 py-2">Ref frames</th>
-            <th className="px-3 py-2">Scan</th>
-            <th className="px-3 py-2">Peak measured</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--rba-line)]">
-          {rows.map((row) => (
-            <tr key={`${row.layer}:${row.variant}`}>
-              <td className="px-3 py-2 font-semibold">{row.variant}</td>
-              <Cell declared={kbps(row.declared.bandwidth)} measured={undefined} />
-              <Cell declared={row.declared.resolution} measured={row.measured.resolution} />
-              <Cell declared={row.declared.frame_rate} measured={row.measured.frame_rate?.toFixed(3)} />
-              <Cell declared={row.declared.codecs} measured={row.measured.audio_codec} />
-              <Cell
-                declared={`${row.measured.profile ?? '—'} ${row.measured.level ?? ''}`.trim()}
-                measured={undefined}
-              />
-              <td
-                className={`px-3 py-2 font-mono text-[12px] ${
-                  refFramesDiffer ? 'bg-red-50 text-critical' : ''
-                }`}
-              >
-                {row.measured.max_num_ref_frames ?? '—'}
-              </td>
-              <Cell declared={row.measured.scan_type} measured={undefined} />
-              <Cell
-                declared={
-                  row.measured.peak_kbps ? `${Math.round(row.measured.peak_kbps)} kbit/s` : '—'
-                }
-                measured={undefined}
-              />
+    <div>
+      <div className="overflow-x-auto">
+        <table className="table table-hover">
+          <thead>
+            <tr>
+              <th>Rung</th>
+              <th>Bandwidth</th>
+              <th>Resolution</th>
+              <th>Frame rate</th>
+              <th>Codecs</th>
+              <th>Profile / level</th>
+              <th>Ref frames</th>
+              <th>Scan</th>
+              <th>Peak measured</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.layer}:${row.variant}`}>
+                <td className="font-semibold text-ink">{row.variant}</td>
+                <Cell declared={kbps(row.declared.bandwidth)} measured={undefined} />
+                <Cell declared={row.declared.resolution} measured={row.measured.resolution} />
+                <Cell
+                  declared={row.declared.frame_rate}
+                  measured={row.measured.frame_rate?.toFixed(3)}
+                />
+                <Cell declared={row.declared.codecs} measured={row.measured.audio_codec} />
+                <Cell
+                  declared={`${row.measured.profile ?? '—'} ${row.measured.level ?? ''}`.trim()}
+                  measured={undefined}
+                />
+                <td
+                  className={cx(
+                    'font-mono text-micro',
+                    refFramesDiffer ? 'bg-pink-50 text-pink-600' : 'text-ink',
+                  )}
+                >
+                  {row.measured.max_num_ref_frames ?? '—'}
+                </td>
+                <Cell declared={row.measured.scan_type} measured={undefined} />
+                <Cell
+                  declared={
+                    row.measured.peak_kbps ? `${Math.round(row.measured.peak_kbps)} kbit/s` : '—'
+                  }
+                  measured={undefined}
+                />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {refFramesDiffer && (
-        <p className="border-t border-critical bg-red-50 px-3 py-2 text-xs text-critical">
+        <p className="border-t border-pink-200 bg-pink-50 px-5 py-2.5 text-small text-pink-600">
           The rungs declare different reference frame counts. Every ABR switch between them
           reallocates the decoded picture buffer.
         </p>
       )}
-      <p className="px-3 py-2 text-xs text-[var(--rba-muted)]">
+      <p className="px-5 py-2.5 text-micro text-ink-muted">
         The upper value in each cell is the manifest declaration; the lower value is what the
         bitstream carries.
       </p>

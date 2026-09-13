@@ -5,29 +5,34 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bulk analysis {{ job_id }} — TV Plus Rebuffer Analyzer</title>
 <style>
-  :root { --ink:#10131c; --muted:#5c6478; --line:#e4e7ef; --ground:#f6f7fb; --brand:#1428A0;
-    --critical:#b4151b; --error:#d4581a; --warn:#9a6700; --info:#1f6feb; --pass:#1a7f37; }
+  :root { --ink:#0B1020; --muted:#667085; --line:#E6E8F0; --line-strong:#D4D8E6;
+    --ground:#F4F5F9; --raised:#FAFBFD; --brand:#1428A0; --brand-soft:#EEF1FB;
+    --violet:#7B2CBF; --violet-soft:#F4EDFC; --pink:#FF2D55; --pink-soft:#FFEEF2;
+    --clean:#12864C; --clean-soft:#E9F6EF;
+    --critical:#FF2D55; --error:#E01142; --warn:#7B2CBF; --info:#1428A0; --pass:#12864C; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--ground); color:var(--ink); font-size:13px; line-height:1.5;
-    font-family:"Space Grotesk","Segoe UI",system-ui,sans-serif; }
+    font-family:"One UI Sans","SamsungOne",Inter,"Segoe UI",system-ui,Arial,sans-serif; }
   .page { max-width:1180px; margin:0 auto; padding:24px 20px 64px; }
-  code,.mono { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; }
+  code,.mono { font-family:"JetBrains Mono","Roboto Mono",ui-monospace,monospace; font-size:12px; }
   h1 { font-size:22px; margin:0 0 2px; }
-  h2 { font-size:16px; margin:26px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--line); }
+  h2 { font-size:16px; margin:26px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line-strong); }
   .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
   header.masthead { display:flex; gap:14px; align-items:center; background:#fff;
-    border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+    border:1px solid var(--line); border-left:4px solid var(--brand); border-radius:10px;
+    padding:14px 16px; }
   header.masthead img { width:44px; height:44px; border-radius:8px; }
   table { width:100%; border-collapse:collapse; font-size:12px; }
-  th { background:var(--ground); text-align:left; font-size:10.5px; text-transform:uppercase;
+  th { background:#fff; text-align:left; font-size:10.5px; text-transform:uppercase;
     letter-spacing:.04em; color:var(--muted); padding:7px 8px; border-bottom:1px solid var(--line); }
   td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
   .chip { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px;
     font-size:11px; font-weight:600; background:#fff; }
-  .status-defect { border-color:var(--critical); color:var(--critical); background:#fdeaea; }
-  .status-risk { border-color:var(--warn); color:var(--warn); background:#fdf3e0; }
-  .status-clean { border-color:var(--pass); color:var(--pass); background:#e8f6ec; }
-  .risk { font-family:"IBM Plex Mono",monospace; font-weight:700; }
+  .status-defect { border-color:var(--pink); color:#fff; background:var(--pink); }
+  .status-risk { border-color:var(--violet-soft); color:var(--warn); background:var(--violet-soft); }
+  .status-clean { border-color:var(--clean-soft); color:var(--pass); background:var(--clean-soft); }
+  .risk { font-family:"JetBrains Mono","Roboto Mono",monospace; font-weight:700;
+    font-variant-numeric:tabular-nums; }
   .risk.high { color:var(--critical); } .risk.mid { color:var(--warn); } .risk.low { color:var(--pass); }
   .muted { color:var(--muted); } .small { font-size:11px; }
   footer { margin-top:28px; padding-top:10px; border-top:1px solid var(--line); font-size:11px; color:var(--muted); }

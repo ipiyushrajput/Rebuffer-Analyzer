@@ -78,7 +78,8 @@ async def probe_url(
     code, out, err = await _run(argv, timeout=timeout)
     if code != 0:
         return {"error": err.decode("utf-8", errors="replace").strip(), "streams": [], "format": {}}
-    return json.loads(out or b"{}")
+    parsed: dict[str, Any] = json.loads(out or b"{}")
+    return parsed
 
 
 async def probe_bytes(data: bytes, *, timeout: float = 20.0) -> dict[str, Any]:
@@ -103,7 +104,8 @@ async def probe_bytes(data: bytes, *, timeout: float = 20.0) -> dict[str, Any]:
     code, out, err = await _run(argv, timeout=timeout, stdin=data)
     if code != 0:
         return {"error": err.decode("utf-8", errors="replace").strip(), "streams": [], "format": {}}
-    return json.loads(out or b"{}")
+    parsed: dict[str, Any] = json.loads(out or b"{}")
+    return parsed
 
 
 async def decode_errors(data: bytes, *, timeout: float = 30.0) -> list[str]:

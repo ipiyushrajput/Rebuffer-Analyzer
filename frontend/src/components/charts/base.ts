@@ -6,30 +6,43 @@
  * relying on colour alone.
  */
 
-/** Categorical palette: brand blue first, then hues separable at small sizes. */
+/**
+ * Categorical palette: the brand spectrum first — Samsung blue, violet, TV Plus pink — then
+ * the clean green and tints of the same three hues. No colour outside the brand range enters
+ * a chart.
+ */
 export const PALETTE = [
   '#1428A0',
-  '#1f9d55',
-  '#c2410c',
-  '#7c3aed',
-  '#0891b2',
-  '#a16207',
-  '#be185d',
-  '#4d7c0f',
+  '#7B2CBF',
+  '#FF2D55',
+  '#12864C',
+  '#4B63D6',
+  '#A66CE0',
+  '#FF7A96',
+  '#3FAE7C',
 ]
 
 export const SEVERITY_COLOR: Record<string, string> = {
-  CRITICAL: '#b4151b',
-  ERROR: '#d4581a',
-  WARN: '#9a6700',
-  INFO: '#1f6feb',
-  PASS: '#1a7f37',
+  CRITICAL: '#FF2D55',
+  ERROR: '#E01142',
+  WARN: '#7B2CBF',
+  INFO: '#1428A0',
+  PASS: '#12864C',
+}
+
+/** Named brand values the individual charts draw threshold lines and markers with. */
+export const BRAND = {
+  blue: '#1428A0',
+  violet: '#7B2CBF',
+  pink: '#FF2D55',
+  clean: '#12864C',
+  ink: '#0B1020',
 }
 
 export const SYMBOLS = ['circle', 'triangle', 'rect', 'diamond', 'roundRect', 'pin']
 
-export const AXIS_LINE = { lineStyle: { color: '#cbd2e0' } }
-export const SPLIT_LINE = { lineStyle: { color: '#eef1f6' } }
+export const AXIS_LINE = { lineStyle: { color: '#D4D8E6' } }
+export const SPLIT_LINE = { lineStyle: { color: '#EEF0F6' } }
 
 export const GRID = { left: 52, right: 18, top: 28, bottom: 36, containLabel: true }
 
@@ -45,28 +58,39 @@ export function baseOption(overrides: ChartOption = {}): ChartOption {
     animation: false, // High-frequency updates repaint faster without transitions.
     color: PALETTE,
     grid: GRID,
-    textStyle: { fontFamily: '"Space Grotesk", system-ui, sans-serif', fontSize: 11 },
+    // Axis labels and tooltips carry measurements, so they are set in the mono face.
+    textStyle: { fontFamily: '"JetBrains Mono", "Roboto Mono", monospace', fontSize: 11 },
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'line' },
+      axisPointer: { type: 'line', lineStyle: { color: '#D4D8E6' } },
       backgroundColor: '#ffffff',
-      borderColor: '#e4e7ef',
+      borderColor: '#E6E8F0',
       borderWidth: 1,
-      textStyle: { color: '#10131c', fontSize: 11 },
+      padding: [8, 10],
+      extraCssText: 'box-shadow: 0 8px 24px rgba(11,16,32,0.10); border-radius: 8px;',
+      textStyle: { color: '#0B1020', fontSize: 11 },
       confine: true,
     },
-    legend: { type: 'scroll', top: 0, itemWidth: 12, itemHeight: 8, textStyle: { fontSize: 10 } },
+    legend: {
+      type: 'scroll',
+      top: 0,
+      itemWidth: 10,
+      itemHeight: 8,
+      icon: 'roundRect',
+      textStyle: { fontSize: 10, color: '#667085' },
+    },
     xAxis: {
       type: 'time',
       axisLine: AXIS_LINE,
       axisTick: { show: false },
       splitLine: { show: false },
-      axisLabel: { hideOverlap: true },
+      axisLabel: { hideOverlap: true, color: '#98A0B4' },
     },
     yAxis: {
       type: 'value',
       axisLine: { show: false },
       axisTick: { show: false },
+      axisLabel: { color: '#98A0B4' },
       splitLine: SPLIT_LINE,
     },
     ...overrides,
@@ -74,7 +98,7 @@ export function baseOption(overrides: ChartOption = {}): ChartOption {
 }
 
 /** A horizontal reference line labelled with the threshold it draws. */
-export function thresholdLine(value: number, label: string, color = '#b4151b') {
+export function thresholdLine(value: number, label: string, color = BRAND.pink) {
   return {
     silent: true,
     symbol: 'none',
@@ -87,7 +111,7 @@ export function thresholdLine(value: number, label: string, color = '#b4151b') {
 export function stallBands(
   bands: { start: number; end: number | null }[],
   now: number,
-  color = 'rgba(180, 21, 27, 0.12)',
+  color = 'rgba(255, 45, 85, 0.12)',
 ) {
   return {
     silent: true,

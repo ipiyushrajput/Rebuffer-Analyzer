@@ -2,11 +2,13 @@
  * The URL and job-options form, shared by the Realtime and Aging tabs.
  *
  * The playback URL is required; origin, CDN and SSAI are optional and, when present, pin a
- * defect to the first layer it appears on.
+ * defect to the first layer it appears on. Everything beyond the URL is folded away, so the
+ * common path is one field and one button.
  */
 
 import { useState } from 'react'
 import { CHECK_SETS, UA_PROFILES, VPB_MODES } from '../lib/constants'
+import { Field, cx } from './ui'
 
 export interface JobOptions {
   ua_profile: string
@@ -61,6 +63,39 @@ export function toPayload(value: UrlFormValue): Record<string, unknown> {
   }
 }
 
+function Toggle({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean
+  onChange: (value: boolean) => void
+  label: string
+  disabled?: boolean
+}) {
+  return (
+    <label
+      className={cx(
+        'flex cursor-pointer items-start gap-2.5 rounded-tile border px-3 py-2 text-small transition-colors duration-150',
+        checked
+          ? 'border-brand-200 bg-brand-50 text-brand-600'
+          : 'border-surface-line bg-white text-ink-soft hover:border-surface-lineStrong',
+        disabled && 'cursor-not-allowed opacity-50',
+      )}
+    >
+      <input
+        type="checkbox"
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-brand-600"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        disabled={disabled}
+      />
+      <span className="leading-snug">{label}</span>
+    </label>
+  )
+}
+
 interface Props {
   value: UrlFormValue
   onChange: (value: UrlFormValue) => void
@@ -85,25 +120,19 @@ export function UrlForm({ value, onChange, disabled }: Props) {
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 lg:grid-cols-[1fr_240px]">
-        <div>
-          <label className="label" htmlFor="playback-url">
-            Playback URL
-          </label>
+      <div className="grid gap-3 lg:grid-cols-[1fr_260px]">
+        <Field label="Playback URL" htmlFor="playback-url">
           <input
             id="playback-url"
-            className="input mono"
+            className="input-mono"
             placeholder="https://cdn.example/live/channel/master.m3u8?hdnts=…"
             value={value.playback_url}
             onChange={(e) => set({ playback_url: e.target.value })}
             disabled={disabled}
             spellCheck={false}
           />
-        </div>
-        <div>
-          <label className="label" htmlFor="channel-name">
-            Channel name
-          </label>
+        </Field>
+        <Field label="Channel name" htmlFor="channel-name">
           <input
             id="channel-name"
             className="input"
@@ -112,28 +141,28 @@ export function UrlForm({ value, onChange, disabled }: Props) {
             onChange={(e) => set({ channel_name: e.target.value })}
             disabled={disabled}
           />
-        </div>
+        </Field>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <button
-          type="button"
-          className="text-xs font-semibold text-brand-700 hover:underline"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? 'Hide' : 'Add'} origin, CDN and SSAI URLs for layer attribution
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-quiet" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? 'Hide' : 'Add'} origin, CDN and SSAI URLs
         </button>
-        <button
-          type="button"
-          className="text-xs font-semibold text-brand-700 hover:underline"
-          onClick={() => setShowOptions((v) => !v)}
-        >
+        <button type="button" className="btn-quiet" onClick={() => setShowOptions((v) => !v)}>
           {showOptions ? 'Hide' : 'Show'} job options
         </button>
+        {value.options.check_sets.length > 0 && (
+          <span className="chip-blue">{value.options.check_sets.length} extra check sets</span>
+        )}
+        {Object.keys(value.options.clear_keys).length > 0 && (
+          <span className="chip-violet">
+            {Object.keys(value.options.clear_keys).length} key pairs held
+          </span>
+        )}
       </div>
 
       {expanded && (
-        <div className="grid gap-3 rounded-md border border-[var(--rba-line)] bg-slate-50 p-3 lg:grid-cols-3">
+        <div className="grid gap-3 rounded-tile border border-surface-line bg-surface-raised p-4 lg:grid-cols-3">
           {(
             [
               ['origin_url', 'Origin URL'],
@@ -141,21 +170,18 @@ export function UrlForm({ value, onChange, disabled }: Props) {
               ['ssai_url', 'SSAI (MediaTailor) URL'],
             ] as const
           ).map(([field, label]) => (
-            <div key={field}>
-              <label className="label" htmlFor={field}>
-                {label}
-              </label>
+            <Field key={field} label={label} htmlFor={field}>
               <input
                 id={field}
-                className="input mono"
+                className="input-mono"
                 value={value[field]}
                 onChange={(e) => set({ [field]: e.target.value } as Partial<UrlFormValue>)}
                 disabled={disabled}
                 spellCheck={false}
               />
-            </div>
+            </Field>
           ))}
-          <p className="text-xs text-[var(--rba-muted)] lg:col-span-3">
+          <p className="text-micro leading-snug text-ink-muted lg:col-span-3">
             With these URLs the same checks run on each layer and every defect is pinned to the
             first layer it appears on. Without them each defect is attributed from its own layer
             and the response headers that prove it.
@@ -164,12 +190,9 @@ export function UrlForm({ value, onChange, disabled }: Props) {
       )}
 
       {showOptions && (
-        <div className="space-y-3 rounded-md border border-[var(--rba-line)] bg-slate-50 p-3">
+        <div className="space-y-4 rounded-tile border border-surface-line bg-surface-raised p-4">
           <div className="grid gap-3 lg:grid-cols-3">
-            <div>
-              <label className="label" htmlFor="ua-profile">
-                User-Agent profile
-              </label>
+            <Field label="User-Agent profile" htmlFor="ua-profile">
               <select
                 id="ua-profile"
                 className="input"
@@ -183,11 +206,8 @@ export function UrlForm({ value, onChange, disabled }: Props) {
                   </option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="label" htmlFor="vpb-mode">
-                Virtual buffer sensitivity
-              </label>
+            </Field>
+            <Field label="Virtual buffer sensitivity" htmlFor="vpb-mode">
               <select
                 id="vpb-mode"
                 className="input"
@@ -202,51 +222,46 @@ export function UrlForm({ value, onChange, disabled }: Props) {
                   </option>
                 ))}
               </select>
-            </div>
+            </Field>
             <div className="flex items-end">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={value.options.record_evidence}
-                  onChange={(e) => setOptions({ record_evidence: e.target.checked })}
-                  disabled={disabled}
-                />
-                Record evidence (segments and playlist snapshots around each incident)
-              </label>
+              <Toggle
+                checked={value.options.record_evidence}
+                onChange={(record_evidence) => setOptions({ record_evidence })}
+                disabled={disabled}
+                label="Record evidence around each incident"
+              />
             </div>
           </div>
 
           <fieldset>
-            <legend className="label">Check sets — baseline always runs</legend>
-            <div className="flex flex-wrap gap-3">
+            <legend className="field-label">Check sets — the baseline always runs</legend>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {CHECK_SETS.map((set_) => (
-                <label key={set_.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={value.options.check_sets.includes(set_.id)}
-                    onChange={() => toggleCheckSet(set_.id)}
-                    disabled={disabled}
-                  />
-                  {set_.label}
-                </label>
+                <Toggle
+                  key={set_.id}
+                  checked={value.options.check_sets.includes(set_.id)}
+                  onChange={() => toggleCheckSet(set_.id)}
+                  disabled={disabled}
+                  label={set_.label}
+                />
               ))}
             </div>
           </fieldset>
 
           <fieldset>
-            <legend className="label">
+            <legend className="field-label">
               Clear keys for encrypted channels — held in memory, never stored or printed
             </legend>
-            <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <input
-                className="input mono max-w-[220px]"
+                className="input-mono max-w-[220px]"
                 placeholder="KID"
                 value={keyPair.kid}
                 onChange={(e) => setKeyPair({ ...keyPair, kid: e.target.value })}
                 disabled={disabled}
               />
               <input
-                className="input mono max-w-[220px]"
+                className="input-mono max-w-[220px]"
                 placeholder="KEY"
                 type="password"
                 value={keyPair.key}
@@ -255,7 +270,7 @@ export function UrlForm({ value, onChange, disabled }: Props) {
               />
               <button
                 type="button"
-                className="btn-secondary"
+                className="btn-ghost"
                 disabled={disabled || !keyPair.kid || !keyPair.key}
                 onClick={() => {
                   setOptions({
@@ -266,11 +281,6 @@ export function UrlForm({ value, onChange, disabled }: Props) {
               >
                 Add key
               </button>
-              {Object.keys(value.options.clear_keys).length > 0 && (
-                <span className="chip border-slate-200 bg-white text-[var(--rba-muted)]">
-                  {Object.keys(value.options.clear_keys).length} key pair(s) held
-                </span>
-              )}
             </div>
           </fieldset>
         </div>

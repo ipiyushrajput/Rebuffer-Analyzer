@@ -168,16 +168,14 @@ export function Player({ src, onEvent }: Props) {
 
   return (
     <div className="card overflow-hidden">
-      <div className="card-header">
-        <h2 className="card-title">Player</h2>
-        <span className="chip border-slate-200 bg-slate-50 text-[var(--rba-muted)]">
-          {PLAYER_METRICS_NOTE}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-2.5 pt-3.5">
+        <h3 className="card-title">Player</h3>
+        <span className="chip-neutral">{PLAYER_METRICS_NOTE}</span>
       </div>
-      <div className="relative bg-black">
+      <div className="relative bg-ink">
         {/* The element is never unmounted while a session runs, so playback survives a tab change. */}
         <video ref={videoRef} controls muted playsInline className="aspect-video w-full" />
-        <div className="pointer-events-none absolute left-2 top-2 rounded bg-black/70 px-2 py-1 font-mono text-[11px] text-white">
+        <div className="pointer-events-none absolute left-2.5 top-2.5 space-y-0.5 rounded-tile bg-ink/75 px-2.5 py-1.5 font-mono text-[11px] leading-snug text-white backdrop-blur-sm">
           <div>rung {overlay.level}</div>
           <div>{kbps(overlay.bitrate)}</div>
           <div>buffer {overlay.buffer.toFixed(1)} s</div>
@@ -186,12 +184,12 @@ export function Player({ src, onEvent }: Props) {
         </div>
       </div>
       {error && (
-        <p className="border-t border-critical bg-red-50 px-4 py-2 text-sm text-critical">
+        <p className="border-t border-pink-200 bg-pink-50 px-4 py-2.5 text-small text-pink-600">
           The player stopped: {error}
         </p>
       )}
       {!src && (
-        <p className="px-4 py-6 text-sm text-[var(--rba-muted)]">
+        <p className="px-4 py-4 text-small text-ink-muted">
           Start an analysis to load the stream through the proxy.
         </p>
       )}

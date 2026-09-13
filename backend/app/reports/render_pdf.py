@@ -94,7 +94,7 @@ async def render_pdf(html: str, destination: Path) -> Path:
                     display_header_footer=True,
                     header_template="<div></div>",
                     footer_template=(
-                        '<div style="width:100%;font-size:8px;color:#5c6478;padding:0 10mm;'
+                        '<div style="width:100%;font-size:8px;color:#667085;padding:0 10mm;'
                         'display:flex;justify-content:space-between">'
                         "<span>TV Plus Rebuffer Analyzer</span>"
                         '<span class="pageNumber"></span>/<span class="totalPages"></span></div>'

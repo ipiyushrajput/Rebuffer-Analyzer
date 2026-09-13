@@ -4,10 +4,14 @@
  * Paste a playback URL, analyse live, and generate a report at any moment from the data
  * collected so far. The player loads through the proxy; every player event goes back over
  * the session socket so a stall names its cause.
+ *
+ * Opening a finding replaces the page body with its investigation. Nothing is unmounted —
+ * the session panel is hidden with CSS — so the player, the socket and every sample survive
+ * the trip into the evidence and back.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { endpoints, api } from '../api/client'
+import { api, endpoints } from '../api/client'
 import {
   AvSkewChart,
   BitrateChart,
@@ -27,19 +31,48 @@ import {
   VirtualBufferChart,
 } from '../components/charts'
 import { EventFeed } from '../components/EventFeed'
-import { FindingsFeed } from '../components/FindingCard'
+import { FindingsList } from '../components/FindingCard'
+import { FindingInvestigation } from '../components/FindingInvestigation'
 import { LadderTable, type LadderRow } from '../components/LadderTable'
+import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import { ManifestDiff, ManifestViewer } from '../components/ManifestViewer'
 import { Player } from '../components/Player'
+import { SessionVerdict } from '../components/SessionVerdict'
 import { UrlForm, emptyForm, toPayload, type UrlFormValue } from '../components/UrlForm'
-import { VerdictBanner } from '../components/VerdictBanner'
-import { REBUFFER_RATIO_THRESHOLD_DEFAULT } from '../lib/constants'
-import { duration, localTime } from '../lib/format'
+import {
+  Card,
+  CardHeader,
+  EmptyState,
+  InlineAlert,
+  LiveChip,
+  MetricRow,
+  MetricTile,
+  SeverityChip,
+  Tabs,
+  cx,
+} from '../components/ui'
+import { IconDownload, IconFile, IconPulse, IconStop } from '../components/ui/icons'
+import {
+  PLAYER_METRICS_NOTE,
+  REBUFFER_RATIO_THRESHOLD_DEFAULT,
+  SEVERITIES,
+  type Severity,
+} from '../lib/constants'
+import { duration, localTime, ratio } from '../lib/format'
 import { findingList, useSessionStore } from '../store/session'
+import type { FindingData, VerdictData } from '../ws/messages'
 import { useSessionSocket } from '../ws/useSessionSocket'
-import type { VerdictData } from '../ws/messages'
 
-type BottomTab = 'master' | 'variants' | 'ladder' | 'network' | 'events' | 'flow'
+type EvidenceTab = 'master' | 'variants' | 'ladder' | 'network' | 'events' | 'flow'
+
+const EVIDENCE_TABS: { id: EvidenceTab; label: string }[] = [
+  { id: 'master', label: 'Master playlist' },
+  { id: 'variants', label: 'Child playlists' },
+  { id: 'ladder', label: 'Ladder audit' },
+  { id: 'network', label: 'Redirects and headers' },
+  { id: 'events', label: 'Event feed' },
+  { id: 'flow', label: 'Time travel' },
+]
 
 interface Props {
   thresholds: Record<string, number>
@@ -49,14 +82,15 @@ export function RealtimeTab({ thresholds }: Props) {
   const [form, setForm] = useState<UrlFormValue>(emptyForm(false))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [bottomTab, setBottomTab] = useState<BottomTab>('master')
+  const [evidenceTab, setEvidenceTab] = useState<EvidenceTab>('master')
   const [manifests, setManifests] = useState<
     { layer: string; variant: string; url: string; raw: string; at: string }[]
   >([])
-  const [flow, setFlow] = useState<{ raw: string; diff: string[]; at: string; variant: string } | null>(
-    null,
-  )
+  const [flow, setFlow] = useState<
+    { raw: string; diff: string[]; at: string; variant: string } | null
+  >(null)
   const [reportUrl, setReportUrl] = useState<string | null>(null)
+  const [openFinding, setOpenFinding] = useState<FindingData | null>(null)
 
   const store = useSessionStore()
   const { sendPlayerEvent } = useSessionSocket(store.sessionId)
@@ -68,6 +102,7 @@ export function RealtimeTab({ thresholds }: Props) {
   const start = async () => {
     setError(null)
     setReportUrl(null)
+    setOpenFinding(null)
     setBusy(true)
     try {
       const session = await endpoints.createRealtime(toPayload(form))
@@ -135,7 +170,7 @@ export function RealtimeTab({ thresholds }: Props) {
       try {
         const snapshot = await endpoints.realtimeSnapshot(store.sessionId, variant, at)
         setFlow({ raw: snapshot.raw, diff: snapshot.diff, at: snapshot.at, variant })
-        setBottomTab('flow')
+        setEvidenceTab('flow')
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       }
@@ -174,229 +209,337 @@ export function RealtimeTab({ thresholds }: Props) {
   const variantManifests = manifests.filter((m) => m.variant !== 'master')
   const masterManifest = manifests.find((m) => m.variant === 'master')
 
+  /* The manifest the investigation shows is the one from the finding's own rendition. */
+  const investigationManifest = useMemo(() => {
+    if (!openFinding) return null
+    const match =
+      manifests.find((m) => m.variant === openFinding.variant) ??
+      (openFinding.variant ? undefined : masterManifest)
+    return match ? { title: match.variant, raw: match.raw, url: match.url } : null
+  }, [openFinding, manifests, masterManifest])
+
+  const activeFindings = findings.filter((finding) => finding.severity !== 'PASS')
+  const latestBuffer = store.playerSamples.at(-1)?.buffer_s ?? null
+  const windowSeconds = store.verdict?.window_seconds ?? store.snapshots.at(-1)?.window_s ?? null
+  const segmentsChecked = store.verdict?.segments_checked ?? store.segments.length
+  const worstSeverity = activeFindings[0]?.severity as Severity | undefined
+
   return (
-    <div className="space-y-4">
-      <section className="card px-4 py-4">
-        <UrlForm value={form} onChange={setForm} disabled={running || busy} />
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={start}
-            disabled={busy || running || form.playback_url.trim().length < 8}
-          >
-            Analyse
-          </button>
-          <button type="button" className="btn-danger" onClick={stop} disabled={!running || busy}>
-            Stop
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => generateReport('html')}
-            disabled={!store.sessionId || busy}
-          >
-            Generate report (HTML)
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => generateReport('pdf')}
-            disabled={!store.sessionId || busy}
-          >
-            Generate report (PDF)
-          </button>
-
-          <span className="ml-auto flex items-center gap-3 text-sm">
-            <span
-              className={`chip ${
-                store.connected
-                  ? 'border-pass bg-green-50 text-pass'
-                  : 'border-slate-200 bg-slate-50 text-[var(--rba-muted)]'
-              }`}
-            >
-              {store.status}
-            </span>
-            <span className="text-[var(--rba-muted)]">elapsed {duration(store.elapsed)}</span>
-          </span>
-        </div>
-
-        {error && (
-          <p className="mt-3 rounded border border-critical bg-red-50 px-3 py-2 text-sm text-critical">
-            {error}
-          </p>
-        )}
-        {reportUrl && (
-          <p className="mt-3 rounded border border-pass bg-green-50 px-3 py-2 text-sm text-pass">
-            The report is ready at{' '}
-            <a className="underline" href={api.url(reportUrl.replace('/api', ''))} target="_blank" rel="noreferrer">
-              {reportUrl}
-            </a>
-            .
-          </p>
-        )}
-      </section>
-
-      <div className="sticky top-2 z-20">
-        <VerdictBanner verdict={store.verdict} threshold={ratioThreshold} elapsed={store.elapsed} />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(380px,520px)_1fr]">
-        <div className="space-y-4">
-          <Player src={store.playerUrl} onEvent={sendPlayerEvent} />
-          <section className="card">
-            <div className="card-header">
-              <h2 className="card-title">Findings</h2>
-              <span className="text-xs text-[var(--rba-muted)]">
-                {Object.entries(store.counts)
-                  .filter(([, count]) => count > 0)
-                  .map(([severity, count]) => `${severity} ${count}`)
-                  .join(' · ') || 'none yet'}
-              </span>
-            </div>
-            <div className="max-h-[70vh] space-y-2 overflow-y-auto p-2">
-              <FindingsFeed findings={findings} />
-            </div>
-          </section>
-        </div>
-
-        <div className="grid gap-4 2xl:grid-cols-2">
-          <PlayerBufferChart samples={store.playerSamples} stalls={store.stalls} />
-          <RebufferRatioChart
-            stalls={store.stalls}
-            startedAt={store.startedAt}
-            threshold={ratioThreshold}
-          />
-          <PlayedRungChart samples={store.playerSamples} />
-          <DownloadRatioChart
-            segments={store.segments}
-            warn={thresholds.download_ratio_warn ?? 0.5}
-            error={thresholds.download_ratio_error ?? 1}
-          />
-          <FetchTimingChart snapshots={store.snapshots} />
-          <StatusHeatmapChart segments={store.segments} />
-          <SequenceLadderChart snapshots={store.snapshots} />
-          <DiscontinuityChart snapshots={store.snapshots} />
-          <FreshnessChart snapshots={store.snapshots} />
-          <BitrateChart segments={store.segments} declared={declaredBandwidth} />
-          <AvSkewChart
-            segments={store.segments}
-            criticalMs={thresholds.av_pts_delta_critical_ms ?? 1000}
-          />
-          <DurationChart segments={store.segments} />
-          <VirtualBufferChart points={store.vpbPoints} playerSamples={store.playerSamples} />
-          <DownloadsGanttChart
-            segments={store.segments}
-            onSelect={(segment) => openFlow(segment.variant, segment.at)}
-          />
-          <TrafficChart segments={store.segments} />
-          <PlaylistStateChart transitions={playlistStates} />
-        </div>
-      </div>
-
-      <section className="card">
-        <div className="card-header">
-          <nav className="flex flex-wrap gap-1" aria-label="Detail panels">
-            {(
-              [
-                ['master', 'Master playlist'],
-                ['variants', 'Child playlists'],
-                ['ladder', 'Ladder audit'],
-                ['network', 'Redirects and headers'],
-                ['events', 'Event feed'],
-                ['flow', 'Flow / time travel'],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={`tab-button ${bottomTab === id ? 'tab-button-active' : ''}`}
-                onClick={() => setBottomTab(id)}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        {/* Panels are hidden with CSS rather than unmounted, so the video ref survives. */}
-        <div className={bottomTab === 'master' ? 'p-3' : 'panel-hidden'}>
-          {masterManifest ? (
-            <ManifestViewer
-              title="Master playlist"
-              raw={masterManifest.raw}
-              url={masterManifest.url}
-              at={masterManifest.at}
-              highlight={(line) => line.startsWith('#EXT-X-STREAM-INF')}
+    <>
+      {/* --- investigation ---------------------------------------------------- */}
+      <div className={openFinding ? '' : 'panel-hidden'}>
+        {openFinding && (
+          <>
+            <PageHeader
+              title={openFinding.title}
+              subtitle={`${openFinding.rule_id} · ${store.channelName || 'Realtime session'}`}
+              onBack={() => setOpenFinding(null)}
+              backLabel="Back to session"
+              status={<SeverityChip severity={openFinding.severity as Severity} />}
             />
-          ) : (
-            <p className="py-6 text-sm text-[var(--rba-muted)]">
-              The master playlist appears once the playback URL resolves.
-            </p>
-          )}
-        </div>
+            <PageBody>
+              <FindingInvestigation finding={openFinding} manifest={investigationManifest} />
+            </PageBody>
+          </>
+        )}
+      </div>
 
-        <div className={bottomTab === 'variants' ? 'grid gap-3 p-3 lg:grid-cols-2' : 'panel-hidden'}>
-          {variantManifests.map((manifest) => (
-            <ManifestViewer
-              key={`${manifest.layer}:${manifest.variant}`}
-              title={`${manifest.variant} (${manifest.layer})`}
-              raw={manifest.raw}
-              url={manifest.url}
-              at={manifest.at}
-              highlight={(line) =>
-                line.startsWith('#EXT-X-DISCONTINUITY') || line.startsWith('#EXT-X-CUE')
+      {/* --- the session ------------------------------------------------------ */}
+      <div className={openFinding ? 'panel-hidden' : ''}>
+        <PageHeader
+          title="Realtime analysis"
+          subtitle={
+            store.channelName ||
+            'Paste a playback URL; every parameter is sent verbatim and every redirect hop is recorded.'
+          }
+          status={
+            <>
+              <LiveChip label={running ? store.status : 'Idle'} live={running && store.connected} />
+              <span className="font-mono text-micro text-ink-muted">
+                {duration(store.elapsed)}
+              </span>
+            </>
+          }
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                onClick={() => generateReport('html')}
+                disabled={!store.sessionId || busy}
+              >
+                <IconFile size={14} />
+                HTML report
+              </button>
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                onClick={() => generateReport('pdf')}
+                disabled={!store.sessionId || busy}
+              >
+                <IconDownload size={14} />
+                PDF report
+              </button>
+              <button
+                type="button"
+                className="btn-accent btn-sm"
+                onClick={stop}
+                disabled={!running || busy}
+              >
+                <IconStop size={13} />
+                Stop
+              </button>
+            </>
+          }
+        />
+
+        <PageBody>
+          <Card>
+            <div className="px-5 pb-4 pt-4">
+              <UrlForm value={form} onChange={setForm} disabled={running || busy} />
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-surface-line pt-4">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={start}
+                  disabled={busy || running || form.playback_url.trim().length < 8}
+                >
+                  <IconPulse size={15} />
+                  Analyse stream
+                </button>
+                <span className="text-micro text-ink-muted">
+                  Player measurements are taken on the {PLAYER_METRICS_NOTE.toLowerCase()}, not on a
+                  television.
+                </span>
+              </div>
+              {error && (
+                <div className="mt-3">
+                  <InlineAlert tone="error">{error}</InlineAlert>
+                </div>
+              )}
+              {reportUrl && (
+                <div className="mt-3">
+                  <InlineAlert tone="clean">
+                    The report is stored at{' '}
+                    <a
+                      className="font-mono underline"
+                      href={api.url(reportUrl.replace('/api', ''))}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {reportUrl}
+                    </a>
+                  </InlineAlert>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <SessionVerdict
+            verdict={store.verdict}
+            threshold={ratioThreshold}
+            elapsed={store.elapsed}
+          />
+
+          <MetricRow>
+            <MetricTile
+              label="Rebuffer ratio"
+              value={ratio(store.verdict?.measured_rebuffer_ratio ?? null)}
+              note={`threshold ${ratioThreshold}`}
+              tone={
+                (store.verdict?.measured_rebuffer_ratio ?? 0) > ratioThreshold ? 'pink' : 'clean'
               }
             />
-          ))}
-          {variantManifests.length === 0 && (
-            <p className="py-6 text-sm text-[var(--rba-muted)]">
-              Child playlists appear once the first poll completes.
-            </p>
-          )}
-        </div>
+            <MetricTile
+              label="Risk score"
+              value={store.verdict?.risk_score ?? '—'}
+              suffix="/ 100"
+              note={store.verdict?.owner_label ?? 'no owner assigned yet'}
+              tone={(store.verdict?.risk_score ?? 0) >= 70 ? 'pink' : 'blue'}
+            />
+            <MetricTile
+              label="Active findings"
+              value={activeFindings.length}
+              note={
+                SEVERITIES.filter((severity) => (store.counts[severity] ?? 0) > 0)
+                  .map((severity) => `${severity.toLowerCase()} ${store.counts[severity]}`)
+                  .join(' · ') || 'no rule has fired'
+              }
+              tone={
+                worstSeverity === 'CRITICAL' || worstSeverity === 'ERROR'
+                  ? 'pink'
+                  : worstSeverity === 'WARN'
+                    ? 'violet'
+                    : 'default'
+              }
+            />
+            <MetricTile
+              label="Player buffer"
+              value={latestBuffer == null ? '—' : latestBuffer.toFixed(1)}
+              suffix="s"
+              note={PLAYER_METRICS_NOTE}
+            />
+            <MetricTile
+              label="Segments checked"
+              value={segmentsChecked}
+              note={`${store.verdict?.playlists_checked ?? store.snapshots.length} playlist polls`}
+            />
+            <MetricTile
+              label="Live window"
+              value={windowSeconds == null ? '—' : windowSeconds.toFixed(0)}
+              suffix="s"
+              note={store.verdict?.worst_variant ?? 'every rendition'}
+            />
+          </MetricRow>
 
-        <div className={bottomTab === 'ladder' ? '' : 'panel-hidden'}>
-          <LadderTable rows={ladderRows} />
-        </div>
+          <div className="grid gap-4 2xl:grid-cols-[minmax(360px,420px)_1fr]">
+            <div className="space-y-4">
+              <Player src={store.playerUrl} onEvent={sendPlayerEvent} />
 
-        <div className={bottomTab === 'network' ? 'p-3' : 'panel-hidden'}>
-          <pre className="manifest-pane mono max-h-96 rounded border border-[var(--rba-line)] bg-slate-50 p-3">
-            {JSON.stringify(
-              store.events.filter((e) => e.kind === 'resolve' || e.kind === 'dns' || e.kind === 'tls'),
-              null,
-              2,
-            )}
-          </pre>
-        </div>
-
-        <div className={bottomTab === 'events' ? '' : 'panel-hidden'}>
-          <EventFeed events={store.events} />
-        </div>
-
-        <div className={bottomTab === 'flow' ? 'p-3' : 'panel-hidden'}>
-          {flow ? (
-            <div className="space-y-3">
-              <p className="text-sm">
-                <span className="font-semibold">{flow.variant}</span> as fetched at{' '}
-                {localTime(flow.at)}.
-              </p>
-              <ManifestViewer title="Snapshot" raw={flow.raw} at={flow.at} />
-              <div className="card">
-                <div className="card-header">
-                  <h3 className="card-title">Diff against the previous poll</h3>
+              <Card>
+                <CardHeader
+                  title="Prioritized findings"
+                  subtitle="Ranked by viewer impact, then by how often the rule fired."
+                  actions={
+                    activeFindings.length > 0 && (
+                      <span className="chip-neutral">{activeFindings.length}</span>
+                    )
+                  }
+                />
+                <div className="max-h-[62vh] space-y-2.5 overflow-y-auto px-4 pb-4">
+                  <FindingsList findings={findings} onOpen={setOpenFinding} />
                 </div>
-                <ManifestDiff diff={flow.diff} />
-              </div>
+              </Card>
             </div>
-          ) : (
-            <p className="py-6 text-sm text-[var(--rba-muted)]">
-              Click a bar on the Downloads chart to open the playlist exactly as it was at that
-              moment, with a diff against the poll before it.
-            </p>
-          )}
-        </div>
-      </section>
-    </div>
+
+            <div className="grid gap-4 2xl:grid-cols-2">
+              <PlayerBufferChart samples={store.playerSamples} stalls={store.stalls} />
+              <RebufferRatioChart
+                stalls={store.stalls}
+                startedAt={store.startedAt}
+                threshold={ratioThreshold}
+              />
+              <PlayedRungChart samples={store.playerSamples} />
+              <DownloadRatioChart
+                segments={store.segments}
+                warn={thresholds.download_ratio_warn ?? 0.5}
+                error={thresholds.download_ratio_error ?? 1}
+              />
+              <FetchTimingChart snapshots={store.snapshots} />
+              <StatusHeatmapChart segments={store.segments} />
+              <SequenceLadderChart snapshots={store.snapshots} />
+              <DiscontinuityChart snapshots={store.snapshots} />
+              <FreshnessChart snapshots={store.snapshots} />
+              <BitrateChart segments={store.segments} declared={declaredBandwidth} />
+              <AvSkewChart
+                segments={store.segments}
+                criticalMs={thresholds.av_pts_delta_critical_ms ?? 1000}
+              />
+              <DurationChart segments={store.segments} />
+              <VirtualBufferChart points={store.vpbPoints} playerSamples={store.playerSamples} />
+              <DownloadsGanttChart
+                segments={store.segments}
+                onSelect={(segment) => openFlow(segment.variant, segment.at)}
+              />
+              <TrafficChart segments={store.segments} />
+              <PlaylistStateChart transitions={playlistStates} />
+            </div>
+          </div>
+
+          {/* --- evidence ------------------------------------------------------ */}
+          <Card>
+            <div className="px-2 pt-1">
+              <Tabs tabs={EVIDENCE_TABS} value={evidenceTab} onChange={setEvidenceTab} />
+            </div>
+
+            {/* Panels are hidden with CSS rather than unmounted, so the video ref survives. */}
+            <div className={evidenceTab === 'master' ? 'p-4' : 'panel-hidden'}>
+              {masterManifest ? (
+                <ManifestViewer
+                  title="Master playlist"
+                  raw={masterManifest.raw}
+                  url={masterManifest.url}
+                  at={masterManifest.at}
+                  highlight={(line) => line.startsWith('#EXT-X-STREAM-INF')}
+                />
+              ) : (
+                <EmptyState
+                  title="No master playlist has been fetched yet"
+                  detail="It appears here the moment the playback URL resolves, with every redirect hop recorded."
+                />
+              )}
+            </div>
+
+            <div
+              className={cx(
+                evidenceTab === 'variants' ? 'grid gap-3 p-4 lg:grid-cols-2' : 'panel-hidden',
+              )}
+            >
+              {variantManifests.map((manifest) => (
+                <ManifestViewer
+                  key={`${manifest.layer}:${manifest.variant}`}
+                  title={`${manifest.variant} (${manifest.layer})`}
+                  raw={manifest.raw}
+                  url={manifest.url}
+                  at={manifest.at}
+                  highlight={(line) =>
+                    line.startsWith('#EXT-X-DISCONTINUITY') || line.startsWith('#EXT-X-CUE')
+                  }
+                />
+              ))}
+              {variantManifests.length === 0 && (
+                <div className="lg:col-span-2">
+                  <EmptyState
+                    title="No child playlist has been polled yet"
+                    detail="Each rendition appears here once its first poll completes."
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className={evidenceTab === 'ladder' ? '' : 'panel-hidden'}>
+              <LadderTable rows={ladderRows} />
+            </div>
+
+            <div className={evidenceTab === 'network' ? 'p-4' : 'panel-hidden'}>
+              <pre className="evidence manifest-pane max-h-96">
+                {JSON.stringify(
+                  store.events.filter(
+                    (e) => e.kind === 'resolve' || e.kind === 'dns' || e.kind === 'tls',
+                  ),
+                  null,
+                  2,
+                )}
+              </pre>
+            </div>
+
+            <div className={evidenceTab === 'events' ? '' : 'panel-hidden'}>
+              <EventFeed events={store.events} />
+            </div>
+
+            <div className={evidenceTab === 'flow' ? 'p-4' : 'panel-hidden'}>
+              {flow ? (
+                <div className="space-y-3">
+                  <p className="text-small text-ink-muted">
+                    <span className="font-semibold text-ink">{flow.variant}</span> as fetched at{' '}
+                    <span className="font-mono">{localTime(flow.at)}</span>.
+                  </p>
+                  <ManifestViewer title="Snapshot" raw={flow.raw} at={flow.at} />
+                  <Card>
+                    <CardHeader title="Diff against the previous poll" />
+                    <ManifestDiff diff={flow.diff} />
+                  </Card>
+                </div>
+              ) : (
+                <EmptyState
+                  title="No moment has been selected"
+                  detail="Click a bar on the Downloads chart to open the playlist exactly as it was at that instant, with a diff against the poll before it."
+                />
+              )}
+            </div>
+          </Card>
+        </PageBody>
+      </div>
+    </>
   )
 }

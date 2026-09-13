@@ -13,7 +13,7 @@ import type {
   SegmentResultData,
 } from '../../ws/messages'
 import type { BufferPoint, PlayerSample, StallBand } from '../../store/session'
-import { PALETTE, SEVERITY_COLOR, baseOption, stallBands, thresholdLine } from './base'
+import { BRAND, PALETTE, SEVERITY_COLOR, baseOption, stallBands, thresholdLine } from './base'
 import type { ChartOption } from './base'
 
 const CHART_HEIGHT = 220
@@ -29,11 +29,11 @@ export function ChartCard({
 }) {
   return (
     <section className="card">
-      <div className="card-header">
-        <h3 className="card-title">{title}</h3>
-        {note && <span className="text-xs text-[var(--rba-muted)]">{note}</span>}
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 pb-1 pt-3.5">
+        <h3 className="text-body font-semibold text-ink">{title}</h3>
+        {note && <span className="text-micro text-ink-faint">{note}</span>}
       </div>
-      <div className="px-2 py-2">{children}</div>
+      <div className="px-1.5 pb-2">{children}</div>
     </section>
   )
 }
@@ -194,8 +194,8 @@ export function DownloadRatioChart({
         silent: true,
         symbol: 'none',
         data: [
-          { yAxis: warn, lineStyle: { color: '#9a6700', type: 'dashed' }, label: { formatter: `warn ${warn}` } },
-          { yAxis: error, lineStyle: { color: '#b4151b', type: 'dashed' }, label: { formatter: `error ${error}` } },
+          { yAxis: warn, lineStyle: { color: BRAND.violet, type: 'dashed' }, label: { formatter: `warn ${warn}` } },
+          { yAxis: error, lineStyle: { color: BRAND.pink, type: 'dashed' }, label: { formatter: `error ${error}` } },
         ],
       }
     }
@@ -444,8 +444,8 @@ export function AvSkewChart({
         silent: true,
         symbol: 'none',
         data: [
-          { yAxis: criticalMs, lineStyle: { color: '#b4151b', type: 'dashed' } },
-          { yAxis: -criticalMs, lineStyle: { color: '#b4151b', type: 'dashed' } },
+          { yAxis: criticalMs, lineStyle: { color: BRAND.pink, type: 'dashed' } },
+          { yAxis: -criticalMs, lineStyle: { color: BRAND.pink, type: 'dashed' } },
         ],
       }
     }
@@ -519,7 +519,7 @@ export function VirtualBufferChart({
       type: 'line',
       showSymbol: false,
       lineStyle: { type: 'dashed', width: 2 },
-      itemStyle: { color: '#10131c' },
+      itemStyle: { color: BRAND.ink },
       data: playerSamples.map((s) => [s.t, s.buffer_s ?? 0]),
     })
     return baseOption({ yAxis: { type: 'value', name: 'seconds buffered', min: 0 }, series })
