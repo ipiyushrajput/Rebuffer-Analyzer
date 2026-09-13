@@ -55,6 +55,35 @@ def test_the_windows_wrappers_do_not_change_the_machine_execution_policy() -> No
         assert "Set-ExecutionPolicy" not in text
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["_common.ps1", "setup.ps1", "run.ps1", "setup.cmd", "rba.cmd"],
+)
+def test_the_windows_scripts_are_pure_ascii(name: str) -> None:
+    """Windows PowerShell 5.1 reads a BOM-less .ps1 as ANSI, not UTF-8.
+
+    A UTF-8 em dash then arrives as three cp1252 characters ending in a double quote, which
+    closes the string it sits in and breaks the parse several hundred lines later. Keeping
+    these files to ASCII makes the two decodings identical, so the same file parses under
+    Windows PowerShell 5.1 and PowerShell 7 alike.
+    """
+    raw = (WINDOWS / name).read_bytes()
+    offenders = sorted({byte for byte in raw if byte > 0x7F})
+    assert not offenders, (
+        f"deploy/windows/{name} carries non-ASCII bytes {offenders}. "
+        "Windows PowerShell 5.1 decodes them as ANSI and the script stops parsing."
+    )
+    assert raw.decode("cp1252") == raw.decode("utf-8")
+
+
+def test_the_rules_target_writes_the_catalogue_without_a_bom() -> None:
+    """`Set-Content -Encoding utf8` emits a BOM on 5.1, and docs/RULES.md is compared
+    against the registry byte for byte."""
+    run = _read(WINDOWS / "run.ps1")
+    assert "UTF8Encoding" in run, "the rules target must write UTF-8 without a BOM"
+    assert "WriteAllText" in run, "the catalogue is written through .NET, not Set-Content"
+
+
 def test_the_windows_scripts_carry_no_credentials() -> None:
     for path in WINDOWS.iterdir():
         if not path.is_file():

@@ -1,0 +1,9 @@
+# Line endings for the Windows entry points.
+#
+# A .cmd file is read by cmd.exe, which expects CRLF; checking one out with LF endings is
+# asking for trouble on a machine whose git is configured with core.autocrlf=false. The
+# PowerShell scripts are pinned for the same reason — one file, one shape, on every clone.
+#
+# Everything else is left to git's own defaults so no existing file is renormalised.
+*.cmd text eol=crlf
+deploy/windows/*.ps1 text eol=crlf
