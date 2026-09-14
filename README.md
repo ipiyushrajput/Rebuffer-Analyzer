@@ -172,21 +172,60 @@ room to spare — the figure the load test in `backend/tests/test_load.py` measu
 
 ## Database
 
-RBA uses the database server configured in the `ipiyushrajput/Transcoder` deployment, in a
-**dedicated `rba` database**. It never touches Transcoder's tables. If the DB user cannot
-create a database, set `DB_TABLE_PREFIX=rba_` and RBA creates its tables inside the existing
-database under that prefix instead. `/api/health` reports database status without revealing
-the host or the user.
+**Everything RBA records lives in your SQL server** — jobs, findings, incidents, samples,
+playlist snapshots, settings, and the rendered reports themselves. The analyzer host keeps
+no state of its own, so a second instance serves a report it did not render and nothing is
+lost when a container is replaced.
 
-Credentials live only in `backend/.env`, which is git-ignored. `backend/.env.example` carries
-the variable names with empty values. A `secret-scan` hook aborts any commit that would carry
-a value from `.env` into the repository.
+Point it at your server in `backend/.env`:
 
-Schema: `channels`, `jobs`, `bulk_items`, `findings`, `incidents`, `samples_playlist`,
+```
+DB_ENGINE=mysql          # mysql | mariadb | postgres | sqlite
+DB_HOST=10.0.0.5
+DB_PORT=3306
+DB_USER=rba
+DB_PASSWORD=…
+DB_NAME=rba
+```
+
+On start RBA creates the `rba` database and its tables, then reports the outcome at
+`/api/health` without revealing the host or the user. It never touches another
+application's tables. If the account cannot create databases, point `DB_NAME` at an
+existing one and set `DB_TABLE_PREFIX=rba_`; every RBA table is then created inside it
+under that prefix.
+
+`DB_ENGINE=sqlite` needs nothing else and keeps a single file in `RBA_DATA_DIR` — useful
+for a laptop, not for the deployment.
+
+Credentials live only in `backend/.env`, which is git-ignored. `backend/.env.example`
+carries the variable names. A `secret-scan` hook aborts any commit that would carry a value
+from `.env` into the repository.
+
+**Schema**: `channels`, `jobs`, `bulk_items`, `findings`, `incidents`, `samples_playlist`,
 `samples_segment`, `samples_player`, `virtual_buffer`, `playlist_snapshots`, `reports`,
 `settings`, each sample table indexed on `(job_id, variant, ts)`. A retention job purges raw
-samples past the configured window (30 days by default) while keeping findings, incidents and
-reports; snapshots pinned around an incident survive the purge.
+samples past the configured window (30 days by default) while keeping findings, incidents
+and reports; snapshots pinned around an incident survive the purge.
+
+**Reports** are stored as bytes in `reports.content` (`LONGBLOB` on MySQL) and streamed from
+there. `RBA_REPORT_STORAGE` decides where they go:
+
+| Value | Behaviour |
+|---|---|
+| `database` | The bytes go in the table and nothing is written to the host. **The default.** |
+| `both` | The database, plus a mirrored copy in `RBA_REPORTS_DIR`. |
+| `disk` | Files only, as builds before this behaved. |
+
+An HTML report is about 1 MB and a PDF about 250 KB. Bulk archives are assembled in memory
+and stored the same way, so a batch of 50 channels produces one row of roughly 20 MB —
+raise MySQL's `max_allowed_packet` past that if you run large batches. Evidence archives are
+built in memory from the stored rows and streamed, never written out.
+
+Applying the schema to an existing database:
+
+```bash
+cd backend && .venv/bin/alembic upgrade head
+```
 
 ## API
 

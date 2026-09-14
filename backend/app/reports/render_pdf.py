@@ -75,9 +75,13 @@ class PdfUnavailable(RuntimeError):
     """Raised when Playwright or its browser is not installed."""
 
 
-async def render_pdf(html: str, destination: Path) -> Path:
-    """Print ``html`` to ``destination``. The HTML is loaded from a file so relative
-    resources and the inlined chart script both execute exactly as they do in a browser."""
+async def render_pdf_bytes(html: str) -> bytes:
+    """Print ``html`` and return the PDF bytes.
+
+    The HTML is loaded from a temporary file so relative resources and the inlined chart
+    script execute exactly as they do in a browser; nothing else touches the disk, which is
+    what lets a report be stored in the database rather than on the host.
+    """
     try:
         from playwright.async_api import async_playwright
     except ImportError as exc:  # pragma: no cover - depends on the host
@@ -86,7 +90,6 @@ async def render_pdf(html: str, destination: Path) -> Path:
             "The HTML report carries the same content."
         ) from exc
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as handle:
         handle.write(html)
         source = Path(handle.name)
@@ -112,8 +115,7 @@ async def render_pdf(html: str, destination: Path) -> Path:
                 )
                 # The charts render after the inlined script runs; give them one frame.
                 await page.wait_for_timeout(600)
-                await page.pdf(
-                    path=str(destination),
+                pdf = await page.pdf(
                     format="A4",
                     print_background=True,
                     margin=PDF_MARGIN,
@@ -136,6 +138,13 @@ async def render_pdf(html: str, destination: Path) -> Path:
     finally:
         source.unlink(missing_ok=True)
 
+    return bytes(pdf)
+
+
+async def render_pdf(html: str, destination: Path) -> Path:
+    """Print ``html`` to ``destination``, for the CLI and for a disk-mirroring deployment."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(await render_pdf_bytes(html))
     return destination
 
 

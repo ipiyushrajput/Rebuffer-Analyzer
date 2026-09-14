@@ -12,11 +12,10 @@ import datetime as dt
 import json
 import logging
 import uuid
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from sqlalchemy import select
 
 from app.api.schemas import JobOptionsIn
@@ -338,8 +337,8 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
     return parent.summary()
 
 
-@router.get("/jobs/{job_id}/report.{fmt}")
-async def download_consolidated(job_id: str, fmt: str) -> FileResponse:
+async def _bulk_report(job_id: str) -> dict[str, Any]:
+    """The bulk job's stored report record, generated on first request."""
     parent = job_manager.get(job_id)
     if parent is None:
         raise HTTPException(status_code=404, detail="Bulk job not found")
@@ -349,33 +348,49 @@ async def download_consolidated(job_id: str, fmt: str) -> FileResponse:
         rows = await _build_rows(job_id, children)
         report = await service.generate_bulk(parent, children, rows=rows)
         parent.extra["report"] = report
+    return dict(report)
+
+
+@router.get("/jobs/{job_id}/report.{fmt}")
+async def download_consolidated(job_id: str, fmt: str) -> Response:
+    """The consolidated report, served from the database."""
+    report = await _bulk_report(job_id)
+    stored = await service.get_report(int(report["id"]))
+    if stored is None:
+        raise HTTPException(status_code=404, detail="The consolidated report is not stored")
+    data, media, filename = stored
 
     if fmt == "html":
-        path = Path(report["consolidated"])
-        return FileResponse(path=path, media_type="text/html; charset=utf-8", filename=path.name)
+        return Response(
+            content=data,
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     if fmt == "pdf":
-        from app.reports.render_pdf import PdfUnavailable, render_pdf
+        from app.reports.render_pdf import PdfUnavailable, render_pdf_bytes
 
-        html = Path(report["consolidated"]).read_text(encoding="utf-8")
-        pdf_path = Path(report["consolidated"]).with_suffix(".pdf")
         try:
-            await render_pdf(html, pdf_path)
+            pdf = await render_pdf_bytes(data.decode("utf-8"))
         except PdfUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return FileResponse(path=pdf_path, media_type="application/pdf", filename=pdf_path.name)
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="bulk-{job_id[:8]}.pdf"'},
+        )
     raise HTTPException(status_code=400, detail="Format must be html or pdf")
 
 
 @router.get("/jobs/{job_id}/reports.zip")
-async def download_bundle(job_id: str) -> FileResponse:
-    parent = job_manager.get(job_id)
-    if parent is None:
-        raise HTTPException(status_code=404, detail="Bulk job not found")
-    report = parent.extra.get("report")
-    if not report:
-        children = job_manager.children(job_id)
-        rows = await _build_rows(job_id, children)
-        report = await service.generate_bulk(parent, children, rows=rows)
-        parent.extra["report"] = report
-    path = Path(report["zip"])
-    return FileResponse(path=path, media_type="application/zip", filename=path.name)
+async def download_bundle(job_id: str) -> Response:
+    """Every per-channel report plus the consolidated one, as a ZIP from the database."""
+    report = await _bulk_report(job_id)
+    stored = await service.get_report(int(report["zip_id"]))
+    if stored is None:
+        raise HTTPException(status_code=404, detail="The report archive is not stored")
+    data, _media, _filename = stored
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="bulk-{job_id[:8]}.zip"'},
+    )

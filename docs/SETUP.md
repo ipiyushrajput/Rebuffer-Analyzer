@@ -27,7 +27,7 @@ installers refuse it outright.
 | Python | 3.11 or newer | yes |
 | Node.js | 20 LTS or newer (ships npm) | yes |
 | ffmpeg / ffprobe | any recent build | no — only the decode-error and quality detectors need it |
-| MySQL | the Transcoder instance | no — SQLite runs the whole app locally |
+| MySQL / MariaDB / PostgreSQL | any recent version | no — SQLite runs the whole app locally |
 
 Without ffmpeg the app starts and reports itself **degraded** in the rail; every check except
 the decode-error and quality detectors still runs. Without a database, set `DB_ENGINE=sqlite`
@@ -42,7 +42,7 @@ git clone https://github.com/ipiyushrajput/Rebuffer-Analyzer.git
 cd Rebuffer-Analyzer
 
 make install                            # virtualenv + backend + node_modules
-cp backend/.env.example backend/.env    # then fill it in, see "The .env file" below
+cp backend/.env.example backend/.env    # then fill it in, see "Connecting your database"
 make dev                                # backend :8010, frontend :5173
 ```
 
@@ -100,7 +100,8 @@ HTML export still works.
 
 ### 3. Fill in `backend\.env`
 
-See [The .env file](#the-env-file). For a purely local run, one line is enough:
+See [Connecting your database](#connecting-your-database). For a purely local run, one
+line is enough:
 
 ```
 DB_ENGINE=sqlite
@@ -177,35 +178,104 @@ on restart, so a second instance would run every aging job twice.
 
 ---
 
-## The .env file
+## Connecting your database
 
-`backend/.env` is git-ignored and must stay that way — it carries the database password.
-`backend/.env.example` lists every variable with empty values.
+> **"RBA" is this application**, not a database — TV Plus **R**e**b**uffer **A**nalyzer. The
+> `rba` you see in `DB_NAME` is the name of the database *it creates inside your SQL server*,
+> and the `RBA_*` variables are this app's own settings. There is no separate store to
+> replace: point `DB_*` at your server and everything goes there.
 
-Against the shared MySQL instance:
+### 1. Write the credentials into `backend/.env`
+
+`backend/.env` is git-ignored and must stay that way — it carries the password.
+`backend/.env.example` lists every variable.
 
 ```
-DB_ENGINE=mysql
-DB_HOST=<host>
+DB_ENGINE=mysql          # mysql | mariadb | postgres | sqlite
+DB_HOST=10.0.0.5
 DB_PORT=3306
-DB_USER=<user>
-DB_PASSWORD=<password>
+DB_USER=rba
+DB_PASSWORD=…
 DB_NAME=rba
 ```
 
-RBA creates its own `rba` database and never touches the Transcoder tables. If the account
-cannot create databases, leave `DB_NAME` pointing at the existing one and set
-`DB_TABLE_PREFIX=rba_`; every RBA table is then created inside it under that prefix.
+### 2. Give the account the right grants
 
-Locally, without any database at all:
+RBA creates its own database and tables on first start, and never touches another
+application's tables:
+
+```sql
+CREATE USER 'rba'@'%' IDENTIFIED BY '…';
+CREATE DATABASE rba CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON rba.* TO 'rba'@'%';
+FLUSH PRIVILEGES;
+```
+
+If the account **cannot create databases**, point `DB_NAME` at a database it already has and
+set a prefix instead. Every RBA table is then created inside that database under the prefix,
+and nothing else in it is touched:
+
+```
+DB_NAME=existing_db
+DB_TABLE_PREFIX=rba_
+```
+
+### 3. Create the schema
+
+The backend creates its tables on first start. On a database you intend to keep, run the
+migrations instead so later upgrades apply cleanly:
+
+```bash
+cd backend && .venv/bin/alembic upgrade head      # Windows: .venv\Scripts\alembic upgrade head
+```
+
+### 4. Check the connection
+
+```
+http://localhost:8010/api/health
+```
+
+`checks.database.ok` is `true` when the connection works. When it is false the `degraded`
+list names `database`, the rail in the UI says so, and the reason class is in the backend
+log — the host, user and password are never logged.
+
+### What ends up in the database
+
+Everything: jobs, findings, incidents, playlist and segment samples, player samples, the
+virtual-buffer series, playlist snapshots, thresholds, and **the rendered reports
+themselves**. The analyzer host keeps no state, so a second instance serves a report it did
+not render and replacing a container loses nothing.
+
+`RBA_REPORT_STORAGE` decides where a report goes:
+
+| Value | Behaviour |
+|---|---|
+| `database` | The bytes go in `reports.content` and nothing is written to the host. **The default.** |
+| `both` | The database, plus a mirrored copy in `RBA_REPORTS_DIR`. |
+| `disk` | Files only, as builds before this behaved. |
+
+An HTML report is about 1 MB, a PDF about 250 KB, and a bulk archive roughly 10 MB per
+50 channels. If you run large batches, raise MySQL's `max_allowed_packet` above the largest
+archive you expect:
+
+```sql
+SET GLOBAL max_allowed_packet = 268435456;   -- 256 MB; also set it in my.cnf to persist
+```
+
+Evidence archives are built in memory from the stored rows and streamed, so they never touch
+the host at all.
+
+### Running without a database
 
 ```
 DB_ENGINE=sqlite
 ```
 
-State then lives in `backend/var/rba.db`. Delete that file to start clean.
+Everything above still applies — reports included — except the file lives at
+`backend/var/rba.db`. Delete it to start clean. Good for a laptop, not for the deployment:
+SQLite takes one writer at a time.
 
-The remaining variables — `RBA_PORT`, `RBA_DATA_DIR`, the concurrency limits — have working
+The remaining variables — `RBA_PORT`, the concurrency limits, retention — have working
 defaults and only need setting when you want to change them.
 
 ---

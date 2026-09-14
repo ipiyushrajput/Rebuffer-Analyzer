@@ -9,7 +9,6 @@ readable.
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -88,26 +87,27 @@ def test_an_analysed_channel_carries_its_findings_and_its_reports(origin: Fixtur
         assert len(listed["reports"]) == 1
 
 
-def test_deleting_a_channel_removes_its_row_and_its_report_file(origin: FixtureServer) -> None:
+def test_deleting_a_channel_removes_its_row_and_its_report(origin: FixtureServer) -> None:
     url = build_simple_channel(origin, variant_count=1, segment_count=3)
 
     with TestClient(create_app()) as client:
         session_id = _analysed_channel(client, url, "Doomed Channel")
-        generated = client.post(f"/api/realtime/sessions/{session_id}/report?format=html").json()
-        path = Path(generated["path"])
-        assert path.exists()
+        report_id = client.post(f"/api/realtime/sessions/{session_id}/report?format=html").json()[
+            "id"
+        ]
+        assert client.get(f"/api/reports/{report_id}/download").status_code == 200
 
         deleted = client.delete(f"/api/channels/{session_id}")
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
         assert deleted.json()["reports_removed"] == 1
 
-        assert not path.exists(), "the report file is removed with the channel"
+        # The bytes go with the row, so the download stops resolving.
+        assert client.get(f"/api/reports/{report_id}/download").status_code == 404
         # The database is shared across this module's tests, so only this channel is asserted.
         remaining = client.get("/api/channels").json()["channels"]
         assert all(channel["id"] != session_id for channel in remaining)
         assert client.get(f"/api/channels/{session_id}").status_code == 404
-        # The report row goes with it, so the Reports tab does not list a dead file.
         reports = client.get("/api/reports").json()["reports"]
         assert all(report["job_id"] != session_id for report in reports)
 

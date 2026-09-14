@@ -90,7 +90,7 @@ async def list_channels(limit: int = Query(default=200, ge=1, le=1000)) -> dict[
                         "size_bytes": report.size_bytes,
                         "created_at": report.created_at.isoformat(),
                         "url": f"/api/reports/{report.id}/download",
-                        "exists": Path(report.path).exists(),
+                        "exists": report.size_bytes > 0,
                     }
                 )
 
@@ -126,7 +126,7 @@ async def read_channel(job_id: str) -> dict[str, Any]:
                     "size_bytes": report.size_bytes,
                     "created_at": report.created_at.isoformat(),
                     "url": f"/api/reports/{report.id}/download",
-                    "exists": Path(report.path).exists(),
+                    "exists": report.size_bytes > 0,
                 }
                 for report in reports
             ],
@@ -144,6 +144,7 @@ async def delete_channel(job_id: str) -> dict[str, Any]:
             detail="This analysis is still running. Stop it before deleting it.",
         )
 
+    removed_reports = 0
     removed_files = 0
     async with db_session.session_scope() as session:
         row = await session.get(JobRow, job_id)
@@ -153,11 +154,14 @@ async def delete_channel(job_id: str) -> dict[str, Any]:
         report_rows = (
             (await session.execute(select(Report).where(Report.job_id == job_id))).scalars().all()
         )
+        removed_reports = len(report_rows)
         for report in report_rows:
-            path = Path(report.path)
-            if path.exists():
-                path.unlink(missing_ok=True)
-                removed_files += 1
+            # The bytes go with the row. A disk mirror, when one was configured, goes too.
+            if report.path:
+                path = Path(report.path)
+                if path.exists():
+                    path.unlink(missing_ok=True)
+                    removed_files += 1
 
         await session.execute(delete(Report).where(Report.job_id == job_id))
         for table in SAMPLE_TABLES:
@@ -166,4 +170,9 @@ async def delete_channel(job_id: str) -> dict[str, Any]:
 
     # The handle is dropped too, so a stopped session does not reappear in any listing.
     job_manager.jobs.pop(job_id, None)
-    return {"deleted": True, "id": job_id, "reports_removed": removed_files}
+    return {
+        "deleted": True,
+        "id": job_id,
+        "reports_removed": removed_reports,
+        "files_removed": removed_files,
+    }

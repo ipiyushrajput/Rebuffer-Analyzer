@@ -26,7 +26,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.rba_log_level)
 
-    for directory in (settings.rba_data_dir, settings.rba_reports_dir, settings.rba_evidence_dir):
+    # Only what the deployment actually uses: sqlite keeps its file in the data directory,
+    # and the reports directory exists only when a disk mirror is configured. Everything
+    # else — reports, evidence archives, bulk bundles — lives in the database.
+    directories = [settings.rba_data_dir] if settings.db_engine.lower() in ("sqlite", "") else []
+    if settings.reports_on_disk:
+        directories.append(settings.rba_reports_dir)
+    for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
 
     mode = await db_session.ensure_database()
