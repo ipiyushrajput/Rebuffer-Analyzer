@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime as dt
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,6 +21,8 @@ from app.net.fetcher import Fetcher, FetchResult
 
 MIN_POLL_INTERVAL_S = 1.0
 DEFAULT_POLL_INTERVAL_S = 3.0
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -32,6 +35,9 @@ class Snapshot:
     result: FetchResult
     playlist: MediaPlaylist | None
     raw: str = ""
+    # Set when the body arrived and the analyzer's own parser raised on it. That is the
+    # analyzer's defect, not the stream's, so it is logged rather than charged to the origin.
+    parse_error: str = ""
 
     @property
     def ok(self) -> bool:
@@ -53,6 +59,8 @@ class Snapshot:
             "total_ms": self.result.timings.total_ms,
             "bytes": self.result.bytes_received,
             "headers": self.result.cdn_fingerprint(),
+            "error": self.result.error,
+            "parse_error": self.parse_error,
         }
 
 
@@ -109,10 +117,22 @@ class PlaylistPoller:
         at = dt.datetime.now(dt.UTC)
         playlist: MediaPlaylist | None = None
         raw = ""
+        parse_error = ""
         if result.ok:
             raw = result.text
-            playlist = parse_media(raw, result.final_url)
-            if playlist.target_duration:
+            try:
+                playlist = parse_media(raw, result.final_url)
+            except Exception as exc:
+                # The body arrived; the parser is what failed. Record it as the analyzer's
+                # own error and keep polling — the next poll may parse.
+                parse_error = f"{type(exc).__name__}: {exc}"
+                log.exception(
+                    "Media playlist parse failed for %s (%s bytes from %s)",
+                    self.target.variant,
+                    result.bytes_received,
+                    result.final_url,
+                )
+            if playlist is not None and playlist.target_duration:
                 self.interval_s = max(MIN_POLL_INTERVAL_S, playlist.target_duration / 2)
 
         snapshot = Snapshot(
@@ -122,6 +142,7 @@ class PlaylistPoller:
             result=result,
             playlist=playlist,
             raw=raw,
+            parse_error=parse_error,
         )
         self.target.history.append(snapshot)
         if len(self.target.history) > self.history_limit:

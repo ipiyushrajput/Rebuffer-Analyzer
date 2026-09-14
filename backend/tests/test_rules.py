@@ -23,6 +23,7 @@ from app.config import Thresholds
 from app.hls.playlist import MasterPlaylist, parse_master, parse_media
 from app.media.segment import analyse as analyse_segment
 from app.net.dns import DnsResult
+from app.net.fetcher import FetchResult, Timings
 from app.net.tls_inspect import TlsResult
 from tests.fixtures.synth import (
     PlaylistSpec,
@@ -282,6 +283,53 @@ def test_a_rung_added_under_a_new_session_is_reported_as_an_added_rung() -> None
     assert findings[0].evidence[0]["added"] == ["v720p@1200k"]
 
 
+def _rated(bandwidth: int, average: int | None = None) -> MasterPlaylist:
+    """One rung whose declared rates are the only thing that moves between polls."""
+    return parse_master(
+        render_master_playlist(
+            [
+                VariantSpec(
+                    name="v",
+                    bandwidth=bandwidth,
+                    average_bandwidth=average,
+                    resolution="1920x1080",
+                    uri="v1/high.m3u8",
+                )
+            ]
+        ),
+        BASE,
+    )
+
+
+def test_a_bandwidth_move_past_the_tolerance_fires_its_own_rule_and_not_the_ladder_rule() -> None:
+    """A rate change is a rate change, reported as `Bandwidth variation`, never as MST-020."""
+    findings = master_rules.check_master_changed(
+        _rated(1_000_000), _rated(1_100_000), layer=LAYER, thresholds=T
+    )
+    assert ids(findings) == {"MST-029"}
+    assert "1000000" in findings[0].detail and "1100000" in findings[0].detail
+    assert "10.0%" in findings[0].detail
+    assert findings[0].evidence[0]["rungs"]["v1080p@1100k"]["BANDWIDTH"]["delta"] == 0.1
+
+
+def test_a_bandwidth_move_inside_the_tolerance_fires_nothing() -> None:
+    """A packager recomputes the rate every poll; 4 % is that recomputation, not a defect."""
+    assert (
+        master_rules.check_master_changed(
+            _rated(1_000_000), _rated(1_040_000), layer=LAYER, thresholds=T
+        )
+        == []
+    )
+
+
+def test_an_average_bandwidth_move_past_the_tolerance_fires() -> None:
+    findings = master_rules.check_master_changed(
+        _rated(1_000_000, 800_000), _rated(1_000_000, 900_000), layer=LAYER, thresholds=T
+    )
+    assert ids(findings) == {"MST-029"}
+    assert "AVERAGE-BANDWIDTH" in findings[0].detail
+
+
 def test_declared_codecs_against_a_measured_sps_fires_on_a_mismatch() -> None:
     master = parse_master(
         render_master_playlist(
@@ -414,6 +462,76 @@ def test_the_playlist_state_machine_walks_live_then_stalled_then_live_end() -> N
     assert transition is not None
     finding = media_rules.check_state_transition(transition, variant="720p", layer=LAYER)
     assert finding is not None and finding.rule.id == "MED-008"
+
+
+def _fetch(
+    status: int, *, body: bytes = b"#EXTM3U\n", error: str | None = None, transport: bool = False
+) -> FetchResult:
+    return FetchResult(
+        requested_url=BASE,
+        final_url=BASE,
+        status=status,
+        headers={},
+        body=body,
+        timings=Timings(ttfb_ms=42.0, total_ms=50.0),
+        error=error,
+        transport_error=transport,
+    )
+
+
+def _http_error_transition(
+    result: FetchResult, *, parse_error: str = ""
+) -> media_rules.StateTransition:
+    """Drive one playlist from LIVE into HTTP_ERROR and hand back the transition."""
+    machine = media_rules.PlaylistStateMachine(variant="v1080p@6852k")
+    live = parse_media(render_media_playlist(PlaylistSpec(segment_count=6)), BASE)
+    machine.observe(at=NOW, http_ok=True, playlist=live, stale_after_s=9.0)
+    failure = media_rules.describe_fetch_failure(result, None, parse_error=parse_error)
+    transition = machine.observe(
+        at=NOW + dt.timedelta(seconds=3),
+        http_ok=result.ok,
+        playlist=None,
+        stale_after_s=9.0,
+        failure=failure,
+    )
+    assert transition is not None
+    return transition
+
+
+def test_a_failed_playlist_download_names_the_status_code_the_origin_returned() -> None:
+    """The operator asked for the status. It is in the detail and in the evidence."""
+    transition = _http_error_transition(_fetch(404, body=b""))
+    finding = media_rules.check_state_transition(transition, variant="v1080p@6852k", layer=LAYER)
+    assert finding is not None and finding.rule.id == "MED-021"
+    assert "HTTP 404 Not Found" in finding.detail
+    assert finding.evidence[0]["http_status"] == 404
+    assert finding.evidence[0]["ttfb_ms"] == 42.0
+
+
+def test_a_failed_playlist_download_names_the_transport_error_when_no_response_arrived() -> None:
+    transition = _http_error_transition(
+        _fetch(0, body=b"", error="ConnectTimeout: timed out", transport=True)
+    )
+    finding = media_rules.check_state_transition(transition, variant="v1080p@6852k", layer=LAYER)
+    assert finding is not None and finding.rule.id == "MED-021"
+    assert "ConnectTimeout: timed out" in finding.detail
+    assert finding.evidence[0]["http_status"] == 0
+
+
+def test_a_two_hundred_with_an_empty_body_is_reported_as_an_empty_body() -> None:
+    transition = _http_error_transition(_fetch(200, body=b""))
+    finding = media_rules.check_state_transition(transition, variant="v1080p@6852k", layer=LAYER)
+    assert finding is not None and "empty body" in finding.detail
+
+
+def test_a_parser_error_on_a_delivered_body_raises_no_finding_against_the_stream() -> None:
+    """The analyzer's own defect. It is logged where the poll happens, never charged here."""
+    transition = _http_error_transition(
+        _fetch(200, body=b"#EXTM3U\n#EXTINF:6,\ns0.ts\n"),
+        parse_error="ValueError: invalid literal for int()",
+    )
+    assert transition.failure is not None and transition.failure.origin_fault is False
+    assert media_rules.check_state_transition(transition, variant="v", layer=LAYER) is None
 
 
 def test_publication_faster_than_real_time_fires() -> None:

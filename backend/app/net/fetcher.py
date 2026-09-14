@@ -136,6 +136,10 @@ class FetchResult:
     started_at: float = 0.0
     finished_at: float = 0.0
     http_version: str = ""
+    # True when the request died on the wire — DNS, connect, TLS, timeout, reset. The origin
+    # is answerable for it. `error` set with this False is the analyzer's own limit (the
+    # redirect cap), which a rule reports differently.
+    transport_error: bool = False
 
     @property
     def ok(self) -> bool:
@@ -189,6 +193,7 @@ class FetchResult:
             "hops": [h.as_dict() for h in self.hops],
             "cdn": self.cdn_fingerprint(),
             "error": self.error,
+            "transport_error": self.transport_error,
         }
 
 
@@ -333,6 +338,7 @@ class Fetcher:
                     timings=trace.timings,
                     hops=hops,
                     error=f"{type(exc).__name__}: {exc}",
+                    transport_error=True,
                     started_at=started,
                     finished_at=time.time(),
                 )

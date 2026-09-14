@@ -116,7 +116,7 @@ NET_RESOLVED = _r(
 TLS_CHAIN_INCOMPLETE = _r(
     "TLS-001",
     "tls",
-    E,
+    W,
     Owner.CDN,
     "Certificate chain is incomplete",
     "The edge sends a leaf certificate without the intermediate, so a device whose trust "
@@ -348,7 +348,7 @@ HTTP_ENCODING = _r(
 HTTP_URI_HOST_SHIFT = _r(
     "HTTP-015",
     "http",
-    E,
+    W,
     Owner.PACKAGER,
     "Relative child URI resolves to a different host after the redirect",
     "The playlist uses relative URIs and the redirect moves the base to another host, so the "
@@ -584,7 +584,7 @@ MST_CODECS_MISMATCH = _r(
 MST_FIRST_RUNG_HIGH = _r(
     "MST-010",
     "master",
-    E,
+    W,
     Owner.PACKAGER,
     "First listed rung is not the lowest bitrate rung",
     "Tizen starts playback on the first EXT-X-STREAM-INF in the master playlist, so a high "
@@ -711,6 +711,20 @@ MST_CHANGED = _r(
     DIRECT,
     "HLSAnalyzer master re-poll (20 s)",
     ("master_repoll_interval_s",),
+)
+MST_BANDWIDTH_VARIATION = _r(
+    "MST-029",
+    "master",
+    W,
+    Owner.PACKAGER,
+    "Bandwidth variation",
+    "A rung's declared BANDWIDTH or AVERAGE-BANDWIDTH moved between polls by more than the "
+    "tolerance, so the rate the player selects against no longer describes the rung it "
+    "picks.",
+    "Declare a stable bandwidth per rung for the life of the channel.",
+    INDIRECT,
+    "HLSAnalyzer master re-poll (20 s)",
+    ("bandwidth_variation_tolerance", "master_repoll_interval_s"),
 )
 MST_MEDIA_BECAME_MASTER = _r(
     "MST-021",
@@ -1993,7 +2007,7 @@ ADS_EXTINF_OVER_TD = _r(
 ADS_CUE_MISSING_IN_MANIFEST = _r(
     "ADS-007",
     "ads",
-    E,
+    W,
     Owner.SSAI,
     "In-band SCTE-35 cue has no matching playlist tag",
     "The transport stream signals a splice the playlist does not advertise, so the player "
@@ -2081,7 +2095,7 @@ PLY_FATAL = _r(
 PLY_STALL = _r(
     "PLY-003",
     "player",
-    E,
+    W,
     Owner.SAMSUNG_PLAYER,
     "Player stalled",
     "The player ran out of buffered media and waited for data.",

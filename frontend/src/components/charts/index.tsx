@@ -18,13 +18,22 @@ import type { ChartOption } from './base'
 
 const CHART_HEIGHT = 220
 
+/**
+ * One chart, with its title and the measurement note that explains the axis.
+ *
+ * `empty` names the measurement the chart is waiting on. A chart with no series drew an
+ * empty grid, which reads the same whether the analyzer measured nothing or the chart
+ * dropped the data on the floor; the message says which, so the operator can act on it.
+ */
 export function ChartCard({
   title,
   note,
+  empty,
   children,
 }: {
   title: string
   note?: string
+  empty?: string
   children: React.ReactNode
 }) {
   return (
@@ -33,10 +42,26 @@ export function ChartCard({
         <h3 className="text-body font-semibold text-ink">{title}</h3>
         {note && <span className="text-micro text-ink-faint">{note}</span>}
       </div>
-      <div className="px-1.5 pb-2">{children}</div>
+      <div className="px-1.5 pb-2">
+        {empty ? (
+          <div
+            className="flex items-center justify-center px-4 text-center text-small text-ink-muted"
+            style={{ height: CHART_HEIGHT }}
+          >
+            {empty}
+          </div>
+        ) : (
+          children
+        )}
+      </div>
     </section>
   )
 }
+
+const NO_SEGMENTS = 'No segment has been sampled yet. This chart draws one point per segment fetch.'
+const NO_SNAPSHOTS = 'No playlist poll has completed yet.'
+const NO_PLAYER =
+  'The player on this host has reported no sample. A player error is shown beside the video.'
 
 function Chart({ option }: { option: ChartOption }) {
   return (
@@ -87,7 +112,11 @@ export function PlayerBufferChart({
     })
   }, [samples, stalls])
   return (
-    <ChartCard title="1 · Player buffer" note={PLAYER_METRICS_NOTE}>
+    <ChartCard
+      title="1 · Player buffer"
+      note={PLAYER_METRICS_NOTE}
+      empty={samples.length === 0 ? NO_PLAYER : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -157,7 +186,15 @@ export function PlayedRungChart({ samples }: { samples: PlayerSample[] }) {
     [samples],
   )
   return (
-    <ChartCard title="3 · Played rung" note={PLAYER_METRICS_NOTE}>
+    <ChartCard
+      title="3 · Played rung"
+      note={PLAYER_METRICS_NOTE}
+      empty={
+        samples.some((s) => s.bitrate)
+          ? undefined
+          : `${NO_PLAYER} The rung is read from the player, so it needs playback to start.`
+      }
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -202,7 +239,11 @@ export function DownloadRatioChart({
     return baseOption({ yAxis: { type: 'value', name: 'download / EXTINF', min: 0 }, series })
   }, [segments, warn, error])
   return (
-    <ChartCard title="4 · Segment download ratio" note="download time divided by playback duration">
+    <ChartCard
+      title="4 · Segment download ratio"
+      note="download time divided by playback duration"
+      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -233,7 +274,11 @@ export function FetchTimingChart({ snapshots }: { snapshots: PlaylistSnapshotDat
     [snapshots],
   )
   return (
-    <ChartCard title="5 · Playlist fetch timing" note="per request">
+    <ChartCard
+      title="5 · Playlist fetch timing"
+      note="per request"
+      empty={snapshots.length === 0 ? NO_SNAPSHOTS : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -279,7 +324,11 @@ export function StatusHeatmapChart({ segments }: { segments: SegmentResultData[]
     })
   }, [segments])
   return (
-    <ChartCard title="6 · HTTP status timeline" note="per rendition">
+    <ChartCard
+      title="6 · HTTP status timeline"
+      note="per rendition"
+      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -321,6 +370,7 @@ export function SequenceLadderChart({ snapshots }: { snapshots: PlaylistSnapshot
           ? `spread ${spread} — at or above the tolerance of ${MSN_GAP_TOLERANCE}`
           : `spread ${spread} — inside the tolerance of ${MSN_GAP_TOLERANCE}`
       }
+      empty={snapshots.length === 0 ? NO_SNAPSHOTS : undefined}
     >
       <Chart option={option} />
     </ChartCard>
@@ -341,7 +391,11 @@ export function DiscontinuityChart({ snapshots }: { snapshots: PlaylistSnapshotD
     return baseOption({ yAxis: { type: 'value', name: 'discontinuity sequence', scale: true }, series })
   }, [snapshots])
   return (
-    <ChartCard title="7b · Discontinuity sequence" note="one counter is shared by the Tizen player">
+    <ChartCard
+      title="7b · Discontinuity sequence"
+      note="one counter is shared by the Tizen player"
+      empty={snapshots.length === 0 ? NO_SNAPSHOTS : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -375,7 +429,11 @@ export function FreshnessChart({ snapshots }: { snapshots: PlaylistSnapshotData[
     return baseOption({ yAxis: { type: 'value', name: 'seconds since a new segment', min: 0 }, series })
   }, [snapshots])
   return (
-    <ChartCard title="8 · Playlist freshness" note="age since the last new segment">
+    <ChartCard
+      title="8 · Playlist freshness"
+      note="age since the last new segment"
+      empty={snapshots.length === 0 ? NO_SNAPSHOTS : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -413,7 +471,11 @@ export function BitrateChart({
     })
   }, [segments, declared])
   return (
-    <ChartCard title="9 · Declared vs measured bitrate" note="peak per rung">
+    <ChartCard
+      title="9 · Declared vs measured bitrate"
+      note="peak per rung"
+      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -452,7 +514,17 @@ export function AvSkewChart({
     return baseOption({ yAxis: { type: 'value', name: 'ms (audio − video)' }, series })
   }, [segments, criticalMs])
   return (
-    <ChartCard title="10 · A/V skew per segment" note={`critical above ${criticalMs} ms`}>
+    <ChartCard
+      title="10 · A/V skew per segment"
+      note={`critical above ${criticalMs} ms`}
+      empty={
+        segments.length === 0
+          ? NO_SEGMENTS
+          : segments.some((s) => s.av_skew_ms != null)
+            ? undefined
+            : 'No sampled segment carries both an audio and a video PTS, so there is no skew to plot.'
+      }
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -485,7 +557,11 @@ export function DurationChart({ segments }: { segments: SegmentResultData[] }) {
     [segments],
   )
   return (
-    <ChartCard title="11 · Segment duration" note="EXTINF against the media inside">
+    <ChartCard
+      title="11 · Segment duration"
+      note="EXTINF against the media inside"
+      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -528,6 +604,11 @@ export function VirtualBufferChart({
     <ChartCard
       title="12 · Virtual Player Buffer"
       note="modelled Tizen player, overlaid with the real hls.js buffer"
+      empty={
+        points.length === 0 && playerSamples.length === 0
+          ? 'The buffer model starts once the first segment of a rung has been measured.'
+          : undefined
+      }
     >
       <Chart option={option} />
     </ChartCard>
@@ -597,7 +678,11 @@ export function DownloadsGanttChart({
   }, [segments, variants])
 
   return (
-    <ChartCard title="13 · Downloads" note="each bar is one segment fetch; failures are red">
+    <ChartCard
+      title="13 · Downloads"
+      note="each bar is one segment fetch; failures are red"
+      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+    >
       <ReactECharts
         option={option}
         style={{ height: CHART_HEIGHT, width: '100%' }}
@@ -641,7 +726,11 @@ export function TrafficChart({ segments }: { segments: SegmentResultData[] }) {
     })
   }, [segments])
   return (
-    <ChartCard title="14 · Traffic and bandwidth" note="received by the analyzer">
+    <ChartCard
+      title="14 · Traffic and bandwidth"
+      note="received by the analyzer"
+      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+    >
       <Chart option={option} />
     </ChartCard>
   )
@@ -692,7 +781,15 @@ export function PlaylistStateChart({
     })
   }, [transitions])
   return (
-    <ChartCard title="15 · Playlist state" note={STATE_ORDER.join(' · ')}>
+    <ChartCard
+      title="15 · Playlist state"
+      note={STATE_ORDER.join(' · ')}
+      empty={
+        transitions.length === 0
+          ? 'No playlist has changed state yet. Every rung has stayed in the state it started in.'
+          : undefined
+      }
+    >
       <Chart option={option} />
     </ChartCard>
   )

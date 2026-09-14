@@ -8,6 +8,7 @@ transition check that compares two consecutive polls. The playlist state machine
 from __future__ import annotations
 
 import datetime as dt
+import http
 import itertools
 from dataclasses import dataclass, field
 from enum import Enum
@@ -17,6 +18,7 @@ from app.analysis.rules import catalogue as R
 from app.analysis.rules.base import Finding, StreamLayer
 from app.config import Thresholds
 from app.hls.playlist import MediaPlaylist
+from app.net.fetcher import FetchResult
 
 ROUNDING_TOLERANCE_S = 0.5
 
@@ -31,11 +33,118 @@ class PlaylistState(str, Enum):
 
 
 @dataclass(slots=True)
+class PlaylistFetchFailure:
+    """Why one playlist poll produced no usable playlist, and whose failure it is.
+
+    `origin_fault` separates the two cases the operator asked to be kept apart. A status
+    code, a dead connection or a body that is not a playlist is the stream's failure and is
+    reported. A body the analyzer itself could not parse is the analyzer's failure: it is
+    logged with the parser error and raises no finding, because naming the stream for it
+    would be wrong.
+    """
+
+    reason: str
+    status: int
+    origin_fault: bool
+    detail: str = ""
+    bytes_received: int = 0
+    ttfb_ms: float | None = None
+
+    def as_evidence(self) -> dict[str, Any]:
+        return {
+            "http_status": self.status,
+            "transport_error": self.detail,
+            "bytes_received": self.bytes_received,
+            "ttfb_ms": self.ttfb_ms,
+            "origin_fault": self.origin_fault,
+        }
+
+
+def status_phrase(status: int) -> str:
+    """``404 Not Found``. The number alone reads as a bare integer in a report."""
+    try:
+        return f"{status} {http.HTTPStatus(status).phrase}"
+    except ValueError:
+        return str(status)
+
+
+def describe_fetch_failure(
+    result: FetchResult, playlist: MediaPlaylist | None, *, parse_error: str = ""
+) -> PlaylistFetchFailure | None:
+    """Name the exact reason a playlist poll produced nothing usable.
+
+    Returns ``None`` when the poll succeeded. Every branch states a measured fact: the
+    status code the origin returned, the transport error the socket raised, or the number of
+    bytes that arrived.
+    """
+
+    def failed(
+        reason: str, *, status: int, origin_fault: bool, detail: str = ""
+    ) -> PlaylistFetchFailure:
+        return PlaylistFetchFailure(
+            reason=reason,
+            status=status,
+            origin_fault=origin_fault,
+            detail=detail,
+            bytes_received=result.bytes_received,
+            ttfb_ms=result.timings.ttfb_ms,
+        )
+
+    if result.transport_error:
+        return failed(
+            f"The request reached no response: {result.error}. The origin at "
+            f"{result.final_url} did not answer.",
+            status=0,
+            origin_fault=True,
+            detail=result.error or "",
+        )
+    if result.error is not None:
+        # The analyzer's own redirect cap, not a server fault, and not a parser bug either:
+        # the chain is real and the operator needs to see it.
+        return failed(
+            f"The request did not complete: {result.error}. The chain ran "
+            f"{result.redirect_count} redirect(s) and ended at {result.final_url}.",
+            status=0,
+            origin_fault=True,
+            detail=result.error,
+        )
+    if not 200 <= result.status < 300:
+        return failed(
+            f"The origin answered HTTP {status_phrase(result.status)} for {result.final_url}.",
+            status=result.status,
+            origin_fault=True,
+        )
+    if result.bytes_received == 0:
+        return failed(
+            f"The origin answered HTTP {status_phrase(result.status)} with an empty body.",
+            status=result.status,
+            origin_fault=True,
+        )
+    if parse_error:
+        return failed(
+            f"The analyzer did not parse the {result.bytes_received}-byte HTTP "
+            f"{status_phrase(result.status)} body: {parse_error}.",
+            status=result.status,
+            origin_fault=False,
+            detail=parse_error,
+        )
+    if playlist is None:
+        return failed(
+            f"The origin answered HTTP {status_phrase(result.status)} with "
+            f"{result.bytes_received} byte(s) that carry no media playlist.",
+            status=result.status,
+            origin_fault=True,
+        )
+    return None
+
+
+@dataclass(slots=True)
 class StateTransition:
     at: dt.datetime
     previous: PlaylistState
     current: PlaylistState
     reason: str
+    failure: PlaylistFetchFailure | None = None
 
 
 @dataclass(slots=True)
@@ -56,13 +165,16 @@ class PlaylistStateMachine:
         http_ok: bool,
         playlist: MediaPlaylist | None,
         stale_after_s: float,
+        failure: PlaylistFetchFailure | None = None,
     ) -> StateTransition | None:
         previous = self.state
         reason = ""
+        carried: PlaylistFetchFailure | None = None
 
         if not http_ok or playlist is None:
             self.state = PlaylistState.HTTP_ERROR
-            reason = "The playlist request did not return a usable body."
+            carried = failure
+            reason = failure.reason if failure else "The playlist request returned no usable body."
         elif playlist.endlist and self.was_live:
             self.state = PlaylistState.LIVE_END
             reason = "EXT-X-ENDLIST appeared after the playlist had been live."
@@ -92,7 +204,9 @@ class PlaylistStateMachine:
 
         if self.state == previous:
             return None
-        transition = StateTransition(at=at, previous=previous, current=self.state, reason=reason)
+        transition = StateTransition(
+            at=at, previous=previous, current=self.state, reason=reason, failure=carried
+        )
         self.transitions.append(transition)
         return transition
 
@@ -411,18 +525,27 @@ def check_state_transition(
     if transition.current == PlaylistState.LIVE_END:
         rule = R.MED_UNEXPECTED_ENDLIST
     elif transition.current == PlaylistState.HTTP_ERROR:
+        # The analyzer's own parser failing on a body the origin delivered is the analyzer's
+        # defect. It is logged where the poll happens; charging the stream with a critical
+        # download failure for it would name the wrong party.
+        if transition.failure is not None and not transition.failure.origin_fault:
+            return None
         rule = R.MED_DOWNLOAD_FAIL
+
+    evidence: dict[str, Any] = {
+        "variant": variant,
+        "from": transition.previous.value,
+        "to": transition.current.value,
+        "at": transition.at.isoformat(),
+        "reason": transition.reason,
+    }
+    if transition.failure is not None:
+        evidence |= transition.failure.as_evidence()
 
     return rule.raise_finding(
         f"{variant} moved from {transition.previous.value} to {transition.current.value} at "
         f"{transition.at.isoformat()}. {transition.reason}",
-        evidence={
-            "variant": variant,
-            "from": transition.previous.value,
-            "to": transition.current.value,
-            "at": transition.at.isoformat(),
-            "reason": transition.reason,
-        },
+        evidence=evidence,
         stream_layer=layer,
         variant=variant,
         at=transition.at,

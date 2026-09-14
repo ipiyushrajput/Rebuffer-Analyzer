@@ -110,18 +110,3 @@ export const VPB_MODES = [
 
 /** Player metrics come from the analyzer's network path, not a TV's. Say so everywhere. */
 export const PLAYER_METRICS_NOTE = 'Analyzer host'
-
-/** The operator identity shown in the page header. Configurable per deployment. */
-export const OPERATOR = {
-  name: import.meta.env.VITE_OPERATOR_NAME ?? 'Piyush Singh',
-  team: import.meta.env.VITE_OPERATOR_TEAM ?? 'Stream Quality',
-}
-
-export function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('')
-}
