@@ -76,9 +76,11 @@ const EVIDENCE_TABS: { id: EvidenceTab; label: string }[] = [
 
 interface Props {
   thresholds: Record<string, number>
+  /** Called with the session id once a stopped analysis has been filed. */
+  onArchived: (sessionId: string) => void
 }
 
-export function RealtimeTab({ thresholds }: Props) {
+export function RealtimeTab({ thresholds, onArchived }: Props) {
   const [form, setForm] = useState<UrlFormValue>(emptyForm(false))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -114,12 +116,41 @@ export function RealtimeTab({ thresholds }: Props) {
     }
   }
 
+  /**
+   * Stopping ends the analysis rather than freezing it.
+   *
+   * The session is cancelled, a report is written from what was collected, and the tab is
+   * returned to the state it was in before the run — no player, no samples, no verdict — so
+   * the next analysis starts clean. The finished run is filed under Analysed channels, which
+   * is where the operator is taken.
+   */
   const stop = async () => {
-    if (!store.sessionId) return
+    const sessionId = store.sessionId
+    if (!sessionId) return
     setBusy(true)
+    setError(null)
     try {
-      await endpoints.stopRealtime(store.sessionId)
-      useSessionStore.setState({ status: 'STOPPED' })
+      await endpoints.stopRealtime(sessionId)
+
+      /*
+       * Stopping waits for the analysis to settle, so the result the report needs is ready
+       * here. It is still best effort: a report that fails to render must not cost the
+       * operator the run, which is filed either way with its verdict and findings.
+       */
+      try {
+        await api.post(`/realtime/sessions/${sessionId}/report?format=html`)
+      } catch {
+        /* the analysis is filed regardless; only the report file is missing */
+      }
+
+      store.reset()
+      setForm(emptyForm(false))
+      setManifests([])
+      setFlow(null)
+      setReportUrl(null)
+      setOpenFinding(null)
+      setEvidenceTab('master')
+      onArchived(sessionId)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -285,9 +316,10 @@ export function RealtimeTab({ thresholds }: Props) {
                 className="btn-accent btn-sm"
                 onClick={stop}
                 disabled={!running || busy}
+                title="Ends the analysis, files it under Analysed channels, and clears this tab"
               >
                 <IconStop size={13} />
-                Stop
+                {busy && running ? 'Stopping' : 'Stop and save'}
               </button>
             </>
           }
@@ -309,7 +341,7 @@ export function RealtimeTab({ thresholds }: Props) {
                 </button>
                 <span className="text-micro text-ink-muted">
                   Player measurements are taken on the {PLAYER_METRICS_NOTE.toLowerCase()}, not on a
-                  television.
+                  television. Stopping files the run under Analysed channels and clears this tab.
                 </span>
               </div>
               {error && (

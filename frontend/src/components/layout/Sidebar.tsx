@@ -12,6 +12,7 @@ import {
   BrandMark,
   IconAging,
   IconBulk,
+  IconChannels,
   IconCollapse,
   IconExpand,
   IconRealtime,
@@ -19,10 +20,11 @@ import {
   IconSettings,
 } from '../ui/icons'
 
-export type TabId = 'realtime' | 'aging' | 'bulk' | 'reports' | 'settings'
+export type TabId = 'realtime' | 'channels' | 'aging' | 'bulk' | 'reports' | 'settings'
 
 const NAV: { id: TabId; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
   { id: 'realtime', label: 'Realtime', Icon: IconRealtime },
+  { id: 'channels', label: 'Analysed channels', Icon: IconChannels },
   { id: 'aging', label: 'Aging', Icon: IconAging },
   { id: 'bulk', label: 'Bulk analysis', Icon: IconBulk },
   { id: 'reports', label: 'Reports', Icon: IconReports },

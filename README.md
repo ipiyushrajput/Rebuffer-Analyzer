@@ -19,7 +19,8 @@ analysis code.
 
 | Tab | Purpose |
 |---|---|
-| **Realtime** | Paste a playback URL, analyse live. Player, sixteen live charts, live findings feed, report at any moment. |
+| **Realtime** | Paste a playback URL, analyse live. Player, sixteen live charts, live findings feed, report at any moment. Stopping files the run and clears the tab for the next one. |
+| **Analysed channels** | Every finished analysis, with its verdict, findings, incidents and reports. Read back from the database, so a channel analysed before the last restart is still here; delete one and its measurements and report files go with it. |
 | **Aging** | Put channels under analysis for 15 min to 24 h. Jobs run server-side and survive the browser closing and a backend restart. |
 | **Bulk** | Upload CSV / XLSX / JSON of many channels. Snapshot or aging mode, with concurrency control. Consolidated ranked report plus per-channel reports. |
 | **Reports** | Every report generated, searchable by channel, date, verdict and owner. |

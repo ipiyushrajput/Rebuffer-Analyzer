@@ -6,12 +6,13 @@
  * every sample it has collected while the operator looks at another screen.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { endpoints } from './api/client'
 import { Sidebar, useRailCollapsed, type TabId } from './components/layout/Sidebar'
 import { AgingTab } from './tabs/Aging'
 import { BulkTab } from './tabs/Bulk'
+import { ChannelsTab } from './tabs/Channels'
 import { RealtimeTab } from './tabs/Realtime'
 import { ReportsTab } from './tabs/Reports'
 import { SettingsTab } from './tabs/Settings'
@@ -26,6 +27,9 @@ const DEGRADED_NOTE: Record<string, string> = {
 export default function App() {
   const [tab, setTab] = useState<TabId>('realtime')
   const [collapsed, setCollapsed] = useRailCollapsed()
+  /* The channel the Analysed channels tab has open, so a stopped run lands on its own page. */
+  const [openChannel, setOpenChannel] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   const { data: health } = useQuery({
     queryKey: ['health'],
@@ -60,7 +64,22 @@ export default function App() {
         style={{ marginLeft: collapsed ? 72 : 232 }}
       >
         <div className={tab === 'realtime' ? '' : 'panel-hidden'}>
-          <RealtimeTab thresholds={thresholds} />
+          <RealtimeTab
+            thresholds={thresholds}
+            onArchived={(sessionId) => {
+              void queryClient.invalidateQueries({ queryKey: ['channels'] })
+              void queryClient.invalidateQueries({ queryKey: ['reports'] })
+              setOpenChannel(sessionId)
+              setTab('channels')
+            }}
+          />
+        </div>
+        <div className={tab === 'channels' ? '' : 'panel-hidden'}>
+          <ChannelsTab
+            thresholds={thresholds}
+            openId={tab === 'channels' ? openChannel : null}
+            onOpenChange={setOpenChannel}
+          />
         </div>
         <div className={tab === 'aging' ? '' : 'panel-hidden'}>
           <AgingTab thresholds={thresholds} />

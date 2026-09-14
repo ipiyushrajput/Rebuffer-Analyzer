@@ -49,15 +49,33 @@ export function Player({ src, onEvent }: Props) {
 
   useEffect(() => {
     const video = videoRef.current
-    if (!video || !src) return undefined
+    if (!video) return undefined
+
+    if (!src) {
+      // The session ended. Stop the element and clear the overlay so nothing reads live.
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+      setOverlay({ level: '—', bitrate: null, buffer: 0, dropped: 0, stalls: 0 })
+      setError(null)
+      return undefined
+    }
 
     setError(null)
     startedAtRef.current = performance.now()
     let currentVariant = ''
 
+    /*
+     * Tearing down hls.js is not enough on its own. The element keeps whatever it last
+     * loaded — and on a browser playing HLS natively it keeps playing it — so the element
+     * is stopped and emptied too. Stopping the analysis has to stop the picture.
+     */
     const cleanup = () => {
       hlsRef.current?.destroy()
       hlsRef.current = null
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
     }
 
     if (Hls.isSupported()) {

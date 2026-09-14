@@ -890,7 +890,7 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 | `SEG-002` | CRITICAL | Packager | Transport stream sync byte is absent at the start of the segment | direct | — | HLSAnalyzer transport stream inspection |
 | `SEG-003` | ERROR | Packager | Transport stream continuity counter skipped | direct | — | HLSAnalyzer PAT/PMT/PID inspection |
 | `SEG-004` | CRITICAL | Packager | Segment carries no PAT or no PMT | direct | — | THEOplayer PAT/PMT check; HLSAnalyzer |
-| `SEG-005` | ERROR | Packager | Segment is smaller than the tiny-segment threshold | direct | `tiny_segment_bytes` | Segment size analyzer |
+| `SEG-005` | WARN | Packager | Segment is smaller than the tiny-segment threshold | direct | `tiny_segment_bytes` | Segment size analyzer |
 | `SEG-006` | CRITICAL | CDN | Segment body is empty | direct | — | Qosifire 'Bad chunk' |
 | `SEG-007` | ERROR | Packager | Measured media duration differs from the declared EXTINF | direct | `extinf_vs_actual_tolerance_s` | HLSAnalyzer EC-2003 |
 | `SEG-008` | ERROR | Packager | Presentation timestamps leave a gap between consecutive segments without a discontinuity | direct | `pts_gap_tolerance_ms` | HLS AV Doctor |

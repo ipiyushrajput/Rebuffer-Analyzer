@@ -8,7 +8,7 @@ from typing import Any
 from app.analysis.rules import catalogue as R
 from app.analysis.rules.base import Finding, StreamLayer
 from app.config import Thresholds
-from app.hls.playlist import MasterPlaylist, Variant
+from app.hls.playlist import MasterPlaylist, Rendition, Variant
 
 # Tags whose presence requires at least this EXT-X-VERSION.
 TAG_MIN_VERSION = {
@@ -332,33 +332,82 @@ def _check_rendition_groups(master: MasterPlaylist, *, layer: StreamLayer) -> li
     return findings
 
 
+def _rendition_key(rendition: Rendition) -> str:
+    """A rendition's identity, independent of the URI it is served from."""
+    parts = [
+        rendition.type,
+        rendition.group_id,
+        rendition.name,
+        rendition.language or "",
+        rendition.channels or "",
+    ]
+    return "/".join(parts)
+
+
+def _attribute_diff(before: dict[str, str], after: dict[str, str]) -> list[str]:
+    """The attribute names whose declared values differ between two polls."""
+    return sorted(name for name in set(before) | set(after) if before.get(name) != after.get(name))
+
+
 def check_master_changed(
     previous: MasterPlaylist, current: MasterPlaylist, *, layer: StreamLayer
 ) -> list[Finding]:
-    """Master re-poll comparison (§B, every 20 s)."""
+    """
+    Master re-poll comparison (§B, every 20 s).
+
+    The ladder is compared by **declared attributes**, never by URI. A server-side ad
+    inserter mints a fresh session on every master fetch, so each poll returns the same
+    ladder under new child URIs; keying the comparison on the URI reported the whole ladder
+    as replaced every 20 s. The rungs are keyed on their variant identity — resolution and
+    bandwidth — and their attributes compared, so a codec, frame-rate, resolution, bandwidth,
+    audio-group or video-range change fires and a session rotation does not.
+    """
     findings: list[Finding] = []
-    before = {v.resolved_uri: v.attrs for v in previous.variants}
-    after = {v.resolved_uri: v.attrs for v in current.variants}
+
+    before = {v.variant_id: v.attrs for v in previous.variants}
+    after = {v.variant_id: v.attrs for v in current.variants}
 
     added = sorted(set(after) - set(before))
     removed = sorted(set(before) - set(after))
-    changed = [uri for uri in set(before) & set(after) if before[uri] != after[uri]]
+    rewritten = {
+        rung: _attribute_diff(before[rung], after[rung])
+        for rung in sorted(set(before) & set(after))
+        if before[rung] != after[rung]
+    }
 
-    if added or removed or changed:
-        parts = []
-        if added:
-            parts.append(f"{len(added)} variant(s) added")
-        if removed:
-            parts.append(f"{len(removed)} variant(s) removed")
-        if changed:
-            parts.append(f"{len(changed)} variant(s) had attributes rewritten")
-        findings.append(
-            R.MST_CHANGED.raise_finding(
-                f"{current.final_url} changed during the session: {', '.join(parts)}.",
-                evidence={"added": added, "removed": removed, "changed": changed},
-                stream_layer=layer,
-            )
+    renditions_before = {_rendition_key(r): r.attrs for r in previous.renditions}
+    renditions_after = {_rendition_key(r): r.attrs for r in current.renditions}
+    renditions_added = sorted(set(renditions_after) - set(renditions_before))
+    renditions_removed = sorted(set(renditions_before) - set(renditions_after))
+
+    if not (added or removed or rewritten or renditions_added or renditions_removed):
+        return findings
+
+    parts: list[str] = []
+    if added:
+        parts.append(f"{len(added)} rung(s) added ({', '.join(added)})")
+    if removed:
+        parts.append(f"{len(removed)} rung(s) removed ({', '.join(removed)})")
+    for rung, names in rewritten.items():
+        parts.append(f"{rung} had {', '.join(names)} rewritten")
+    if renditions_added:
+        parts.append(f"{len(renditions_added)} rendition(s) added")
+    if renditions_removed:
+        parts.append(f"{len(renditions_removed)} rendition(s) removed")
+
+    findings.append(
+        R.MST_CHANGED.raise_finding(
+            f"{current.final_url} changed during the session: {'; '.join(parts)}.",
+            evidence={
+                "added": added,
+                "removed": removed,
+                "rewritten": rewritten,
+                "renditions_added": renditions_added,
+                "renditions_removed": renditions_removed,
+            },
+            stream_layer=layer,
         )
+    )
     return findings
 
 

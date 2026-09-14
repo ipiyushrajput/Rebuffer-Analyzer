@@ -84,6 +84,21 @@ export interface RealtimeSession extends JobSummary {
   player_metrics_note: string
 }
 
+/** One report file stored against an analysed channel. */
+export interface ChannelReport {
+  id: number
+  format: string
+  size_bytes: number
+  created_at: string
+  url: string
+  exists: boolean
+}
+
+/** A finished analysis, read back from the database rather than the job manager. */
+export interface AnalysedChannel extends JobSummary {
+  reports: ChannelReport[]
+}
+
 export const endpoints = {
   health: () => api.get<Record<string, unknown>>('/health'),
 
@@ -120,6 +135,12 @@ export const endpoints = {
       '/bulk/validate',
       form,
     ),
+
+  listChannels: () => api.get<{ channels: AnalysedChannel[]; count: number }>('/channels'),
+  readChannel: (id: string) =>
+    api.get<AnalysedChannel & Record<string, unknown>>(`/channels/${id}`),
+  deleteChannel: (id: string) =>
+    api.del<{ deleted: boolean; reports_removed: number }>(`/channels/${id}`),
 
   listReports: (query = '') => api.get<{ reports: Record<string, unknown>[] }>(`/reports${query}`),
   deleteReport: (id: number) => api.del<{ deleted: boolean }>(`/reports/${id}`),
