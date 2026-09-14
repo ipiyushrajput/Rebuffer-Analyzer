@@ -1283,7 +1283,7 @@ SEG_NO_PAT_PMT = _r(
 SEG_TINY = _r(
     "SEG-005",
     "segment",
-    E,
+    W,
     Owner.PACKAGER,
     "Segment is smaller than the tiny-segment threshold",
     "The segment holds too few bytes to carry the media its EXTINF declares, so the player "

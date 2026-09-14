@@ -7,6 +7,9 @@ threshold, so a rule that stops firing â€” or starts firing on a clean stream â€
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
+
+import pytest
 
 from app.analysis.rules import ads as ads_rules
 from app.analysis.rules import master as master_rules
@@ -17,7 +20,7 @@ from app.analysis.rules import subtitles as subtitle_rules
 from app.analysis.rules import transport as transport_rules
 from app.analysis.rules.base import Severity, StreamLayer
 from app.config import Thresholds
-from app.hls.playlist import parse_master, parse_media
+from app.hls.playlist import MasterPlaylist, parse_master, parse_media
 from app.media.segment import analyse as analyse_segment
 from app.net.dns import DnsResult
 from app.net.tls_inspect import TlsResult
@@ -198,6 +201,85 @@ def test_a_master_that_changes_between_polls_fires() -> None:
     )
     assert "MST-020" in ids(master_rules.check_master_changed(before, after, layer=LAYER))
     assert master_rules.check_master_changed(before, before, layer=LAYER) == []
+
+
+def _ladder(session: str, **overrides: Any) -> MasterPlaylist:
+    """The same ladder served under one ad-inserter session, as MediaTailor serves it."""
+    rungs = [("low", 600_000, "640x360"), ("high", 2_000_000, "1920x1080")]
+    specs = [
+        VariantSpec(
+            name=name,
+            bandwidth=bandwidth,
+            resolution=resolution,
+            uri=f"v1/session/{session}/{name}.m3u8",
+            **overrides,
+        )
+        for name, bandwidth, resolution in rungs
+    ]
+    return parse_master(render_master_playlist(specs), BASE)
+
+
+def test_a_master_whose_only_change_is_the_ad_inserter_session_does_not_fire() -> None:
+    """MediaTailor mints a session per master fetch, so every child URI changes each poll.
+
+    The ladder is identical; only the session path moved. Keying the comparison on the URI
+    reported the whole ladder as replaced every 20 s, which is the false positive this
+    guards against.
+    """
+    before = _ladder("2f6d1c40-0a11-4f0e-9a52-7c1b0e5f9a01")
+    after = _ladder("9b8e7d60-5c22-41aa-8e37-1d4f0a2c3b55")
+
+    assert before.variants[0].resolved_uri != after.variants[0].resolved_uri
+    assert master_rules.check_master_changed(before, after, layer=LAYER) == []
+
+
+@pytest.mark.parametrize(
+    ("attribute", "override"),
+    [
+        ("CODECS", {"codecs": "hvc1.2.4.L120.B0,mp4a.40.2"}),
+        ("FRAME-RATE", {"frame_rate": 50.0}),
+    ],
+)
+def test_a_real_ladder_change_still_fires_through_a_session_rotation(
+    attribute: str, override: dict[str, Any]
+) -> None:
+    """A codec or frame-rate rewrite is reported even though the session moved too."""
+    before = _ladder("2f6d1c40-0a11-4f0e-9a52-7c1b0e5f9a01")
+    after = _ladder("9b8e7d60-5c22-41aa-8e37-1d4f0a2c3b55", **override)
+
+    findings = master_rules.check_master_changed(before, after, layer=LAYER)
+    assert "MST-020" in ids(findings)
+    assert attribute in findings[0].detail
+    assert attribute in findings[0].evidence[0]["rewritten"]["v1080p@2000k"]
+
+
+def test_a_rung_added_under_a_new_session_is_reported_as_an_added_rung() -> None:
+    before = _ladder("2f6d1c40-0a11-4f0e-9a52-7c1b0e5f9a01")
+    after = parse_master(
+        render_master_playlist(
+            [
+                VariantSpec(
+                    name="low", bandwidth=600_000, resolution="640x360", uri="v1/session/b/low.m3u8"
+                ),
+                VariantSpec(
+                    name="mid",
+                    bandwidth=1_200_000,
+                    resolution="1280x720",
+                    uri="v1/session/b/mid.m3u8",
+                ),
+                VariantSpec(
+                    name="high",
+                    bandwidth=2_000_000,
+                    resolution="1920x1080",
+                    uri="v1/session/b/high.m3u8",
+                ),
+            ]
+        ),
+        BASE,
+    )
+    findings = master_rules.check_master_changed(before, after, layer=LAYER)
+    assert "MST-020" in ids(findings)
+    assert findings[0].evidence[0]["added"] == ["v720p@1200k"]
 
 
 def test_declared_codecs_against_a_measured_sps_fires_on_a_mismatch() -> None:

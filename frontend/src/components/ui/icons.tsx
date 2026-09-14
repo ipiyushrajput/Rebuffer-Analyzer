@@ -135,6 +135,21 @@ export const IconFile = (p: IconProps) => (
   </Svg>
 )
 
+export const IconChannels = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2.5" y="7" width="19" height="13" rx="2.5" />
+    <path d="m8 3.5 4 3.5 4-3.5" />
+    <path d="M10.5 11.5v5l4.5-2.5-4.5-2.5Z" fill="currentColor" stroke="none" />
+  </Svg>
+)
+
+export const IconTrash = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 7h16M10 4h4M9 7v12M15 7v12" />
+    <path d="M6 7l.8 12.2A2 2 0 0 0 8.8 21h6.4a2 2 0 0 0 2-1.8L18 7" />
+  </Svg>
+)
+
 export const IconPulse = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />
@@ -142,28 +157,19 @@ export const IconPulse = (p: IconProps) => (
 )
 
 /**
- * The product mark: a Samsung-blue tile carrying the TV Plus ring, used in the rail and
- * anywhere the application identifies itself.
+ * The product mark: the Samsung TV Plus icon, served from `public/` rather than hotlinked,
+ * so the rail renders on a deployment with no route to the internet. The same source
+ * generates the favicon and the report masthead.
  */
 export function BrandMark({ size = 34 }: { size?: number }) {
   return (
-    <svg
+    <img
+      src="/tvplus-logo.png"
       width={size}
       height={size}
-      viewBox="0 0 40 40"
-      role="img"
-      aria-label="TV Plus Rebuffer Analyzer"
-    >
-      <rect width="40" height="40" rx="10" fill="#1428A0" />
-      <path
-        d="M28 20a8 8 0 1 1-3.1-6.3"
-        fill="none"
-        stroke="#FFFFFF"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-      />
-      <path d="M24.4 9.6v5.2h-5.2" fill="none" stroke="#FFFFFF" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="20" cy="20" r="2.6" fill="#FFFFFF" />
-    </svg>
+      alt="Samsung TV Plus"
+      className="shrink-0 rounded-tile object-cover"
+      style={{ width: size, height: size }}
+    />
   )
 }

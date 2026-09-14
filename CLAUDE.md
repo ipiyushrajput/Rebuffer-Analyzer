@@ -62,7 +62,7 @@ python -m app.cli rules --markdown            # rule catalogue
 
 ```
 backend/app/
-  api/        REST routers (realtime, aging, bulk, reports, proxy, settings, health)
+  api/        REST routers (realtime, channels, aging, bulk, reports, proxy, settings, health)
   ws/         WebSocket hub + typed message schemas
   jobs/       job manager, persistence, resume-on-restart
   net/        fetcher (manual redirects + timing split), dns, tls_inspect
@@ -73,7 +73,7 @@ backend/app/
   bulk/       csv/xlsx/json parsing with column alias mapping
   db/         SQLAlchemy models, repository, session factory
 frontend/src/
-  tabs/       Realtime, Aging, Bulk, Reports, Settings
+  tabs/       Realtime, Channels (analysed channels), Aging, Bulk, Reports, Settings
   components/ Player, charts/, FindingCard, ManifestViewer, SequenceLadder
 ```
 
@@ -104,6 +104,13 @@ frontend/src/
   The same tokens are mirrored in `backend/app/reports/templates/` so a report looks like the
   screen it came from.
 - Results panels are hidden with CSS, never unmounted, so video element refs survive.
+- Stopping a realtime session ends it: the player element is stopped and emptied, the store
+  is reset, and the run is filed under Analysed channels. The Realtime tab returns to the
+  state it was in before the analysis so the next one starts clean.
+- The brand mark, the favicon and the report masthead all come from
+  `frontend/public/tvplus-logo.png` and `backend/app/reports/assets/`, generated from the
+  Samsung TV Plus icon. Assets are served locally, never hotlinked: the deployment host has
+  no route to the internet.
 
 ## Deployment
 
