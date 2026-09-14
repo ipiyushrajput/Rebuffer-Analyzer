@@ -10,6 +10,7 @@ import datetime as dt
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import select
 
 from app.api.job_views import row_summary as _row_summary
@@ -130,9 +131,8 @@ async def create_report(job_id: str, format: str = Query(default="html")) -> dic
 
 
 @router.get("/jobs/{job_id}/report.{fmt}")
-async def download_report(job_id: str, fmt: str) -> Any:
-    from fastapi.responses import FileResponse
-
+async def download_report(job_id: str, fmt: str) -> Response:
+    """Render the report for this job and serve it from the database."""
     if fmt not in ("html", "pdf"):
         raise HTTPException(status_code=400, detail="Format must be html or pdf")
     handle = job_manager.get(job_id)
@@ -140,11 +140,15 @@ async def download_report(job_id: str, fmt: str) -> Any:
         raise HTTPException(status_code=404, detail="No finished result for this job")
 
     generated = await service.generate(handle, fmt=fmt)
-    from pathlib import Path
-
-    path = Path(generated["path"])
-    media = "application/pdf" if fmt == "pdf" else "text/html; charset=utf-8"
-    return FileResponse(path=path, media_type=media, filename=path.name)
+    stored = await service.get_report(int(generated["id"]))
+    if stored is None:
+        raise HTTPException(status_code=404, detail="The report is not stored")
+    data, media, filename = stored
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _now() -> dt.datetime:

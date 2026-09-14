@@ -19,12 +19,18 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.config import get_settings
+
+# A rendered report is about a megabyte. MySQL's default BLOB caps at 64 KB, so the column
+# is declared LONGBLOB there; SQLite and PostgreSQL take the generic type unchanged.
+ReportBlob = LargeBinary().with_variant(mysql.LONGBLOB(), "mysql", "mariadb")
 
 _prefix = get_settings().db_table_prefix
 
@@ -264,7 +270,12 @@ class Report(Base):
     channel_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     job_type: Mapped[str] = mapped_column(String(16), default="realtime")
     format: Mapped[str] = mapped_column(String(8))
-    path: Mapped[str] = mapped_column(Text)
+    # The report itself. Stored here so a deployment keeps nothing on local disk and a
+    # report survives the container it was rendered in. Deferred: a listing reads a couple
+    # of hundred rows and must not drag a megabyte of HTML along with each one.
+    content: Mapped[bytes | None] = mapped_column(ReportBlob, nullable=True, deferred=True)
+    # Set only when a copy was also written to disk, which is off by default.
+    path: Mapped[str | None] = mapped_column(Text, nullable=True)
     verdict_status: Mapped[str | None] = mapped_column(String(48), nullable=True)
     owner: Mapped[str | None] = mapped_column(String(32), nullable=True)
     risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)

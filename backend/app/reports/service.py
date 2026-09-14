@@ -1,8 +1,12 @@
 """Report generation and storage.
 
-A report is written to disk, recorded in the database, and served back by id. Generating one
-never interrupts a running job: the Realtime tab can produce a report at any moment from the
-data collected so far.
+A report is rendered, stored, and served back by id. Storage is the database by default —
+the bytes live in the reports table, so a deployment keeps nothing on local disk and a
+report outlives the container that rendered it. Set `RBA_REPORT_STORAGE=both` to mirror a
+copy into `RBA_REPORTS_DIR` as well.
+
+Generating a report never interrupts a running job: the Realtime tab can produce one at any
+moment from the data collected so far.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import delete, select
+from sqlalchemy.orm import undefer
 
 from app.analysis.engine import AnalysisResult
 from app.config import get_settings
@@ -23,7 +28,7 @@ from app.db import session as db_session
 from app.db.models import PlaylistSnapshot, Report
 from app.jobs.manager import JobHandle
 from app.reports.render_html import render_bulk_report, render_html_for_handle
-from app.reports.render_pdf import PdfUnavailable, render_pdf
+from app.reports.render_pdf import PdfUnavailable, render_pdf_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,53 @@ def reports_dir() -> Path:
     directory = get_settings().rba_reports_dir
     directory.mkdir(parents=True, exist_ok=True)
     return directory
+
+
+async def store_report(
+    *,
+    handle_id: str,
+    channel_name: str | None,
+    job_type: str,
+    fmt: str,
+    data: bytes,
+    stem: str,
+    verdict_status: str | None,
+    owner: str | None = None,
+    risk_score: float | None = None,
+) -> dict[str, Any]:
+    """Record one rendered report and return the row as the API reports it.
+
+    The bytes go to the database. A copy is written to disk only when the deployment asks
+    for it, and the path is recorded so an existing mirror stays readable.
+    """
+    settings = get_settings()
+    path: Path | None = None
+    if settings.reports_on_disk:
+        path = reports_dir() / f"{stem}.{fmt}"
+        path.write_bytes(data)
+
+    async with db_session.session_scope() as session:
+        row = Report(
+            job_id=handle_id,
+            channel_name=channel_name,
+            job_type=job_type,
+            format=fmt,
+            content=data if settings.reports_in_database else None,
+            path=str(path) if path else None,
+            verdict_status=verdict_status,
+            owner=owner,
+            risk_score=risk_score,
+            size_bytes=len(data),
+        )
+        session.add(row)
+        await session.flush()
+        return {
+            "id": row.id,
+            "format": fmt,
+            "path": str(path) if path else None,
+            "url": f"/api/reports/{row.id}/download",
+            "size_bytes": row.size_bytes,
+        }
 
 
 async def generate(
@@ -55,45 +107,31 @@ async def generate(
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
     stem = f"{_slug(handle.channel_name)}-{handle.type}-{stamp}-{handle.id[:8]}"
 
-    html_path = reports_dir() / f"{stem}.html"
-    html_path.write_text(html, encoding="utf-8")
-    written: list[tuple[str, Path]] = [("html", html_path)]
+    rendered: list[tuple[str, bytes]] = [("html", html.encode("utf-8"))]
 
     pdf_note: str | None = None
     if fmt == "pdf":
         try:
-            pdf_path = await render_pdf(html, reports_dir() / f"{stem}.pdf")
-            written.append(("pdf", pdf_path))
+            rendered.append(("pdf", await render_pdf_bytes(html)))
         except PdfUnavailable as exc:
             pdf_note = str(exc)
             logger.warning("PDF export did not run for %s: %s", handle.id, exc)
 
     verdict = analysis.verdict
-    records: list[dict[str, Any]] = []
-    async with db_session.session_scope() as session:
-        for kind, path in written:
-            report_row = Report(
-                job_id=handle.id,
-                channel_name=handle.channel_name,
-                job_type=handle.type,
-                format=kind,
-                path=str(path),
-                verdict_status=verdict.status.value,
-                owner=verdict.owner,
-                risk_score=float(verdict.risk_score),
-                size_bytes=path.stat().st_size,
-            )
-            session.add(report_row)
-            await session.flush()
-            records.append(
-                {
-                    "id": report_row.id,
-                    "format": kind,
-                    "path": str(path),
-                    "url": f"/api/reports/{report_row.id}/download",
-                    "size_bytes": report_row.size_bytes,
-                }
-            )
+    records = [
+        await store_report(
+            handle_id=handle.id,
+            channel_name=handle.channel_name,
+            job_type=handle.type,
+            fmt=kind,
+            data=data,
+            stem=stem,
+            verdict_status=verdict.status.value,
+            owner=verdict.owner,
+            risk_score=float(verdict.risk_score),
+        )
+        for kind, data in rendered
+    ]
 
     primary = next((r for r in records if r["format"] == fmt), records[0])
     return {**primary, "generated": records, "note": pdf_note}
@@ -109,7 +147,9 @@ async def generate_bulk(
     started = parent.started_at or parent.created_at
     ended = parent.finished_at or dt.datetime.now(dt.UTC)
 
-    per_channel: list[tuple[str, Path]] = []
+    # Per-channel reports are held in memory: they go into the archive, which is itself
+    # stored as a report row rather than left on the host.
+    per_channel: list[tuple[str, str, str]] = []
     for child in children:
         if child.result is None:
             continue
@@ -118,59 +158,67 @@ async def generate_bulk(
         except Exception as exc:
             logger.warning("per-channel report failed for %s: %s", child.id, type(exc).__name__)
             continue
-        path = reports_dir() / f"{_slug(child.channel_name)}-{child.id[:8]}.html"
-        path.write_text(html, encoding="utf-8")
-        per_channel.append((child.channel_name, path))
+        name = f"{_slug(child.channel_name)}-{child.id[:8]}.html"
+        per_channel.append((child.channel_name, name, html))
 
     for row in rows:
-        match = next((p for name, p in per_channel if name == row.get("channel_name")), None)
-        row["report_path"] = match.name if match else None
+        match = next(
+            (n for channel, n, _ in per_channel if channel == row.get("channel_name")), None
+        )
+        row["report_path"] = match
 
     consolidated_html = render_bulk_report(
         rows, job_id=parent.id, started_at=started, ended_at=ended
     )
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
-    consolidated = reports_dir() / f"bulk-{stamp}-{parent.id[:8]}.html"
-    consolidated.write_text(consolidated_html, encoding="utf-8")
+    stem = f"bulk-{stamp}-{parent.id[:8]}"
 
-    archive = reports_dir() / f"bulk-{stamp}-{parent.id[:8]}.zip"
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
         bundle.writestr("consolidated.html", consolidated_html)
-        for _name, path in per_channel:
-            bundle.write(path, arcname=f"channels/{path.name}")
+        for _channel, name, html in per_channel:
+            bundle.writestr(f"channels/{name}", html)
+    archive_bytes = buffer.getvalue()
 
-    async with db_session.session_scope() as session:
-        bulk_row = Report(
-            job_id=parent.id,
-            channel_name=f"Bulk — {len(rows)} channel(s)",
-            job_type="bulk",
-            format="html",
-            path=str(consolidated),
-            verdict_status="BULK",
-            risk_score=max((r.get("risk_score") or 0 for r in rows), default=0.0),
-            size_bytes=consolidated.stat().st_size,
-        )
-        session.add(bulk_row)
-        await session.flush()
-        report_id = bulk_row.id
+    highest_risk = max((r.get("risk_score") or 0 for r in rows), default=0.0)
+    consolidated_record = await store_report(
+        handle_id=parent.id,
+        channel_name=f"Bulk — {len(rows)} channel(s)",
+        job_type="bulk",
+        fmt="html",
+        data=consolidated_html.encode("utf-8"),
+        stem=stem,
+        verdict_status="BULK",
+        risk_score=float(highest_risk),
+    )
+    archive_record = await store_report(
+        handle_id=parent.id,
+        channel_name=f"Bulk — {len(rows)} channel(s)",
+        job_type="bulk",
+        fmt="zip",
+        data=archive_bytes,
+        stem=stem,
+        verdict_status="BULK",
+        risk_score=float(highest_risk),
+    )
 
     return {
-        "id": report_id,
-        "consolidated": str(consolidated),
-        "zip": str(archive),
-        "url": f"/api/reports/{report_id}/download",
+        "id": consolidated_record["id"],
+        "zip_id": archive_record["id"],
+        "consolidated": consolidated_record["path"],
+        "zip": archive_record["path"],
+        "url": f"/api/reports/{consolidated_record['id']}/download",
         "zip_url": f"/api/bulk/jobs/{parent.id}/reports.zip",
         "channel_reports": len(per_channel),
     }
 
 
-async def build_evidence_bundle(handle: JobHandle) -> Path:
-    """Segments and playlist snapshots recorded around each incident, as a ZIP."""
-    settings = get_settings()
-    directory = settings.rba_evidence_dir
-    directory.mkdir(parents=True, exist_ok=True)
-    archive = directory / f"evidence-{handle.id[:8]}.zip"
+async def build_evidence_bundle(handle: JobHandle) -> bytes:
+    """Segments and playlist snapshots recorded around each incident, as ZIP bytes.
 
+    Built in memory from the database rows and streamed to the caller, so an evidence
+    download leaves nothing behind on the analyzer host.
+    """
     async with db_session.session_scope() as session:
         snapshots = (
             (
@@ -184,7 +232,8 @@ async def build_evidence_bundle(handle: JobHandle) -> Path:
             .all()
         )
 
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
         if handle.result is not None:
             bundle.writestr(
                 "result.json",
@@ -208,7 +257,7 @@ async def build_evidence_bundle(handle: JobHandle) -> Path:
                         bundle.writestr(
                             f"playlists/{_slug(variant)}/{stamp}.m3u8", snapshot_obj.raw
                         )
-    return archive
+    return buffer.getvalue()
 
 
 async def list_reports(
@@ -243,20 +292,38 @@ async def list_reports(
                 "size_bytes": row.size_bytes,
                 "created_at": row.created_at.isoformat(),
                 "url": f"/api/reports/{row.id}/download",
-                "exists": Path(row.path).exists(),
+                "exists": row.size_bytes > 0,
             }
             for row in rows
         ]
 
 
-async def get_report(report_id: int) -> tuple[Path, str, str] | None:
+MEDIA_TYPES = {
+    "pdf": "application/pdf",
+    "zip": "application/zip",
+    "html": "text/html; charset=utf-8",
+}
+
+
+async def get_report(report_id: int) -> tuple[bytes, str, str] | None:
+    """The stored report as bytes, its media type, and the filename to offer.
+
+    The database holds the report. A row written by an older deployment that kept reports
+    on disk still resolves, by reading the path it recorded.
+    """
     async with db_session.session_scope() as session:
-        row = await session.get(Report, report_id)
+        # The blob is deferred on the model, so this read asks for it explicitly.
+        row = await session.get(Report, report_id, options=[undefer(Report.content)])
         if row is None:
             return None
-        path = Path(row.path)
-        media = "application/pdf" if row.format == "pdf" else "text/html; charset=utf-8"
-        return path, media, f"{_slug(row.channel_name or 'report')}.{row.format}"
+        data = row.content
+        if data is None and row.path:
+            path = Path(row.path)
+            data = path.read_bytes() if path.exists() else None
+        if data is None:
+            return None
+        media = MEDIA_TYPES.get(row.format, "application/octet-stream")
+        return data, media, f"{_slug(row.channel_name or 'report')}.{row.format}"
 
 
 async def delete_report(report_id: int) -> bool:
@@ -264,6 +331,7 @@ async def delete_report(report_id: int) -> bool:
         row = await session.get(Report, report_id)
         if row is None:
             return False
-        Path(row.path).unlink(missing_ok=True)
+        if row.path:
+            Path(row.path).unlink(missing_ok=True)
         await session.execute(delete(Report).where(Report.id == report_id))
         return True

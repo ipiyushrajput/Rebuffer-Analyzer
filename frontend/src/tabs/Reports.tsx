@@ -148,11 +148,13 @@ export function ReportsTab() {
               />
             ) : (
               <EmptyState
-                title={open.exists ? 'This report is a PDF' : 'The stored file was removed'}
+                title={
+                  open.exists ? `This report is a ${open.format.toUpperCase()}` : 'No content is stored'
+                }
                 detail={
                   open.exists
-                    ? 'Open it in a new tab or download it; the browser renders PDFs outside this panel.'
-                    : 'The database row remains so the verdict stays searchable. Regenerate the report from its job to restore the file.'
+                    ? 'Open it in a new tab or download it; the browser renders it outside this panel.'
+                    : 'The row remains so the verdict stays searchable, and the document itself is no longer stored. Generate a new report from the job.'
                 }
               />
             )}
@@ -192,7 +194,7 @@ export function ReportsTab() {
             suffix="/ 100"
             tone="pink"
           />
-          <MetricTile label="Stored" value={bytes(totalBytes)} note="on the analyzer host" />
+          <MetricTile label="Stored" value={bytes(totalBytes)} note="held in the database" />
           <MetricTile
             label="Newest"
             value={
@@ -353,7 +355,7 @@ export function ReportsTab() {
                               Open
                             </button>
                           ) : (
-                            <span className="chip-violet">File removed</span>
+                            <span className="chip-violet">No content</span>
                           )}
                           <button
                             type="button"

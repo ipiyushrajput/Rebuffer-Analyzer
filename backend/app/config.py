@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     rba_reports_dir: Path = BACKEND_ROOT / "var" / "reports"
     rba_evidence_dir: Path = BACKEND_ROOT / "var" / "evidence"
 
+    # Where a rendered report lives: "database" keeps the bytes in the reports table and
+    # writes nothing to disk; "both" also mirrors a copy into RBA_REPORTS_DIR. Evidence and
+    # bulk archives are built in memory and streamed either way.
+    rba_report_storage: str = "database"
+
     rba_max_concurrent_jobs: int = 20
     rba_bulk_default_concurrency: int = 5
     rba_per_host_connections: int = 8
@@ -171,6 +176,16 @@ class Settings(BaseSettings):
 
     def table_name(self, base: str) -> str:
         return f"{self.db_table_prefix}{base}"
+
+    @property
+    def reports_on_disk(self) -> bool:
+        """True when a rendered report is also mirrored into RBA_REPORTS_DIR."""
+        return self.rba_report_storage.lower() in ("disk", "both")
+
+    @property
+    def reports_in_database(self) -> bool:
+        """True when the report bytes are stored in the reports table."""
+        return self.rba_report_storage.lower() in ("database", "db", "both", "")
 
 
 @lru_cache(maxsize=1)

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 from app.api.realtime import _interim
 from app.jobs.manager import job_manager
@@ -120,40 +119,37 @@ async def read_report(report_id: int) -> dict[str, Any]:
     found = await service.get_report(report_id)
     if found is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    path, media, filename = found
+    data, media, filename = found
     return {
         "id": report_id,
-        "path": str(path),
         "media_type": media,
         "filename": filename,
-        "exists": path.exists(),
+        "size_bytes": len(data),
+        "exists": True,
         "url": f"/api/reports/{report_id}/download",
     }
 
 
 @router.get("/reports/{report_id}/download")
-async def download_report(report_id: int, inline: bool = Query(default=False)) -> FileResponse:
+async def download_report(report_id: int, inline: bool = Query(default=False)) -> Response:
     """
-    Serve a stored report.
+    Serve a stored report, streamed from the database.
 
     ``inline=1`` drops the attachment disposition so the Reports tab renders the document in
     place. The bytes are identical either way; only the disposition header changes.
     """
     found = await service.get_report(report_id)
     if found is None:
-        raise HTTPException(status_code=404, detail="Report not found")
-    path, media, filename = found
-    if not path.exists():
         raise HTTPException(
-            status_code=410, detail="The report file has been removed from the analyzer host"
+            status_code=404, detail="Report not found, or its content is no longer stored"
         )
-    if inline:
-        return FileResponse(
-            path=path,
-            media_type=media,
-            headers={"Content-Disposition": f'inline; filename="{filename}"'},
-        )
-    return FileResponse(path=path, media_type=media, filename=filename)
+    data, media, filename = found
+    disposition = "inline" if inline else "attachment"
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
 
 
 @router.delete("/reports/{report_id}")
@@ -165,13 +161,16 @@ async def remove_report(report_id: int) -> dict[str, bool]:
 
 
 @router.get("/jobs/{job_id}/evidence.zip")
-async def evidence_bundle(job_id: str) -> FileResponse:
+async def evidence_bundle(job_id: str) -> Response:
+    """The evidence archive, built in memory from the stored rows and streamed."""
     handle = job_manager.get(job_id)
     if handle is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    archive: Path = await service.build_evidence_bundle(handle)
-    return FileResponse(
-        path=archive, media_type="application/zip", filename=f"evidence-{job_id[:8]}.zip"
+    archive = await service.build_evidence_bundle(handle)
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="evidence-{job_id[:8]}.zip"'},
     )
 
 

@@ -85,6 +85,12 @@ frontend/src/
   `rebuffer_impact`. Text is written in present-tense definite statements.
 - Thresholds are never inlined. They live in `app/config.py` (`Thresholds`), are editable
   in the Settings tab, and are persisted in the DB.
+- **The database holds everything.** Jobs, findings, incidents, samples, snapshots, settings
+  and the rendered reports (`reports.content`, LONGBLOB on MySQL). The analyzer host keeps no
+  state, so a second instance serves a report it did not render. `RBA_REPORT_STORAGE` is
+  `database` by default; `both` mirrors a copy to `RBA_REPORTS_DIR`. Bulk archives and
+  evidence bundles are built in memory and streamed. A schema change needs an Alembic
+  revision in `backend/alembic/versions/`.
 - Every rule needs a positive and a negative test driven by the fault-injecting fixture
   server in `tests/fixtures/`.
 - Frontend: React 18 + Vite + TypeScript, Tailwind, ECharts via `echarts-for-react`,
