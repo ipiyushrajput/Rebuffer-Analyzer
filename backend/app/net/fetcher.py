@@ -14,6 +14,7 @@ Three properties this module guarantees, because every downstream rule depends o
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -34,6 +35,11 @@ except ImportError:  # pragma: no cover - urllib3 is optional for the async path
     pass
 
 COMPONENT_SUFFIX = "|COMPONENT=HLS"
+# The pipe arrives raw from a player configuration and percent-encoded from the channel
+# catalogue. Both forms are the same routing marker.
+_PIPE = r"(?:\||%7[Cc])"
+COMPONENT_MARKER = re.compile(rf"{_PIPE}COMPONENT=HLS$")
+COMPONENT_MARKER_PATH = re.compile(rf"{_PIPE}COMPONENT=HLS/")
 
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 MAX_REDIRECTS = 10
@@ -59,13 +65,14 @@ CDN_HEADER_NAMES = (
 
 
 def strip_component_suffix(url: str) -> str:
-    """Remove the TV Plus ``|COMPONENT=HLS`` routing marker. Everything else is verbatim."""
-    if url.endswith(COMPONENT_SUFFIX):
-        return url[: -len(COMPONENT_SUFFIX)]
-    marker = COMPONENT_SUFFIX + "/"
-    if marker in url:
-        return url.replace(marker, "/")
-    return url
+    """Remove the TV Plus ``|COMPONENT=HLS`` routing marker. Everything else is verbatim.
+
+    The channel catalogue serves the marker percent-encoded — ``%7CCOMPONENT=HLS`` — and the
+    player configuration serves it raw, so both spellings are removed. Only the marker itself
+    goes: a ``%7C`` anywhere else in the query is a pipe the origin asked for and is kept.
+    """
+    stripped = COMPONENT_MARKER.sub("", url)
+    return COMPONENT_MARKER_PATH.sub("/", stripped)
 
 
 def query_keys(url: str) -> set[str]:

@@ -30,6 +30,7 @@ import {
 import { IconDownload, IconFile, IconPulse, IconStop } from '../components/ui/icons'
 import { AGING_PRESETS, REBUFFER_RATIO_THRESHOLD_DEFAULT, type Severity } from '../lib/constants'
 import { duration, localDateTime, utcTitle } from '../lib/format'
+import { usePrefill, type ChannelPrefill } from '../lib/prefill'
 import type { FindingData, VerdictData } from '../ws/messages'
 
 const ACTIVE = new Set(['PENDING', 'RUNNING', 'CANCELLING'])
@@ -49,10 +50,13 @@ function JobStatusChip({ status }: { status: string }) {
 
 interface Props {
   thresholds: Record<string, number>
+  /** A channel sent from All channels. It seeds the form; it never starts the job. */
+  prefill?: ChannelPrefill | null
 }
 
-export function AgingTab({ thresholds }: Props) {
+export function AgingTab({ thresholds, prefill = null }: Props) {
   const [form, setForm] = useState<UrlFormValue>(emptyForm(true))
+  usePrefill(prefill, setForm, true)
   const [durationMinutes, setDurationMinutes] = useState(60)
   const [custom, setCustom] = useState('')
   const [openJob, setOpenJob] = useState<JobSummary | null>(null)

@@ -99,6 +99,37 @@ export interface AnalysedChannel extends JobSummary {
   reports: ChannelReport[]
 }
 
+/** One country the channel catalogue serves, and the data set its channels come from. */
+export interface CatalogueCountry {
+  code: string
+  name: string
+  group: string
+}
+
+/** One channel as the catalogue lists it. `playback_url` already has the routing marker off. */
+export interface CatalogueChannel {
+  number: string
+  service_id: string
+  country: string
+  name: string
+  playback_url: string
+  extra: string[]
+}
+
+export interface CataloguePage {
+  channels: CatalogueChannel[]
+  page: number
+  page_size: number
+  total: number | null
+  total_pages: number | null
+  has_next: boolean
+  has_previous: boolean
+  url: string
+  today: string
+  country: CatalogueCountry
+  environment: string
+}
+
 export const endpoints = {
   health: () => api.get<Record<string, unknown>>('/health'),
 
@@ -134,6 +165,17 @@ export const endpoints = {
     api.upload<{ rows: Record<string, unknown>[]; errors: Record<string, unknown>[] }>(
       '/bulk/validate',
       form,
+    ),
+
+  catalogueCountries: () =>
+    api.get<{ countries: CatalogueCountry[]; environments: string[]; page_size: number }>(
+      '/catalogue/countries',
+    ),
+  catalogueChannels: (params: { country: string; env: string; page: number; today?: string }) =>
+    api.get<CataloguePage>(
+      `/catalogue/channels?country=${encodeURIComponent(params.country)}` +
+        `&env=${encodeURIComponent(params.env)}&page=${params.page}` +
+        (params.today ? `&today=${encodeURIComponent(params.today)}` : ''),
     ),
 
   listChannels: () => api.get<{ channels: AnalysedChannel[]; count: number }>('/channels'),

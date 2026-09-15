@@ -143,6 +143,14 @@ export const IconChannels = (p: IconProps) => (
   </Svg>
 )
 
+export const IconGlobe = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18Z" />
+  </Svg>
+)
+
 export const IconTrash = (p: IconProps) => (
   <Svg {...p}>
     <path d="M4 7h16M10 4h4M9 7v12M15 7v12" />

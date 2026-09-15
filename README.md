@@ -256,6 +256,9 @@ POST   /api/bulk/jobs       GET /api/bulk/jobs/{id}  POST /api/bulk/validate
 GET    /api/bulk/jobs/{id}/report.{html|pdf}         GET /api/bulk/jobs/{id}/reports.zip
 GET    /api/bulk/template.{csv|xlsx|json}
 
+GET    /api/catalogue/countries              every selectable country and environment
+GET    /api/catalogue/channels?country=&env=&page=&today=    one page of the TV Plus list
+
 GET    /api/reports  ·  GET|DELETE /api/reports/{id}  ·  GET /api/reports/{id}/download
 GET    /api/jobs/{id}/evidence.zip   ·  GET /api/jobs/{id}/snapshots?variant=&at=
 GET    /api/proxy?u=<urlencoded>
@@ -263,6 +266,23 @@ GET|PUT /api/settings   ·  GET /api/settings/rules   ·  GET /api/health
 ```
 
 Interactive documentation is served at `/api/docs`.
+
+### All channels
+
+The TV Plus channel list for one country and environment, fetched by the backend rather than
+the browser: the catalogue sends no CORS headers, and the country-to-`dbconnect` mapping
+belongs on the server. `today` is the date the operator pressed Search, and every later page
+repeats it so paging stays inside one search. Playback URLs arrive with the
+`|COMPONENT=HLS` routing marker removed, in both its raw and percent-encoded spellings.
+
+Each row opens Realtime or Aging with the channel filled in — name, service ID and country
+in the channel name, and the clean playback URL. Nothing starts on its own, and every field
+stays editable.
+
+Countries are grouped by the data set they read: **Group A** (AU, BR, CA, IN, KR, MX, NZ,
+TH, US, PH, SG) and **Group B** (AT, BE, DE, DK, FI, FR, IE, IT, LU, NL, NO, PT, ES, SE, CH,
+GB, EG, SA, AE). Adding a country or moving an environment is one edit in
+`backend/app/tvplus/catalogue.py`.
 
 ### Bulk input
 
@@ -279,7 +299,7 @@ row-level errors shown for correction.
 The application follows one design system, **Signal Clarity**, and the report templates
 follow it too, so a PDF sent to a vendor looks like the screen the operator read it on.
 
-- **Structure.** A collapsible dark rail carries the five sections and the host's health.
+- **Structure.** A collapsible dark rail carries the sections and the host's health.
   Every screen opens with a page header — what this is, what state it is in, who is
   operating it — then a row of measurements, then the evidence. Opening a finding replaces
   the body with its investigation: the causal chain, the request evidence, the failing

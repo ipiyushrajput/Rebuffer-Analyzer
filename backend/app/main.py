@@ -89,7 +89,7 @@ def create_app() -> FastAPI:
         expose_headers=["Content-Disposition"],
     )
 
-    from app.api import aging, bulk, channels, proxy, realtime, reports
+    from app.api import aging, bulk, catalogue, channels, proxy, realtime, reports
     from app.api import settings as settings_api
     from app.ws import routes as ws_routes
 
@@ -99,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(aging.router, prefix="/api")
     app.include_router(bulk.router, prefix="/api")
     app.include_router(channels.router, prefix="/api")
+    app.include_router(catalogue.router, prefix="/api")
     app.include_router(reports.router, prefix="/api")
     app.include_router(proxy.router, prefix="/api")
     app.include_router(ws_routes.router)
