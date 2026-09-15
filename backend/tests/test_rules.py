@@ -705,6 +705,99 @@ def test_audio_and_video_declaring_different_discontinuity_counts_fires() -> Non
     )
 
 
+def _skewed_ladder() -> list[sequence_rules.VariantSnapshot]:
+    """One rung polled a beat after the other, across a discontinuity at segment 100.
+
+    This is the shape an operator reported as a false positive. The laggard still lists
+    segment 99 and tags 100 as discontinuous; the leader's window has slid to 100, so the
+    tag is gone and the count has moved into EXT-X-DISCONTINUITY-SEQUENCE. The declared
+    headers read 0 and 1 and the tag positions read [100] and [], yet both rungs agree on
+    every segment they both publish.
+    """
+    return [
+        _snapshot(
+            "v360p@1436k",
+            PlaylistSpec(media_sequence=99, segment_count=6, discontinuity_at={1}),
+        ),
+        _snapshot(
+            "v1080p@8566k",
+            PlaylistSpec(media_sequence=100, segment_count=6, discontinuity_sequence=1),
+        ),
+    ]
+
+
+def test_poll_skew_across_a_discontinuity_fires_neither_cross_variant_rule() -> None:
+    found = ids(
+        sequence_rules.check_cross_variant(_skewed_ladder(), layer=LAYER, thresholds=T, at=NOW)
+    )
+    assert "SEQ-009" not in found
+    assert "SEQ-011" not in found
+
+
+def test_a_dsn_spread_beyond_the_tolerance_fires_whatever_the_windows_say() -> None:
+    """No ordering of polls moves one rung three discontinuities ahead of another."""
+    snapshots = [
+        _snapshot(
+            "low", PlaylistSpec(media_sequence=100, segment_count=5, discontinuity_sequence=1)
+        ),
+        _snapshot(
+            "high", PlaylistSpec(media_sequence=100, segment_count=5, discontinuity_sequence=5)
+        ),
+    ]
+    finding = next(
+        f
+        for f in sequence_rules.check_cross_variant(snapshots, layer=LAYER, thresholds=T, at=NOW)
+        if f.rule.id == "SEQ-009"
+    )
+    assert "span 4" in finding.detail
+    assert finding.evidence[0]["spread"] == 4
+    assert finding.evidence[0]["tolerance"] == T.cross_variant_dsn_tolerance
+
+
+def test_a_dsn_disagreement_at_a_segment_every_rung_lists_fires_inside_the_tolerance() -> None:
+    """Same segment, different discontinuity count: no poll ordering explains that."""
+    snapshots = [
+        _snapshot(
+            "low", PlaylistSpec(media_sequence=100, segment_count=5, discontinuity_sequence=4)
+        ),
+        _snapshot(
+            "high", PlaylistSpec(media_sequence=100, segment_count=5, discontinuity_sequence=5)
+        ),
+    ]
+    finding = next(
+        f
+        for f in sequence_rules.check_cross_variant(snapshots, layer=LAYER, thresholds=T, at=NOW)
+        if f.rule.id == "SEQ-009"
+    )
+    assert "Media sequence 101" in finding.detail
+    assert finding.evidence[0]["anchor_msn"] == 101
+
+
+def test_the_audio_video_discontinuity_split_follows_the_ladder_judgement() -> None:
+    """AV-003 described the same poll skew from another angle; it is gated on the same test."""
+    skew = _skewed_ladder()
+    skew[0].kind = "audio"
+    assert "AV-003" not in ids(
+        sequence_rules.check_cross_variant(skew, layer=LAYER, thresholds=T, at=NOW)
+    )
+
+
+def test_a_tag_only_one_rung_carries_inside_the_common_window_still_fires() -> None:
+    """The real defect: both rungs publish segment 102, one calls it discontinuous."""
+    snapshots = [
+        _snapshot("low", PlaylistSpec(media_sequence=100, segment_count=6, discontinuity_at={2})),
+        _snapshot("high", PlaylistSpec(media_sequence=100, segment_count=6)),
+    ]
+    finding = next(
+        f
+        for f in sequence_rules.check_cross_variant(snapshots, layer=LAYER, thresholds=T, at=NOW)
+        if f.rule.id == "SEQ-011"
+    )
+    assert "101-105" in finding.detail
+    assert finding.evidence[0]["positions"]["low"] == [102]
+    assert finding.evidence[0]["positions"]["high"] == []
+
+
 def test_discontinuity_tags_at_different_positions_fire() -> None:
     snapshots = [
         _snapshot("low", PlaylistSpec(media_sequence=100, segment_count=6, discontinuity_at={2})),
@@ -1095,6 +1188,54 @@ def test_webvtt_without_a_timestamp_map_fires_and_a_good_cue_file_passes() -> No
         subtitle_rules.check_webvtt(bad, variant="sub", uri="s.vtt", layer=LAYER)
     )
     assert ids(subtitle_rules.check_webvtt(good, variant="sub", uri="s.vtt", layer=LAYER)) == {
+        "SUB-901"
+    }
+
+
+def test_a_cue_with_more_than_two_hour_digits_parses() -> None:
+    """
+    WebVTT allows two *or more* digits in the hours field.
+
+    A packager that offsets cues from a channel epoch writes four, and the segment below is
+    one the operator pulled from the CDN. Requiring exactly two reported every such segment
+    as unparseable, which named the stream for text it had written correctly.
+    """
+    text = (
+        "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:1246:04:14.730,MPEGTS:207000\n\n"
+        "1247:44:25.511 --> 1247:44:27.113\nSo funny.\n\n"
+        "1247:44:27.113 --> 1247:44:29.382\nYou had it in the bucket\n"
+    )
+    findings = subtitle_rules.check_webvtt(text, variant="sub_en", uri="s.vtt", layer=LAYER)
+    assert ids(findings) == {"SUB-901"}
+    assert "2 cue(s)" in findings[0].detail
+
+
+def test_a_cue_whose_milliseconds_are_short_still_fires() -> None:
+    """The hours field widened; the rest of the timestamp is still exact."""
+    text = (
+        "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n\n"
+        "1247:44:27.11 --> 1247:44:29.382\nShort milliseconds\n"
+    )
+    assert "SUB-001" in ids(
+        subtitle_rules.check_webvtt(text, variant="sub", uri="s.vtt", layer=LAYER)
+    )
+
+
+def test_a_webvtt_body_is_cut_on_a_line_boundary_before_the_cue_checks_see_it() -> None:
+    """A half-written timing line is the analyzer's truncation, never the packager's text."""
+    from app.media.segment import WEBVTT_HEAD_BYTES, analyse
+
+    cues = "".join(
+        f"00:{n // 60:02d}:{n % 60:02d}.000 --> 00:{(n + 1) // 60:02d}:{(n + 1) % 60:02d}.000\n"
+        f"Line {n}\n\n"
+        for n in range(400)
+    )
+    body = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n\n" + cues
+    assert len(body.encode()) > WEBVTT_HEAD_BYTES
+
+    head = analyse(body.encode(), uri="s.vtt").raw["webvtt_head"]
+    assert head.endswith("\n")
+    assert ids(subtitle_rules.check_webvtt(head, variant="sub", uri="s.vtt", layer=LAYER)) == {
         "SUB-901"
     }
 

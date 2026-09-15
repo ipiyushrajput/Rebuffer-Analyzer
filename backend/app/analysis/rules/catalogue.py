@@ -1206,6 +1206,7 @@ SEQ_XVAR_DSN_MISMATCH = _r(
     "Emit the same discontinuity count on every rung at the same timeline position.",
     DIRECT,
     "Tizen Compat Audit DISC module; past TV Plus investigation",
+    ("cross_variant_dsn_tolerance",),
 )
 SEQ_XVAR_SEGMENT_MISMATCH = _r(
     "SEQ-010",
@@ -1422,7 +1423,7 @@ SEG_NO_ID3 = _r(
 SEG_BITRATE_OVER_DECLARED = _r(
     "SEG-015",
     "segment",
-    E,
+    W,
     Owner.PACKAGER,
     "Segment bitrate exceeds the rung's declared BANDWIDTH",
     "This single segment carries more bits per second than the rung declares, so ABR "
@@ -2153,7 +2154,7 @@ VPB_RATIO = _r(
 VPB_STALL = _r(
     "VPB-002",
     "virtual_buffer",
-    E,
+    W,
     Owner.CDN,
     "Simulated player buffer reached zero",
     "Segments on this rung arrived more slowly than they play, so a player buffer modelled on "

@@ -61,6 +61,7 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
     keys: [
       'stale_playlist_factor',
       'cross_variant_msn_error_spread',
+      'cross_variant_dsn_tolerance',
       'min_live_window_multiple',
       'segment_extinf_max_ratio_to_td',
       'segment_extinf_absolute_max_s',
@@ -97,7 +98,7 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
     id: 'ladder',
     title: 'Ladder',
     note: 'The shape a ladder must keep for ABR to recover on a constrained connection.',
-    keys: ['lowest_rung_max_kbps', 'max_adjacent_rung_ratio'],
+    keys: ['lowest_rung_max_kbps', 'max_adjacent_rung_ratio', 'bandwidth_variation_tolerance'],
   },
   {
     id: 'incidents',

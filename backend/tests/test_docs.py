@@ -103,3 +103,18 @@ def test_no_committed_file_carries_an_ai_attribution_line() -> None:
             if pattern.search(text):
                 offenders.append(str(path.relative_to(root)))
     assert not offenders, f"attribution lines found in: {sorted(set(offenders))}"
+
+
+def test_every_threshold_is_editable_in_the_settings_tab() -> None:
+    """A threshold the Settings tab does not list cannot be changed without a code change.
+
+    The tab renders explicit key groups, so a threshold added to `Thresholds` and left out of
+    them is invisible on screen while still governing what fires.
+    """
+    from app.config import Thresholds
+
+    settings_tsx = (DOCS.parent / "frontend" / "src" / "tabs" / "Settings.tsx").read_text(
+        encoding="utf-8"
+    )
+    missing = [name for name in Thresholds.model_fields if f"'{name}'" not in settings_tsx]
+    assert not missing, f"thresholds absent from the Settings tab groups: {missing}"

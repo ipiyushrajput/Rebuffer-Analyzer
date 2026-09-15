@@ -9,7 +9,12 @@ from typing import Any
 from app.analysis.rules import catalogue as R
 from app.analysis.rules.base import Finding, StreamLayer
 
-CUE_TIMING = re.compile(r"(\d{2}:)?\d{2}:\d{2}\.\d{3}\s*-->\s*(\d{2}:)?\d{2}:\d{2}\.\d{3}")
+# WebVTT allows two *or more* digits in the hours field (W3C WebVTT, cue timings). A
+# packager that offsets cues from a channel epoch writes four, as in
+# `1247:44:27.113 --> 1247:44:29.382`, which is well formed; requiring exactly two reported
+# every such segment as unparseable.
+TIMESTAMP = r"(?:\d{2,}:)?\d{2}:\d{2}\.\d{3}"
+CUE_TIMING = re.compile(rf"{TIMESTAMP}\s*-->\s*{TIMESTAMP}")
 # C0 controls other than tab, line feed and carriage return.
 C0_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 

@@ -907,7 +907,7 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 | `SEG-012` | CRITICAL | Packager | Media segment timescale does not match the initialisation segment | direct | — | Dolby Stream Validator container-level conformance |
 | `SEG-013` | CRITICAL | Packager | Initialisation segment is unreachable or does not parse | direct | — | Qosifire 'Bad init segment' |
 | `SEG-014` | ERROR | Packager | Packed audio segment carries no transport stream timestamp | direct | — | THEOplayer packed-audio ID3 check |
-| `SEG-015` | ERROR | Packager | Segment bitrate exceeds the rung's declared BANDWIDTH | direct | `bandwidth_overshoot_tolerance` | THEOplayer segment-size check; HLSAnalyzer EC-2001 |
+| `SEG-015` | WARN | Packager | Segment bitrate exceeds the rung's declared BANDWIDTH | direct | `bandwidth_overshoot_tolerance` | THEOplayer segment-size check; HLSAnalyzer EC-2001 |
 | `SEG-016` | CRITICAL | Content provider | Segment decryption failed | direct | — | THEOplayer decryption-failure check; Dolby clear-key input |
 | `SEG-017` | ERROR | CDN | Segment download time exceeds its playback duration | direct | `download_ratio_error` | HLSAnalyzer WA-1002 |
 | `SEG-018` | CRITICAL | CDN | Segment download failed | direct | — | HLSAnalyzer EC-2002 |
@@ -1039,7 +1039,7 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 | `SEQ-006` | CRITICAL | Packager | Discontinuity sequence number decreased | direct | — | A-Sequence Detector |
 | `SEQ-007` | ERROR | Packager | Discontinuity sequence number advanced by more than one between polls | direct | — | A-Sequence Detector |
 | `SEQ-008` | ERROR | Packager | Media sequence numbers across variants differ beyond the tolerated spread | direct | `cross_variant_msn_error_spread` | A-Sequence Detector; Tizen Compat Audit XVAR module |
-| `SEQ-009` | CRITICAL | Packager | Discontinuity sequence numbers differ across variants | direct | — | Tizen Compat Audit DISC module; past TV Plus investigation |
+| `SEQ-009` | CRITICAL | Packager | Discontinuity sequence numbers differ across variants | direct | `cross_variant_dsn_tolerance` | Tizen Compat Audit DISC module; past TV Plus investigation |
 | `SEQ-010` | ERROR | Packager | Variants list different segment counts or durations for the same media sequence number | direct | — | Tizen Compat Audit XVAR module |
 | `SEQ-011` | CRITICAL | Packager | Discontinuity tags sit at different positions across variants | direct | — | Tizen Compat Audit DISC module |
 | `SEQ-012` | WARN | Packager | Program date times differ across variants for the same position | indirect | — | HLS AV Doctor DemuxAnalyzer |
@@ -1325,7 +1325,7 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 | ID | Severity | Owner | Title | Impact | Thresholds | Reference |
 |---|---|---|---|---|---|---|
 | `VPB-001` | CRITICAL | CDN | Simulated rebuffering ratio is above the threshold | direct | `rebuffer_ratio_threshold`, `vpb_mode` | HLSAnalyzer virtual buffer; Qosifire per-rendition buffer |
-| `VPB-002` | ERROR | CDN | Simulated player buffer reached zero | direct | `vpb_startup_buffer_td_multiple`, `vpb_rebuffer_resume_td_multiple` | HLSAnalyzer virtual buffer; Qosifire 'Buffer too short' |
+| `VPB-002` | WARN | CDN | Simulated player buffer reached zero | direct | `vpb_startup_buffer_td_multiple`, `vpb_rebuffer_resume_td_multiple` | HLSAnalyzer virtual buffer; Qosifire 'Buffer too short' |
 | `VPB-003` | WARN | Packager | Simulated player buffer exceeded the maximum a player holds | indirect | `vpb_max_buffer_s` | Qosifire 'Buffer too long'; HLSAnalyzer EC-1004 |
 | `VPB-004` | CRITICAL | CDN | No segment on this rung was downloadable for a continuous period | direct | `vpb_outage_threshold_s` | HLSAnalyzer outage mode |
 | `VPB-900` | PASS | CDN | Simulated player buffer never emptied | none | — | — |
@@ -1366,6 +1366,7 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 |---|---|
 | `rebuffer_ratio_threshold` | `0.25` |
 | `cross_variant_msn_error_spread` | `5` |
+| `cross_variant_dsn_tolerance` | `2` |
 | `stale_playlist_factor` | `1.5` |
 | `download_ratio_warn` | `0.5` |
 | `download_ratio_error` | `1.0` |

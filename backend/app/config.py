@@ -56,6 +56,10 @@ class Thresholds(BaseModel):
 
     rebuffer_ratio_threshold: float = 0.25
     cross_variant_msn_error_spread: int = 5
+    # Renditions are polled independently, so one can carry a discontinuity the next has not
+    # published yet and the counters differ for a poll or two. Past this spread the ladder
+    # disagrees by more than poll skew can account for.
+    cross_variant_dsn_tolerance: int = 2
     stale_playlist_factor: float = 1.5
     download_ratio_warn: float = 0.5
     download_ratio_error: float = 1.0
