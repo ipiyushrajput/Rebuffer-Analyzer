@@ -9,12 +9,15 @@ Virtual Player Buffer replays.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.media.fmp4 import Fmp4Analysis, parse_init
 from app.media.segment import SegmentAnalysis, analyse
 from app.net.fetcher import Fetcher, FetchResult
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -110,9 +113,19 @@ class SegmentSampler:
         if not init_uri or self.sampling.init_uri == init_uri:
             return None
         result = await self.fetcher.fetch(init_uri)
+        # Recorded before the parse, so an init segment the analyzer cannot read is fetched
+        # once rather than on every poll.
         self.sampling.init_uri = init_uri
         if result.ok:
-            self.sampling.init_segment = parse_init(result.body)
+            try:
+                self.sampling.init_segment = parse_init(result.body)
+            except Exception:
+                log.exception(
+                    "EXT-X-MAP parse failed for %s (%s bytes from %s)",
+                    self.sampling.variant,
+                    result.bytes_received,
+                    init_uri,
+                )
         return result
 
     async def fetch_segment(
@@ -134,20 +147,15 @@ class SegmentSampler:
             result = await self.fetcher.fetch(uri)
         completed_at = dt.datetime.now(dt.UTC)
 
-        analysis = analyse(
-            result.body,
-            uri=uri,
-            declared_duration=declared_duration,
-            variant_id=self.sampling.variant,
-            msn=msn,
-            init_segment=self.sampling.init_segment,
-            encrypted=self.encrypted,
-        )
-
+        # The segment counts as attempted the moment it comes off the wire, before it is
+        # parsed. Marking it afterwards meant a body the parser could not read was re-fetched
+        # on every poll for the life of the session, and the rung never advanced past it.
         self.sampling.fetched_msns.add(msn)
         if len(self.sampling.fetched_msns) > self.max_tracked_msns:
             cutoff = sorted(self.sampling.fetched_msns)[: len(self.sampling.fetched_msns) // 2]
             self.sampling.fetched_msns.difference_update(cutoff)
+
+        analysis = self._analyse(result, uri=uri, msn=msn, declared_duration=declared_duration)
 
         return SampledSegment(
             variant=self.sampling.variant,
@@ -160,3 +168,42 @@ class SegmentSampler:
             declared_duration=declared_duration,
             discontinuity_before=discontinuity_before,
         )
+
+    def _analyse(
+        self, result: FetchResult, *, uri: str, msn: int, declared_duration: float | None
+    ) -> SegmentAnalysis:
+        """Parse the body, and record a parser failure as a fact about that segment.
+
+        The transport measurement — status, bytes, TTFB, total time — is valid whatever the
+        bitstream turns out to contain. A parser that raises must not take the measurement
+        down with it, and must not stop the rung being sampled.
+        """
+        try:
+            return analyse(
+                result.body,
+                uri=uri,
+                declared_duration=declared_duration,
+                variant_id=self.sampling.variant,
+                msn=msn,
+                init_segment=self.sampling.init_segment,
+                encrypted=self.encrypted,
+            )
+        except Exception as exc:
+            log.exception(
+                "Segment parse failed for %s msn %s (%s bytes from %s)",
+                self.sampling.variant,
+                msn,
+                result.bytes_received,
+                uri,
+            )
+            failed = SegmentAnalysis(
+                uri=uri,
+                container="unknown",
+                byte_size=result.bytes_received,
+                variant_id=self.sampling.variant,
+                msn=msn,
+                declared_duration=declared_duration,
+                encrypted=self.encrypted,
+            )
+            failed.parse_error = f"The analyzer did not parse this segment: {type(exc).__name__}"
+            return failed

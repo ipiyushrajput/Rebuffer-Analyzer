@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import datetime as dt
 import logging
+import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -99,6 +100,10 @@ class PlaylistPoller:
         self.on_snapshot = on_snapshot
         self.history_limit = history_limit
         self.interval_s = DEFAULT_POLL_INTERVAL_S
+        # A handler that raises is a defect in the analyzer, not in the stream. It is counted
+        # and kept, so the session reports the defect instead of reporting no measurement.
+        self.failures = 0
+        self.last_failure = ""
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -157,7 +162,17 @@ class PlaylistPoller:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                pass
+                # The loop survives a failed poll, but the failure is never silent. This
+                # handler once swallowed the traceback, which turned a crash in a detector
+                # into a session that polled playlists and sampled no segments, with nothing
+                # anywhere to say why.
+                self.failures += 1
+                self.last_failure = traceback.format_exc()
+                log.exception(
+                    "Playlist poll handling failed for %s (failure %d)",
+                    self.target.variant,
+                    self.failures,
+                )
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self.interval_s)
             except TimeoutError:

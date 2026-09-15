@@ -39,6 +39,14 @@ def test_the_windows_runner_uses_the_documented_ports() -> None:
     assert FRONTEND_PORT in run, "the Windows runner must default the frontend to 8080"
 
 
+def test_the_windows_runner_exposes_every_cli_command() -> None:
+    """A CLI command the operator needs on Windows is only real once run.ps1 offers it."""
+    run = _read(WINDOWS / "run.ps1")
+    for command in ("analyse", "diagnose", "rules"):
+        assert f"app.cli {command}" in run, f"run.ps1 must run `app.cli {command}`"
+        assert f"'{command}'" in run, f"run.ps1 must accept the {command} target"
+
+
 def test_both_installers_refuse_the_metanalyser_port() -> None:
     """8001 belongs to the existing Metanalyser backend and is never bound by RBA."""
     for path in (ROOT / "deploy" / "install.sh", WINDOWS / "_common.ps1"):

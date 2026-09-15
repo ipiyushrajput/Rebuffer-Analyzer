@@ -55,6 +55,7 @@ Backend CLI for headless use:
 
 ```
 python -m app.cli analyse <url> --duration 5m --html out.html
+python -m app.cli diagnose <url>              # why sampling measured what it measured
 python -m app.cli rules --markdown            # rule catalogue
 ```
 
@@ -93,6 +94,12 @@ frontend/src/
   revision in `backend/alembic/versions/`.
 - Every rule needs a positive and a negative test driven by the fault-injecting fixture
   server in `tests/fixtures/`.
+- **The analyzer never fails silently.** A handler that raises is logged with its traceback
+  and counted on the poller, never swallowed. A measurement that produced nothing carries
+  the reason it produced nothing: `AnalysisSession.sampling_state()` explains a session that
+  sampled no segment, the reason rides the progress metric, and the UI renders it in place
+  of an empty chart. `python -m app.cli diagnose <url>` prints the same account per
+  rendition.
 - Frontend: React 18 + Vite + TypeScript, Tailwind, ECharts via `echarts-for-react`,
   Zustand + TanStack Query. `MSN_GAP_TOLERANCE = 5` is shared from `src/lib/constants.ts`.
 - Design system — **Signal Clarity**. White is the dominant ground; a collapsible dark rail

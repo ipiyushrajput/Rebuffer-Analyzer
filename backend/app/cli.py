@@ -1,6 +1,7 @@
 """Command line interface.
 
     python -m app.cli analyse <url> --duration 5m --html out.html
+    python -m app.cli diagnose <url>
     python -m app.cli rules --markdown > ../docs/RULES.md
 
 The `analyse` command runs the same engine the Realtime, Aging and Bulk tabs run, so a
@@ -12,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import re
 import sys
 from pathlib import Path
@@ -160,6 +162,71 @@ def _cmd_analyse(args: argparse.Namespace) -> int:
     return 0 if result.verdict.status.name == "NO_STREAM_SIDE_DEFECT" else 2
 
 
+async def _run_diagnosis(args: argparse.Namespace) -> int:
+    """Run a short session and print, per poll, exactly what segment sampling did.
+
+    This exists for the one question the screen cannot answer on a host the analyzer is not
+    running on: a session that polls playlists and samples nothing. It prints the resolved
+    ladder, then one line per poll — HTTP status, segments listed, segments eligible,
+    segments fetched — and any handler failure with its traceback.
+    """
+    session = AnalysisSession(
+        session_id="diagnose",
+        playback_url=args.url,
+        options=SessionOptions(duration_s=args.duration, snapshot_mode=True),
+    )
+
+    print(f"Analysing {args.url} for {args.duration:.0f} s\n", file=sys.stderr)
+    await session.run()
+
+    for layer, context in session.layers.items():
+        print(f"layer {layer.value}")
+        print(f"  master          {context.master_final_url or '(none)'}")
+        print(f"  renditions      {', '.join(context.targets) or '(none)'}")
+        print(f"  samplers        {', '.join(context.samplers) or '(none)'}")
+        print(f"  encrypted       {context.encrypted}")
+        print(f"  playlist polls  {context.playlist_count}")
+        print(f"  segments        {context.segment_count}")
+        for poller in context.pollers:
+            target = poller.target
+            last = target.latest
+            status = last.result.status if last else 0
+            listed = len(last.playlist.segments) if last and last.playlist else 0
+            report = session.sampling_reports.get(target.variant)
+            print(
+                f"    {target.variant:<18} HTTP {status:<4} listed={listed:<3} "
+                f"polls={report.polls if report else 0:<4} "
+                f"sampled={report.total_fetched if report else 0:<4} "
+                f"handler failures={poller.failures}"
+            )
+            # A rung that is sampling normally explains nothing; the count speaks for it.
+            if report and report.reason and report.total_fetched == 0:
+                print(f"      reason: {report.reason}")
+            if poller.last_failure:
+                print("      last handler failure:")
+                for line in poller.last_failure.strip().splitlines():
+                    print(f"        {line}")
+        print()
+
+    state = session.sampling_state()
+    print(f"segments sampled: {state['segments_sampled']}")
+    if state["reason"]:
+        print(f"nothing was sampled because: {state['reason']}")
+    return 0 if state["segments_sampled"] else 1
+
+
+def _cmd_diagnose(args: argparse.Namespace) -> int:
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+        stream=sys.stderr,
+    )
+    if not args.verbose:
+        # One line per request buries the account this command exists to print.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+    return asyncio.run(_run_diagnosis(args))
+
+
 def _cmd_rules(args: argparse.Namespace) -> int:
     rules = registry.all()
     if args.json:
@@ -270,6 +337,15 @@ def build_parser() -> argparse.ArgumentParser:
     analyse.add_argument("--json", default=None, help="Write the raw result JSON here")
     analyse.add_argument("--verbose", "-v", action="store_true")
     analyse.set_defaults(func=_cmd_analyse)
+
+    diagnose = sub.add_parser(
+        "diagnose",
+        help="Run a short session and print why segment sampling measured what it measured",
+    )
+    diagnose.add_argument("url", help="Playback URL")
+    diagnose.add_argument("--duration", type=parse_duration, default=45.0, help="e.g. 45s, 2m")
+    diagnose.add_argument("--verbose", "-v", action="store_true")
+    diagnose.set_defaults(func=_cmd_diagnose)
 
     rules = sub.add_parser("rules", help="Print the rule catalogue")
     rules.add_argument("--markdown", action="store_true", help="Render docs/RULES.md")

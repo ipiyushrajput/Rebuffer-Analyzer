@@ -63,6 +63,11 @@ const NO_SNAPSHOTS = 'No playlist poll has completed yet.'
 const NO_PLAYER =
   'The player on this host has reported no sample. A player error is shown beside the video.'
 
+/** The engine's own account of why nothing was sampled, when it has one. */
+function noSegments(reason?: string): string {
+  return reason ? `No segment has been sampled. ${reason}` : NO_SEGMENTS
+}
+
 function Chart({ option }: { option: ChartOption }) {
   return (
     <ReactECharts
@@ -206,10 +211,12 @@ export function DownloadRatioChart({
   segments,
   warn,
   error,
+  reason,
 }: {
   segments: SegmentResultData[]
   warn: number
   error: number
+  reason?: string
 }) {
   const option = useMemo(() => {
     const groups = byVariant(segments)
@@ -242,7 +249,7 @@ export function DownloadRatioChart({
     <ChartCard
       title="4 · Segment download ratio"
       note="download time divided by playback duration"
-      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+      empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <Chart option={option} />
     </ChartCard>
@@ -286,7 +293,13 @@ export function FetchTimingChart({ snapshots }: { snapshots: PlaylistSnapshotDat
 
 // 6 — HTTP status timeline heatmap ------------------------------------------
 
-export function StatusHeatmapChart({ segments }: { segments: SegmentResultData[] }) {
+export function StatusHeatmapChart({
+  segments,
+  reason,
+}: {
+  segments: SegmentResultData[]
+  reason?: string
+}) {
   const option = useMemo(() => {
     const variants = [...new Set(segments.map((s) => s.variant))]
     const data = segments.map((s) => [
@@ -327,7 +340,7 @@ export function StatusHeatmapChart({ segments }: { segments: SegmentResultData[]
     <ChartCard
       title="6 · HTTP status timeline"
       note="per rendition"
-      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+      empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <Chart option={option} />
     </ChartCard>
@@ -444,9 +457,11 @@ export function FreshnessChart({ snapshots }: { snapshots: PlaylistSnapshotData[
 export function BitrateChart({
   segments,
   declared,
+  reason,
 }: {
   segments: SegmentResultData[]
   declared: Record<string, number | null>
+  reason?: string
 }) {
   const option = useMemo(() => {
     const variants = [...new Set(segments.map((s) => s.variant))]
@@ -474,7 +489,7 @@ export function BitrateChart({
     <ChartCard
       title="9 · Declared vs measured bitrate"
       note="peak per rung"
-      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+      empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <Chart option={option} />
     </ChartCard>
@@ -486,9 +501,11 @@ export function BitrateChart({
 export function AvSkewChart({
   segments,
   criticalMs,
+  reason,
 }: {
   segments: SegmentResultData[]
   criticalMs: number
+  reason?: string
 }) {
   const option = useMemo(() => {
     const groups = byVariant(segments.filter((s) => s.av_skew_ms != null))
@@ -519,7 +536,7 @@ export function AvSkewChart({
       note={`critical above ${criticalMs} ms`}
       empty={
         segments.length === 0
-          ? NO_SEGMENTS
+          ? noSegments(reason)
           : segments.some((s) => s.av_skew_ms != null)
             ? undefined
             : 'No sampled segment carries both an audio and a video PTS, so there is no skew to plot.'
@@ -532,7 +549,13 @@ export function AvSkewChart({
 
 // 11 — EXTINF vs measured duration ------------------------------------------
 
-export function DurationChart({ segments }: { segments: SegmentResultData[] }) {
+export function DurationChart({
+  segments,
+  reason,
+}: {
+  segments: SegmentResultData[]
+  reason?: string
+}) {
   const option = useMemo(
     () =>
       baseOption({
@@ -560,7 +583,7 @@ export function DurationChart({ segments }: { segments: SegmentResultData[] }) {
     <ChartCard
       title="11 · Segment duration"
       note="EXTINF against the media inside"
-      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+      empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <Chart option={option} />
     </ChartCard>
@@ -620,9 +643,11 @@ export function VirtualBufferChart({
 export function DownloadsGanttChart({
   segments,
   onSelect,
+  reason,
 }: {
   segments: SegmentResultData[]
   onSelect?: (segment: SegmentResultData) => void
+  reason?: string
 }) {
   const variants = useMemo(() => [...new Set(segments.map((s) => s.variant))], [segments])
   const option = useMemo(() => {
@@ -681,7 +706,7 @@ export function DownloadsGanttChart({
     <ChartCard
       title="13 · Downloads"
       note="each bar is one segment fetch; failures are red"
-      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+      empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <ReactECharts
         option={option}
@@ -700,7 +725,13 @@ export function DownloadsGanttChart({
 
 // 14 — Traffic and bandwidth -------------------------------------------------
 
-export function TrafficChart({ segments }: { segments: SegmentResultData[] }) {
+export function TrafficChart({
+  segments,
+  reason,
+}: {
+  segments: SegmentResultData[]
+  reason?: string
+}) {
   const option = useMemo(() => {
     const buckets = new Map<number, number>()
     for (const segment of segments) {
@@ -729,7 +760,7 @@ export function TrafficChart({ segments }: { segments: SegmentResultData[] }) {
     <ChartCard
       title="14 · Traffic and bandwidth"
       note="received by the analyzer"
-      empty={segments.length === 0 ? NO_SEGMENTS : undefined}
+      empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <Chart option={option} />
     </ChartCard>

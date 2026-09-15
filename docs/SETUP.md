@@ -13,6 +13,7 @@ database. Everything below does those three things; they differ only in the shel
 | Tests | `make test` | `deploy\windows\rba.cmd test` |
 | Linters | `make lint` | `deploy\windows\rba.cmd lint` |
 | Headless analysis | `python -m app.cli analyse …` | `deploy\windows\rba.cmd analyse …` |
+| Why no segments were sampled | `python -m app.cli diagnose …` | `deploy\windows\rba.cmd diagnose …` |
 
 Ports are the same on both: backend **8010**, Vite dev server **5173**, production bundle
 **8080**. **8001 is never used** — it belongs to the existing Metanalyser backend, and both
@@ -146,6 +147,16 @@ Headless, no UI — the exit code is the verdict, so this drops straight into a 
 ```
 
 `analyse` exits **0** when no stream-side defect was found and **2** when one was.
+
+When a run reports **0 segments checked**, `diagnose` says why. It prints the resolved
+ladder and, per rendition, the HTTP status, how many segments the playlist listed, how many
+this session sampled, and any failure inside the analyzer with its traceback:
+
+```powershell
+.\deploy\windows\rba.cmd diagnose "https://cdn.example/live/ch1/master.m3u8"
+```
+
+`diagnose` exits **0** when segments were sampled and **1** when none were.
 
 ### Changing the ports
 
