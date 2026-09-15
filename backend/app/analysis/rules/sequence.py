@@ -229,19 +229,9 @@ def check_cross_variant(
                 )
             )
 
-    dsns = {s.variant: s.playlist.discontinuity_sequence for s in snapshots}
-    if len(set(dsns.values())) > 1:
-        findings.append(
-            R.SEQ_XVAR_DSN_MISMATCH.raise_finding(
-                f"Discontinuity sequence numbers differ across the ladder at "
-                f"{moment.isoformat()}: {dsns}. The Tizen player holds one counter for every "
-                "rendition.",
-                evidence={"dsn_by_variant": dsns, "at": moment.isoformat()},
-                stream_layer=layer,
-                at=moment,
-            )
-        )
-
+    dsn_findings = _check_dsn_mismatch(snapshots, layer=layer, at=moment, thresholds=thresholds)
+    findings += dsn_findings
+    if dsn_findings:
         audio = [s for s in snapshots if s.kind == "audio"]
         if video and audio:
             video_dsn = {s.variant: s.playlist.discontinuity_sequence for s in video}
@@ -262,6 +252,89 @@ def check_cross_variant(
     findings += _check_discontinuity_positions(video, layer=layer, at=moment)
     findings += _check_pdt_alignment(snapshots, layer=layer, at=moment)
     return findings
+
+
+def comparable_msns(snapshots: list[VariantSnapshot]) -> set[int]:
+    """The media sequence numbers every rendition lists, first segment excluded.
+
+    Two renditions are only comparable where both actually publish the same segment. The
+    first segment of a window is excluded on top of that: a discontinuity there is not
+    written as a tag at all, because the packager folds it into
+    EXT-X-DISCONTINUITY-SEQUENCE and drops the tag as the window slides. Renditions slide at
+    different moments, so the first segment disagrees on paper while the timeline agrees.
+    """
+    windows: list[set[int]] = []
+    for snapshot in snapshots:
+        msns = [segment.msn for segment in snapshot.playlist.segments]
+        if len(msns) < 2:
+            return set()
+        windows.append(set(msns[1:]))
+    return set.intersection(*windows) if windows else set()
+
+
+def _dsn_at_msn(snapshot: VariantSnapshot, msn: int) -> int | None:
+    segment = snapshot.playlist.segment_by_msn(msn)
+    return segment.discontinuity_sequence if segment else None
+
+
+def _check_dsn_mismatch(
+    snapshots: list[VariantSnapshot],
+    *,
+    layer: StreamLayer,
+    at: dt.datetime,
+    thresholds: Thresholds,
+) -> list[Finding]:
+    """Discontinuity counters that disagree by more than independent polling explains.
+
+    Every rendition is polled on its own clock, so one can carry a discontinuity a moment
+    before the next publishes it and the declared counters differ for a poll or two. That is
+    poll skew, not a ladder defect. Two measurements separate the defect from the skew: a
+    spread wider than the tolerance, which no poll ordering produces, and a disagreement at
+    one media sequence number every rendition lists, which is the same instant of the
+    timeline seen from every rung.
+    """
+    dsns = {s.variant: s.playlist.discontinuity_sequence for s in snapshots}
+    if len(set(dsns.values())) <= 1:
+        return []
+
+    spread = max(dsns.values()) - min(dsns.values())
+    evidence: dict[str, Any] = {
+        "dsn_by_variant": dsns,
+        "spread": spread,
+        "tolerance": thresholds.cross_variant_dsn_tolerance,
+        "polled_at": {s.variant: s.at.isoformat() for s in snapshots},
+        "at": at.isoformat(),
+    }
+
+    if spread > thresholds.cross_variant_dsn_tolerance:
+        return [
+            R.SEQ_XVAR_DSN_MISMATCH.raise_finding(
+                f"Discontinuity sequence numbers span {spread} across the ladder at "
+                f"{at.isoformat()}, against a tolerance of "
+                f"{thresholds.cross_variant_dsn_tolerance}: {dsns}. The Tizen player holds one "
+                "counter for every rendition.",
+                evidence=evidence,
+                stream_layer=layer,
+                at=at,
+            )
+        ]
+
+    for msn in sorted(comparable_msns(snapshots)):
+        anchored = {s.variant: _dsn_at_msn(s, msn) for s in snapshots}
+        present = {k: v for k, v in anchored.items() if v is not None}
+        if len(present) < 2 or len(set(present.values())) <= 1:
+            continue
+        return [
+            R.SEQ_XVAR_DSN_MISMATCH.raise_finding(
+                f"Media sequence {msn} is listed by every rendition and carries a different "
+                f"discontinuity sequence on each: {present}. The Tizen player holds one counter "
+                "for every rendition.",
+                evidence={**evidence, "anchor_msn": msn, "dsn_at_anchor": present},
+                stream_layer=layer,
+                at=at,
+            )
+        ]
+    return []
 
 
 def _check_common_msn_alignment(
@@ -306,24 +379,49 @@ def _check_common_msn_alignment(
 def _check_discontinuity_positions(
     video: list[VariantSnapshot], *, layer: StreamLayer, at: dt.datetime
 ) -> list[Finding]:
+    """Discontinuity tags compared only where every rung publishes the same segment.
+
+    Comparing whole windows reported the ladder every time one rung had slid and another had
+    not: a tag is dropped from a segment the moment that segment becomes the first in the
+    window, because the count moves into EXT-X-DISCONTINUITY-SEQUENCE. Restricting the
+    comparison to the media sequence numbers every rung lists, first segment excluded, leaves
+    only tags that genuinely sit at different positions.
+    """
     findings: list[Finding] = []
     if len(video) < 2:
         return findings
+
+    comparable = comparable_msns(video)
+    if not comparable:
+        return findings
+
     positions = {
-        s.variant: sorted(seg.msn for seg in s.playlist.segments if seg.discontinuity_before)
+        s.variant: sorted(
+            seg.msn
+            for seg in s.playlist.segments
+            if seg.discontinuity_before and seg.msn in comparable
+        )
         for s in video
     }
-    unique = {tuple(v) for v in positions.values()}
-    if len(unique) > 1:
-        findings.append(
-            R.SEQ_XVAR_DISC_POSITION.raise_finding(
-                f"Discontinuity tags sit at different media sequence numbers across the ladder: "
-                f"{positions}.",
-                evidence={"positions": positions, "at": at.isoformat()},
-                stream_layer=layer,
-                at=at,
-            )
+    if len({tuple(v) for v in positions.values()}) <= 1:
+        return findings
+
+    window = f"{min(comparable)}-{max(comparable)}"
+    findings.append(
+        R.SEQ_XVAR_DISC_POSITION.raise_finding(
+            f"Across media sequence {window}, which every rung lists, discontinuity tags sit "
+            f"at different positions: {positions}.",
+            evidence={
+                "positions": positions,
+                "comparable_msn_from": min(comparable),
+                "comparable_msn_to": max(comparable),
+                "polled_at": {s.variant: s.at.isoformat() for s in video},
+                "at": at.isoformat(),
+            },
+            stream_layer=layer,
+            at=at,
         )
+    )
     return findings
 
 

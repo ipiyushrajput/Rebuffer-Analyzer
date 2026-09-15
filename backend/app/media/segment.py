@@ -182,13 +182,30 @@ def analyse(
         analysis.audio_codec = config.codec if config else ""
         analysis.id3_timestamp = adts.find_id3_timestamp(data)
     elif container == "webvtt":
-        analysis.raw["webvtt_head"] = data[:2048].decode("utf-8", errors="replace")
+        analysis.raw["webvtt_head"] = _webvtt_head(data)
     elif container == "empty":
         analysis.parse_error = "Segment body is empty"
     else:
         analysis.parse_error = f"Container is not recognised from the first bytes or the URI: {uri}"
 
     return analysis
+
+
+WEBVTT_HEAD_BYTES = 8192
+
+
+def _webvtt_head(data: bytes) -> str:
+    """The head of a WebVTT segment, cut only on a line boundary.
+
+    The cue checks judge whole lines. Cutting mid-line handed them a half-written timing
+    line, which reported the stream for a cue the packager had written correctly, so the
+    trailing partial line is dropped whenever the body is longer than the cap.
+    """
+    if len(data) <= WEBVTT_HEAD_BYTES:
+        return data.decode("utf-8", errors="replace")
+    text = data[:WEBVTT_HEAD_BYTES].decode("utf-8", errors="replace")
+    cut = text.rfind("\n")
+    return text[: cut + 1] if cut != -1 else ""
 
 
 def _analyse_ts(data: bytes, analysis: SegmentAnalysis) -> None:
