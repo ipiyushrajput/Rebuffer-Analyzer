@@ -7,7 +7,7 @@
 
 import { useState } from 'react'
 import { localTime, ms, utcTitle } from '../lib/format'
-import type { EventData } from '../ws/messages'
+import type { SessionEvent } from '../store/session'
 import { EmptyState, cx } from './ui'
 
 const KIND_LABEL: Record<string, string> = {
@@ -28,8 +28,13 @@ const KIND_TONE: Record<string, string> = {
   proxy_fetch: 'chip-neutral',
 }
 
-function summarise(event: EventData): string {
-  const data = (event.data ?? {}) as Record<string, unknown>
+/*
+ * An event arrives flattened — the socket envelope's payload is spread onto the record — so
+ * the fields are read straight off it. Reading a nested `event.data` found nothing and every
+ * line summarised as an empty object.
+ */
+function summarise(event: SessionEvent): string {
+  const data = event as unknown as Record<string, unknown>
   switch (event.kind) {
     case 'dns':
       return `${data.host} → ${(data.a as string[] | undefined)?.join(', ') || 'no A record'} in ${ms(
@@ -46,7 +51,7 @@ function summarise(event: EventData): string {
         (data.renditions as unknown[] | undefined)?.length ?? 0
       } rendition(s)`
     case 'playlist_state':
-      return `${event.variant ?? ''} ${data.from} → ${data.to}`
+      return `${event.variant_id ?? ''} ${data.from} → ${data.to}`
     case 'proxy_fetch':
       return `${data.host} · HTTP ${data.status} · ${ms(data.ttfb_ms as number)}`
     default:
@@ -54,7 +59,7 @@ function summarise(event: EventData): string {
   }
 }
 
-export function EventFeed({ events }: { events: (EventData & { ts: string })[] }) {
+export function EventFeed({ events }: { events: SessionEvent[] }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null)
 
   if (events.length === 0) {

@@ -1,28 +1,13 @@
 /**
  * The page header.
  *
- * Persistent context: what this screen is, what state it is in, and who is operating it.
- * Actions sit on the right so the eye travels title → state → action.
+ * Persistent context: what this screen is and what state it is in. Actions sit on the right
+ * so the eye travels title → state → action.
  */
 
 import type { ReactNode } from 'react'
-import { OPERATOR, initials } from '../../lib/constants'
 import { cx } from '../ui'
 import { IconArrowLeft } from '../ui/icons'
-
-export function OperatorChip() {
-  return (
-    <div className="flex items-center gap-2.5 rounded-pill border border-surface-line bg-white py-1 pl-1 pr-3.5">
-      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-spectrum-soft text-[11px] font-semibold text-white">
-        {initials(OPERATOR.name)}
-      </span>
-      <span className="leading-tight">
-        <span className="block text-micro font-semibold text-ink">{OPERATOR.name}</span>
-        <span className="block text-[11px] text-ink-muted">{OPERATOR.team}</span>
-      </span>
-    </div>
-  )
-}
 
 export function PageHeader({
   title,
@@ -61,7 +46,6 @@ export function PageHeader({
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end sm:gap-3">
           {actions}
           {status}
-          <OperatorChip />
         </div>
       </div>
     </header>

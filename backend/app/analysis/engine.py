@@ -500,11 +500,15 @@ class AnalysisSession:
             )
         )
 
+        failure = media_rules.describe_fetch_failure(
+            snapshot.result, snapshot.playlist, parse_error=snapshot.parse_error
+        )
         transition = machine.observe(
             at=snapshot.at,
             http_ok=snapshot.result.ok,
             playlist=snapshot.playlist,
             stale_after_s=target_duration * self.thresholds.stale_playlist_factor,
+            failure=failure,
         )
         if transition is not None:
             await self._record(
@@ -897,7 +901,9 @@ class AnalysisSession:
                 continue
             current = parse_master(text, result.final_url)
             await self._record(
-                master_rules.check_master_changed(context.master, current, layer=context.layer)
+                master_rules.check_master_changed(
+                    context.master, current, layer=context.layer, thresholds=self.thresholds
+                )
             )
             context.master = current
 

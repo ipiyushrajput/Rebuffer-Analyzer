@@ -32,6 +32,13 @@ export interface StallBand {
   variant: string
 }
 
+/** One engine event as the store keeps it: the payload, plus what the envelope carried. */
+export type SessionEvent = EventData & {
+  ts: string
+  variant_id: string | null
+  layer: string | null
+}
+
 export interface PlayerSample {
   t: number
   buffer_s?: number
@@ -55,7 +62,7 @@ export interface SessionState {
 
   snapshots: PlaylistSnapshotData[]
   segments: SegmentResultData[]
-  events: (EventData & { ts: string })[]
+  events: SessionEvent[]
   playerSamples: PlayerSample[]
   stalls: StallBand[]
   vpbPoints: BufferPoint[]
@@ -166,7 +173,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
       case 'event': {
         const data = message.data as unknown as EventData
-        set({ events: trim([{ ...data, ts: message.ts }, ...state.events], EVENT_LIMIT) })
+        // The rendition and layer live on the envelope, not in the payload. Keeping them
+        // here is what lets a consumer say which rung an event belongs to.
+        set({
+          events: trim(
+            [
+              {
+                ...data,
+                ts: message.ts,
+                variant_id: message.variant_id ?? null,
+                layer: message.layer ?? null,
+              },
+              ...state.events,
+            ],
+            EVENT_LIMIT,
+          ),
+        })
         break
       }
       default:

@@ -35,6 +35,9 @@ export function Player({ src, onEvent }: Props) {
   const hlsRef = useRef<Hls | null>(null)
   const stallStartRef = useRef<number | null>(null)
   const startedAtRef = useRef<number>(0)
+  /* The rung the player is on, carried into every sample so the played-rung chart has a series. */
+  const bitrateRef = useRef<number | null>(null)
+  const levelRef = useRef<number | null>(null)
   const [overlay, setOverlay] = useState<Overlay>({
     level: '—',
     bitrate: null,
@@ -97,6 +100,8 @@ export function Player({ src, onEvent }: Props) {
       hls.on(Events.LEVEL_SWITCHED, (_e, data: LevelSwitchedData) => {
         const level = hls.levels[data.level]
         currentVariant = level ? `v${level.height}p@${Math.round(level.bitrate / 1000)}k` : ''
+        bitrateRef.current = level?.bitrate ?? null
+        levelRef.current = data.level
         setOverlay((o) => ({
           ...o,
           level: level ? `${level.width}x${level.height}` : '—',
@@ -164,7 +169,13 @@ export function Player({ src, onEvent }: Props) {
       const quality = video.getVideoPlaybackQuality?.()
       const dropped = quality?.droppedVideoFrames ?? 0
       setOverlay((o) => ({ ...o, buffer: ahead, dropped }))
-      pushPlayerSample({ t: Date.now(), buffer_s: ahead, dropped })
+      pushPlayerSample({
+        t: Date.now(),
+        buffer_s: ahead,
+        dropped,
+        bitrate: bitrateRef.current ?? undefined,
+        level: levelRef.current ?? undefined,
+      })
       onEvent({ event: 'buffer', buffer_s: ahead, variant: currentVariant })
       if (dropped > 0) {
         onEvent({

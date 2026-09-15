@@ -75,6 +75,10 @@ class Thresholds(BaseModel):
     segment_extinf_absolute_max_s: float = 120.0
     av_pts_delta_critical_ms: int = 1000
     master_repoll_interval_s: int = 20
+    # A packager recomputes BANDWIDTH and AVERAGE-BANDWIDTH per poll, so a small drift is
+    # ordinary. Past this fraction the declared rate no longer describes the rung and ABR
+    # picks against a figure that is not true.
+    bandwidth_variation_tolerance: float = 0.05
 
     # Virtual Player Buffer
     vpb_startup_buffer_td_multiple: float = 3.0

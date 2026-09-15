@@ -5,7 +5,8 @@
  * spacing intervals, dividers and numeric alignment so dense screens keep one rhythm.
  */
 
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { copyText } from '../../lib/clipboard'
 import { SEVERITY_STYLE, type Severity } from '../../lib/constants'
 import { IconCheck } from './icons'
 
@@ -321,7 +322,10 @@ export function InlineAlert({
   )
 }
 
-/** Copy-to-clipboard button that confirms in place rather than through a toast. */
+/**
+ * Copy-to-clipboard button that confirms in place rather than through a toast, and says so
+ * when the copy did not happen rather than looking like it did.
+ */
 export function CopyButton({
   text,
   label = 'Copy',
@@ -333,21 +337,38 @@ export function CopyButton({
   variant?: 'ghost' | 'primary'
   className?: string
 }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+
+  useEffect(() => {
+    if (state === 'idle') return undefined
+    const timer = window.setTimeout(() => setState('idle'), 1800)
+    return () => window.clearTimeout(timer)
+  }, [state])
+
   return (
     <button
       type="button"
-      className={cx(variant === 'primary' ? 'btn-primary' : 'btn-ghost', 'btn-sm', className)}
-      onClick={async (event) => {
-        const button = event.currentTarget
-        await navigator.clipboard.writeText(typeof text === 'function' ? text() : text)
-        const original = button.textContent
-        button.textContent = 'Copied'
-        window.setTimeout(() => {
-          button.textContent = original
-        }, 1500)
+      className={cx(
+        variant === 'primary' ? 'btn-primary' : 'btn-ghost',
+        'btn-sm',
+        state === 'failed' && 'text-pink-600',
+        className,
+      )}
+      onClick={async () => {
+        const copied = await copyText(typeof text === 'function' ? text() : text)
+        setState(copied ? 'copied' : 'failed')
       }}
     >
-      {label}
+      {state === 'copied' ? (
+        <>
+          <IconCheck size={13} />
+          Copied
+        </>
+      ) : state === 'failed' ? (
+        'Copy blocked — select and copy'
+      ) : (
+        label
+      )}
     </button>
   )
 }

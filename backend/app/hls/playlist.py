@@ -33,7 +33,7 @@ def _f(value: str | None) -> float | None:
         return None
 
 
-def _i(value: str | None) -> int | None:
+def parse_int(value: str | None) -> int | None:
     if value is None:
         return None
     try:
@@ -60,11 +60,11 @@ class Variant:
 
     @property
     def bandwidth(self) -> int | None:
-        return _i(self.attrs.get("BANDWIDTH"))
+        return parse_int(self.attrs.get("BANDWIDTH"))
 
     @property
     def average_bandwidth(self) -> int | None:
-        return _i(self.attrs.get("AVERAGE-BANDWIDTH"))
+        return parse_int(self.attrs.get("AVERAGE-BANDWIDTH"))
 
     @property
     def codecs(self) -> str | None:
@@ -77,12 +77,12 @@ class Variant:
     @property
     def width(self) -> int | None:
         res = self.resolution
-        return _i(res.split("x")[0]) if res and "x" in res else None
+        return parse_int(res.split("x")[0]) if res and "x" in res else None
 
     @property
     def height(self) -> int | None:
         res = self.resolution
-        return _i(res.split("x")[1]) if res and "x" in res else None
+        return parse_int(res.split("x")[1]) if res and "x" in res else None
 
     @property
     def frame_rate(self) -> float | None:
@@ -317,7 +317,7 @@ def parse_master(text: str, final_url: str) -> MasterPlaylist:
                 )
             )
         elif line.startswith("#EXT-X-VERSION:"):
-            playlist.version = _i(line.split(":", 1)[1])
+            playlist.version = parse_int(line.split(":", 1)[1])
         elif line.startswith("#EXT-X-INDEPENDENT-SEGMENTS"):
             playlist.independent_segments = True
         elif line.startswith("#EXT-X-SESSION-KEY:"):
@@ -412,9 +412,9 @@ def parse_media(text: str, final_url: str) -> MediaPlaylist:
         elif line.startswith("#EXT-X-TARGETDURATION:"):
             playlist.target_duration = _f(line.split(":", 1)[1])
         elif line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
-            playlist.media_sequence = _i(line.split(":", 1)[1]) or 0
+            playlist.media_sequence = parse_int(line.split(":", 1)[1]) or 0
         elif line.startswith("#EXT-X-DISCONTINUITY-SEQUENCE:"):
-            playlist.discontinuity_sequence = _i(line.split(":", 1)[1]) or 0
+            playlist.discontinuity_sequence = parse_int(line.split(":", 1)[1]) or 0
         elif line == "#EXT-X-DISCONTINUITY":
             pending_discontinuity = True
         elif line.startswith("#EXT-X-PROGRAM-DATE-TIME:"):
@@ -432,7 +432,7 @@ def parse_media(text: str, final_url: str) -> MediaPlaylist:
             current_map = resolve(final_url, uri) if uri else None
             playlist.map_uri = playlist.map_uri or current_map
         elif line.startswith("#EXT-X-VERSION:"):
-            playlist.version = _i(line.split(":", 1)[1])
+            playlist.version = parse_int(line.split(":", 1)[1])
         elif line.startswith("#EXT-X-PLAYLIST-TYPE:"):
             playlist.playlist_type = line.split(":", 1)[1].strip().upper()
         elif line == "#EXT-X-ENDLIST":

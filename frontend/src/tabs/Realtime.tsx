@@ -209,12 +209,18 @@ export function RealtimeTab({ thresholds, onArchived }: Props) {
     [store.sessionId],
   )
 
+  /*
+   * An event arrives flattened: the socket envelope's `data` is spread onto the record, so
+   * a master event is `{kind, url, variants, renditions, ts}` with no nested `data`. Reading
+   * `event.data.variants` found nothing, which left the declared series of the bitrate chart
+   * and the whole playlist-state chart empty.
+   */
   const declaredBandwidth = useMemo(() => {
     const out: Record<string, number | null> = {}
     for (const event of store.events) {
       if (event.kind !== 'master') continue
-      const data = (event.data ?? {}) as { variants?: { id: string; bandwidth: number | null }[] }
-      for (const variant of data.variants ?? []) out[variant.id] = variant.bandwidth
+      const variants = (event.variants ?? []) as { id: string; bandwidth: number | null }[]
+      for (const variant of variants) out[variant.id] = variant.bandwidth
     }
     return out
   }, [store.events])
@@ -225,9 +231,11 @@ export function RealtimeTab({ thresholds, onArchived }: Props) {
         .filter((event) => event.kind === 'playlist_state')
         .map((event) => ({
           at: event.ts,
-          variant: String(event.variant ?? ''),
-          state: String((event.data as Record<string, unknown>)?.to ?? ''),
+          // The rendition is on the envelope for a state change, not in the payload.
+          variant: String(event.variant_id ?? event.variant ?? ''),
+          state: String(event.to ?? ''),
         }))
+        .filter((entry) => entry.state !== '')
         .reverse(),
     [store.events],
   )

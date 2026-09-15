@@ -95,6 +95,29 @@ describe('the session store', () => {
     expect(useSessionStore.getState().stalls[0].end).toBe(5000)
   })
 
+  it('keeps the rendition and layer an event carries on its envelope', () => {
+    /*
+     * The engine puts the rung and the layer on the envelope, not inside the payload. A
+     * consumer that read only the payload could not say which rung a state change belonged
+     * to, which left the playlist-state chart with nothing to plot.
+     */
+    const { ingest } = useSessionStore.getState()
+    ingest({
+      type: 'event',
+      session_id: 's1',
+      ts: '2026-09-11T10:00:00Z',
+      layer: 'PLAYBACK',
+      variant_id: 'v1080p@7539k',
+      data: { kind: 'playlist_state', from: 'LIVE', to: 'HTTP_ERROR' },
+    })
+    const [event] = useSessionStore.getState().events
+    expect(event.variant_id).toBe('v1080p@7539k')
+    expect(event.layer).toBe('PLAYBACK')
+    expect(event.ts).toBe('2026-09-11T10:00:00Z')
+    expect(event.kind).toBe('playlist_state')
+    expect(event.to).toBe('HTTP_ERROR')
+  })
+
   it('ignores a message type it does not know', () => {
     const before = useSessionStore.getState()
     before.ingest({

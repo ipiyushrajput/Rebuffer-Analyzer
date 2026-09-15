@@ -75,15 +75,30 @@ class PdfUnavailable(RuntimeError):
     """Raised when Playwright or its browser is not installed."""
 
 
-async def render_pdf_bytes(html: str) -> bytes:
-    """Print ``html`` and return the PDF bytes.
+PDF_FOOTER = (
+    '<div style="width:100%;font-size:8px;color:#667085;padding:0 10mm;'
+    'display:flex;justify-content:space-between">'
+    "<span>TV Plus Rebuffer Analyzer</span>"
+    '<span class="pageNumber"></span>/<span class="totalPages"></span></div>'
+)
+
+
+def render_pdf_blocking(html: str) -> bytes:
+    """Print ``html`` and return the PDF bytes, synchronously.
+
+    Playwright's **sync** API is used on purpose. The async API drives the browser over an
+    asyncio subprocess, and on Windows a server running on the selector event loop cannot
+    spawn one at all — `_make_subprocess_transport` raises NotImplementedError and the PDF
+    never renders. The sync API owns its own machinery, so it works whatever loop the server
+    happens to be on. `render_pdf_bytes` calls this on a worker thread, where no event loop
+    is running, which is the one condition the sync API asks for.
 
     The HTML is loaded from a temporary file so relative resources and the inlined chart
     script execute exactly as they do in a browser; nothing else touches the disk, which is
     what lets a report be stored in the database rather than on the host.
     """
     try:
-        from playwright.async_api import async_playwright
+        from playwright.sync_api import sync_playwright
     except ImportError as exc:  # pragma: no cover - depends on the host
         raise PdfUnavailable(
             "Playwright is not installed on the analyzer host, so PDF export did not run. "
@@ -95,50 +110,47 @@ async def render_pdf_bytes(html: str) -> bytes:
         source = Path(handle.name)
 
     try:
-        async with async_playwright() as playwright:
-            launch: dict[str, object] = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+        with sync_playwright() as playwright:
+            launch: dict[str, Any] = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
             try:
-                browser = await playwright.chromium.launch(**launch)  # type: ignore[arg-type]
+                browser = playwright.chromium.launch(**launch)
             except Exception:  # Retry once with an explicitly named binary.
                 executable = chromium_executable()
                 if executable is None:
                     raise
                 logger.info("launching the Chromium found at %s", executable)
-                browser = await playwright.chromium.launch(
-                    executable_path=executable,
-                    **launch,  # type: ignore[arg-type]
-                )
+                browser = playwright.chromium.launch(executable_path=executable, **launch)
             try:
-                page = await browser.new_page()
-                await page.goto(
-                    source.as_uri(), wait_until="networkidle", timeout=RENDER_TIMEOUT_MS
-                )
+                page = browser.new_page()
+                page.goto(source.as_uri(), wait_until="networkidle", timeout=RENDER_TIMEOUT_MS)
                 # The charts render after the inlined script runs; give them one frame.
-                await page.wait_for_timeout(600)
-                pdf = await page.pdf(
+                page.wait_for_timeout(600)
+                pdf = page.pdf(
                     format="A4",
                     print_background=True,
                     margin=PDF_MARGIN,
                     display_header_footer=True,
                     header_template="<div></div>",
-                    footer_template=(
-                        '<div style="width:100%;font-size:8px;color:#667085;padding:0 10mm;'
-                        'display:flex;justify-content:space-between">'
-                        "<span>TV Plus Rebuffer Analyzer</span>"
-                        '<span class="pageNumber"></span>/<span class="totalPages"></span></div>'
-                    ),
+                    footer_template=PDF_FOOTER,
                 )
             finally:
-                await browser.close()
+                browser.close()
+    except PdfUnavailable:
+        raise
     except Exception as exc:
         raise PdfUnavailable(
-            f"The headless browser did not produce a PDF: {type(exc).__name__}. "
+            f"The headless browser did not produce a PDF: {type(exc).__name__}: {exc}. "
             "The HTML report carries the same content."
         ) from exc
     finally:
         source.unlink(missing_ok=True)
 
     return bytes(pdf)
+
+
+async def render_pdf_bytes(html: str) -> bytes:
+    """Print ``html`` on a worker thread and return the PDF bytes."""
+    return await asyncio.to_thread(render_pdf_blocking, html)
 
 
 async def render_pdf(html: str, destination: Path) -> Path:
@@ -149,8 +161,10 @@ async def render_pdf(html: str, destination: Path) -> Path:
 
 
 def render_pdf_sync(html: str, destination: Path) -> Path:
-    """Blocking wrapper for the CLI."""
-    return asyncio.run(render_pdf(html, destination))
+    """Blocking wrapper for the CLI. No event loop is involved."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(render_pdf_blocking(html))
+    return destination
 
 
 def available() -> bool:

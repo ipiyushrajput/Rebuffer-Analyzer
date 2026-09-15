@@ -8,7 +8,7 @@ from typing import Any
 from app.analysis.rules import catalogue as R
 from app.analysis.rules.base import Finding, StreamLayer
 from app.config import Thresholds
-from app.hls.playlist import MasterPlaylist, Rendition, Variant
+from app.hls.playlist import MasterPlaylist, Rendition, Variant, parse_int
 
 # Tags whose presence requires at least this EXT-X-VERSION.
 TAG_MIN_VERSION = {
@@ -344,13 +344,62 @@ def _rendition_key(rendition: Rendition) -> str:
     return "/".join(parts)
 
 
+# Rates are reported on their own, against a tolerance; every other attribute is a hard
+# change the moment it differs.
+RATE_ATTRS = ("BANDWIDTH", "AVERAGE-BANDWIDTH")
+
+
 def _attribute_diff(before: dict[str, str], after: dict[str, str]) -> list[str]:
-    """The attribute names whose declared values differ between two polls."""
-    return sorted(name for name in set(before) | set(after) if before.get(name) != after.get(name))
+    """The attribute names whose declared values differ between two polls, rates aside."""
+    return sorted(
+        name
+        for name in set(before) | set(after)
+        if name not in RATE_ATTRS and before.get(name) != after.get(name)
+    )
+
+
+def _rung_keys(variants: list[Variant]) -> list[str]:
+    """
+    Each rung's identity across polls, independent of both its URI and its declared rate.
+
+    `variant_id` carries the bandwidth, so a packager that recomputes BANDWIDTH per poll
+    would make every rung read as one removed and one added. Resolution identifies the rung
+    instead, and a ladder that lists the same resolution twice separates those rungs by the
+    order they appear in, which a packager holds stable. Codecs and frame rate stay out of
+    the key: a codec rewrite is the change being reported, so it has to land on the same
+    rung rather than read as one rung swapped for another.
+    """
+    seen: dict[str, int] = {}
+    keys: list[str] = []
+    for variant in variants:
+        base = variant.resolution or "no-resolution"
+        ordinal = seen.get(base, 0)
+        seen[base] = ordinal + 1
+        keys.append(f"{base}#{ordinal}")
+    return keys
+
+
+def _rate_variation(
+    before: dict[str, str], after: dict[str, str], tolerance: float
+) -> dict[str, dict[str, float]]:
+    """Declared rates that moved by more than `tolerance`, as a fraction of the old value."""
+    moved: dict[str, dict[str, float]] = {}
+    for name in RATE_ATTRS:
+        old, new = parse_int(before.get(name)), parse_int(after.get(name))
+        if old is None or new is None or old <= 0:
+            continue
+        delta = abs(new - old) / old
+        if delta > tolerance:
+            moved[name] = {"from": float(old), "to": float(new), "delta": round(delta, 4)}
+    return moved
 
 
 def check_master_changed(
-    previous: MasterPlaylist, current: MasterPlaylist, *, layer: StreamLayer
+    previous: MasterPlaylist,
+    current: MasterPlaylist,
+    *,
+    layer: StreamLayer,
+    thresholds: Thresholds | None = None,
 ) -> list[Finding]:
     """
     Master re-poll comparison (§B, every 20 s).
@@ -358,22 +407,57 @@ def check_master_changed(
     The ladder is compared by **declared attributes**, never by URI. A server-side ad
     inserter mints a fresh session on every master fetch, so each poll returns the same
     ladder under new child URIs; keying the comparison on the URI reported the whole ladder
-    as replaced every 20 s. The rungs are keyed on their variant identity — resolution and
-    bandwidth — and their attributes compared, so a codec, frame-rate, resolution, bandwidth,
-    audio-group or video-range change fires and a session rotation does not.
+    as replaced every 20 s.
+
+    Rungs are keyed on their shape — resolution, codecs, frame rate — so a packager that
+    recomputes the rate each poll does not read as the ladder being replaced. A rate that
+    moves beyond the tolerance is its own finding, MST-029, because it says something
+    different from the ladder having changed: the numbers ABR selects against are drifting
+    while the ladder itself stands.
     """
+    limits = thresholds or Thresholds()
     findings: list[Finding] = []
 
-    before = {v.variant_id: v.attrs for v in previous.variants}
-    after = {v.variant_id: v.attrs for v in current.variants}
+    previous_keys = _rung_keys(previous.variants)
+    current_keys = _rung_keys(current.variants)
+    before = dict(zip(previous_keys, (v.attrs for v in previous.variants), strict=True))
+    after = dict(zip(current_keys, (v.attrs for v in current.variants), strict=True))
+    # The operator knows a rung by its variant id, so that is what the message names.
+    labels = dict(zip(previous_keys, (v.variant_id for v in previous.variants), strict=True))
+    labels |= dict(zip(current_keys, (v.variant_id for v in current.variants), strict=True))
 
-    added = sorted(set(after) - set(before))
-    removed = sorted(set(before) - set(after))
+    shared = sorted(set(before) & set(after))
+    added = sorted(labels.get(key, key) for key in set(after) - set(before))
+    removed = sorted(labels.get(key, key) for key in set(before) - set(after))
     rewritten = {
-        rung: _attribute_diff(before[rung], after[rung])
-        for rung in sorted(set(before) & set(after))
-        if before[rung] != after[rung]
+        labels.get(key, key): _attribute_diff(before[key], after[key])
+        for key in shared
+        if _attribute_diff(before[key], after[key])
     }
+
+    rates = {
+        labels.get(key, key): moved
+        for key in shared
+        if (moved := _rate_variation(before[key], after[key], limits.bandwidth_variation_tolerance))
+    }
+    if rates:
+        detail = "; ".join(
+            f"{rung} {name} {int(values['from'])} → {int(values['to'])} "
+            f"({values['delta'] * 100:.1f}%)"
+            for rung, moved in rates.items()
+            for name, values in moved.items()
+        )
+        findings.append(
+            R.MST_BANDWIDTH_VARIATION.raise_finding(
+                f"{current.final_url} declares a moved rate past the "
+                f"{limits.bandwidth_variation_tolerance * 100:.0f}% tolerance: {detail}.",
+                evidence={
+                    "tolerance": limits.bandwidth_variation_tolerance,
+                    "rungs": rates,
+                },
+                stream_layer=layer,
+            )
+        )
 
     renditions_before = {_rendition_key(r): r.attrs for r in previous.renditions}
     renditions_after = {_rendition_key(r): r.attrs for r in current.renditions}
