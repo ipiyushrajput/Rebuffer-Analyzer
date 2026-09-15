@@ -118,6 +118,40 @@ describe('the session store', () => {
     expect(event.to).toBe('HTTP_ERROR')
   })
 
+  it('keeps the sampling account the engine sends on the progress metric', () => {
+    /*
+     * A session that samples no segment must be able to say why. The reason travels on the
+     * metric, which is what the tile and the empty charts render instead of a blank.
+     */
+    const { ingest } = useSessionStore.getState()
+    ingest(
+      message('metric', {
+        progress: 0.2,
+        elapsed_s: 12,
+        sampling: {
+          segments_sampled: 0,
+          reason: 'v1080p@6852k returned a playlist that lists no segment.',
+          by_variant: [
+            {
+              variant: 'v1080p@6852k',
+              at: '2026-09-15T10:00:00Z',
+              reason: 'v1080p@6852k returned a playlist that lists no segment.',
+              listed: 0,
+              eligible: 0,
+              fetched: 0,
+              polls: 4,
+              total_fetched: 0,
+            },
+          ],
+        },
+      }),
+    )
+    const { sampling } = useSessionStore.getState()
+    expect(sampling?.segments_sampled).toBe(0)
+    expect(sampling?.reason).toContain('lists no segment')
+    expect(sampling?.by_variant[0].polls).toBe(4)
+  })
+
   it('ignores a message type it does not know', () => {
     const before = useSessionStore.getState()
     before.ingest({

@@ -19,6 +19,7 @@
     lint      ruff + mypy + eslint + tsc.
     rules     Regenerate docs\RULES.md from the rule registry.
     analyse   Analyse one channel headlessly. Pass the URL and any CLI flags after it.
+    diagnose  Report what segment sampling did for one channel, and why.
     setup     Re-run the installer (deploy\windows\setup.ps1).
     clean     Remove build and cache artefacts.
 
@@ -31,7 +32,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('dev', 'backend', 'frontend', 'serve', 'build', 'test', 'lint', 'rules', 'analyse', 'setup', 'clean', 'help')]
+    [ValidateSet('dev', 'backend', 'frontend', 'serve', 'build', 'test', 'lint', 'rules', 'analyse', 'diagnose', 'setup', 'clean', 'help')]
     [string]$Command = 'dev',
 
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
@@ -103,6 +104,7 @@ switch ($Command) {
             'lint'     = 'ruff + mypy + eslint + tsc'
             'rules'    = 'regenerate docs\RULES.md from the rule registry'
             'analyse'  = 'analyse one channel headlessly; pass the URL and any CLI flags'
+            'diagnose' = 'report what segment sampling did for one channel, and why'
             'setup'    = 're-run the installer'
             'clean'    = 'remove build and cache artefacts'
         }
@@ -114,6 +116,7 @@ switch ($Command) {
         Write-Host '  Examples' -ForegroundColor White
         Write-Host '    rba.cmd dev'
         Write-Host '    rba.cmd analyse "https://cdn.example/live/ch1/master.m3u8" --duration 5m --html out.html'
+        Write-Host '    rba.cmd diagnose "https://cdn.example/live/ch1/master.m3u8"'
         Write-Host '    $env:RBA_PORT = 8011; rba.cmd serve'
         Write-Host ''
         Write-Host '  Full setup guide: docs\SETUP.md' -ForegroundColor DarkGray
@@ -282,6 +285,21 @@ switch ($Command) {
             & $python -m app.cli analyse @Rest
             # 0 means no stream-side defect and 2 means one was found; both are results,
             # so the exit code is passed through rather than treated as a failure.
+            exit $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+    }
+
+    'diagnose' {
+        if ($Rest.Count -eq 0) {
+            Write-Fail 'Pass the playback URL, for example: .\deploy\windows\run.ps1 diagnose "https://cdn.example/live/ch1/master.m3u8"'
+        }
+        $python = Get-VenvPython
+        Push-Location (Join-Path $RepoRoot 'backend')
+        try {
+            & $python -m app.cli diagnose @Rest
+            # 0 means segments were sampled and 1 means none were; both are results.
             exit $LASTEXITCODE
         } finally {
             Pop-Location

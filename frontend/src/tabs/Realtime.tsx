@@ -261,6 +261,12 @@ export function RealtimeTab({ thresholds, onArchived }: Props) {
   const latestBuffer = store.playerSamples.at(-1)?.buffer_s ?? null
   const windowSeconds = store.verdict?.window_seconds ?? store.snapshots.at(-1)?.window_s ?? null
   const segmentsChecked = store.verdict?.segments_checked ?? store.segments.length
+  /*
+   * When nothing has been sampled the engine says why, and that sentence replaces the
+   * empty grid on every segment-driven chart and the poll count under the tile. A session
+   * that measured no segment is a finding about the analyzer or the stream, never a blank.
+   */
+  const samplingReason = segmentsChecked === 0 ? (store.sampling?.reason ?? '') : ''
   const worstSeverity = activeFindings[0]?.severity as Severity | undefined
 
   return (
@@ -422,7 +428,10 @@ export function RealtimeTab({ thresholds, onArchived }: Props) {
             <MetricTile
               label="Segments checked"
               value={segmentsChecked}
-              note={`${store.verdict?.playlists_checked ?? store.snapshots.length} playlist polls`}
+              note={
+                samplingReason ||
+                `${store.verdict?.playlists_checked ?? store.snapshots.length} playlist polls`
+              }
             />
             <MetricTile
               label="Live window"
@@ -462,26 +471,33 @@ export function RealtimeTab({ thresholds, onArchived }: Props) {
               <PlayedRungChart samples={store.playerSamples} />
               <DownloadRatioChart
                 segments={store.segments}
+                reason={samplingReason}
                 warn={thresholds.download_ratio_warn ?? 0.5}
                 error={thresholds.download_ratio_error ?? 1}
               />
               <FetchTimingChart snapshots={store.snapshots} />
-              <StatusHeatmapChart segments={store.segments} />
+              <StatusHeatmapChart segments={store.segments} reason={samplingReason} />
               <SequenceLadderChart snapshots={store.snapshots} />
               <DiscontinuityChart snapshots={store.snapshots} />
               <FreshnessChart snapshots={store.snapshots} />
-              <BitrateChart segments={store.segments} declared={declaredBandwidth} />
+              <BitrateChart
+                segments={store.segments}
+                declared={declaredBandwidth}
+                reason={samplingReason}
+              />
               <AvSkewChart
                 segments={store.segments}
+                reason={samplingReason}
                 criticalMs={thresholds.av_pts_delta_critical_ms ?? 1000}
               />
-              <DurationChart segments={store.segments} />
+              <DurationChart segments={store.segments} reason={samplingReason} />
               <VirtualBufferChart points={store.vpbPoints} playerSamples={store.playerSamples} />
               <DownloadsGanttChart
                 segments={store.segments}
+                reason={samplingReason}
                 onSelect={(segment) => openFlow(segment.variant, segment.at)}
               />
-              <TrafficChart segments={store.segments} />
+              <TrafficChart segments={store.segments} reason={samplingReason} />
               <PlaylistStateChart transitions={playlistStates} />
             </div>
           </div>

@@ -94,6 +94,59 @@ class SessionOptions:
         }
 
 
+def _ordinal(value: int) -> str:
+    """1st, 2nd, 3rd, 4th. A rule sentence that reads "every 3th segment" is not finished."""
+    teens = 10 <= value % 100 <= 20
+    suffix = "th" if teens else {1: "st", 2: "nd", 3: "rd"}.get(value % 10, "th")
+    return f"{value}{suffix}"
+
+
+@dataclass(slots=True)
+class SamplingReport:
+    """Why one poll of one rung sampled the number of segments it did.
+
+    A session that measures no segment used to look identical to one that was never asked
+    to. Every poll now leaves this behind, so "0 segments checked" always carries the
+    measurement that produced the nothing.
+    """
+
+    variant: str
+    at: str = ""
+    reason: str = ""
+    # The most recent poll.
+    listed: int = 0
+    eligible: int = 0
+    fetched: int = 0
+    # The life of the session, so a rung that is sampling normally does not read as idle
+    # just because its latest poll listed nothing new.
+    polls: int = 0
+    total_fetched: int = 0
+
+    def begin_poll(self, at: str, listed: int) -> None:
+        self.at = at
+        self.reason = ""
+        self.listed = listed
+        self.eligible = 0
+        self.fetched = 0
+        self.polls += 1
+
+    def record_fetch(self) -> None:
+        self.fetched += 1
+        self.total_fetched += 1
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "variant": self.variant,
+            "at": self.at,
+            "reason": self.reason,
+            "listed": self.listed,
+            "eligible": self.eligible,
+            "fetched": self.fetched,
+            "polls": self.polls,
+            "total_fetched": self.total_fetched,
+        }
+
+
 @dataclass
 class LayerContext:
     """Per-layer state: the master, the renditions, and everything measured on them."""
@@ -190,6 +243,10 @@ class AnalysisSession:
         self.player_events: list[dict[str, Any]] = []
         self.redirect_chains: list[dict[str, Any]] = []
 
+        # The latest sampling outcome per rung. Read by `sampling_state`, which is what the
+        # UI shows in place of an unexplained zero.
+        self.sampling_reports: dict[str, SamplingReport] = {}
+
         self.started_at = dt.datetime.now(dt.UTC)
         self.ended_at: dt.datetime | None = None
         self._stop = asyncio.Event()
@@ -210,6 +267,49 @@ class AnalysisSession:
         if self.options.duration_s <= 0:
             return 0.0
         return min(1.0, self.elapsed_s / self.options.duration_s)
+
+    @property
+    def segments_sampled(self) -> int:
+        return sum(context.segment_count for context in self.layers.values())
+
+    def sampling_state(self) -> dict[str, Any]:
+        """What segment sampling has done, and — when it has done nothing — why.
+
+        `reason` is empty whenever any segment has been measured. It is only filled in for a
+        session that has sampled nothing, which is the case an operator cannot otherwise
+        explain from the screen.
+        """
+        sampled = self.segments_sampled
+        reason = ""
+        if sampled == 0:
+            crashed = [
+                poller
+                for context in self.layers.values()
+                for poller in context.pollers
+                if poller.failures
+            ]
+            if crashed:
+                # A detector raising is the analyzer's own defect. It is named first,
+                # because no explanation about the stream would be true.
+                reason = (
+                    f"{len(crashed)} playlist handler(s) failed inside the analyzer, so "
+                    f"sampling never ran. The last failure was on {crashed[0].target.variant}: "
+                    f"{crashed[0].last_failure.strip().splitlines()[-1]}"
+                )
+            elif not any(context.targets for context in self.layers.values()):
+                reason = "No rendition was resolved from the master playlist, so none is polled."
+            else:
+                for report in self.sampling_reports.values():
+                    if report.reason:
+                        reason = report.reason
+                        break
+                if not reason:
+                    reason = "No playlist poll has reached the segment sampler yet."
+        return {
+            "segments_sampled": sampled,
+            "reason": reason,
+            "by_variant": [r.as_dict() for r in self.sampling_reports.values()],
+        }
 
     def stop(self) -> None:
         self._stop.set()
@@ -462,6 +562,7 @@ class AnalysisSession:
                         "elapsed_s": self.elapsed_s,
                         "findings": len(self.collector),
                         "counts": self.collector.counts(),
+                        "sampling": self.sampling_state(),
                     },
                 },
             )
@@ -617,8 +718,29 @@ class AnalysisSession:
         playlist: MediaPlaylist,
         snapshot: Snapshot,
     ) -> None:
+        report = self.sampling_reports.setdefault(
+            target.variant, SamplingReport(variant=target.variant)
+        )
+        report.begin_poll(snapshot.at.isoformat(), len(playlist.segments))
+
         sampler = context.samplers.get(target.variant)
-        if sampler is None or self._sample_budget <= 0:
+        if sampler is None:
+            report.reason = (
+                f"{target.variant} is polled but has no segment sampler, so no segment of it "
+                "is fetched."
+            )
+            return
+        if self._sample_budget <= 0:
+            report.reason = (
+                f"The sample budget of {self.options.max_segment_samples} segment(s) is spent "
+                "for this session."
+            )
+            return
+        if not playlist.segments:
+            report.reason = (
+                f"{target.variant} returned a playlist that lists no segment, so there is "
+                "nothing to fetch."
+            )
             return
 
         if playlist.map_uri:
@@ -656,6 +778,7 @@ class AnalysisSession:
                 break
             if not sampler.sampling.should_fetch(segment.msn):
                 continue
+            report.eligible += 1
             self._sample_budget -= 1
 
             sample = await sampler.fetch_segment(
@@ -666,7 +789,19 @@ class AnalysisSession:
                 byterange=segment.byterange,
             )
             context.segment_count += 1
+            report.record_fetch()
             await self._on_segment(context, target, sample, buffer, history, snapshot)
+
+        if report.fetched == 0:
+            policy = (
+                "every segment"
+                if sampler.sampling.full
+                else f"every {_ordinal(sampler.sampling.nth)} segment"
+            )
+            report.reason = (
+                f"{target.variant} lists {report.listed} segment(s), all of which this "
+                f"session has already sampled. The rung samples {policy}."
+            )
 
     async def _on_segment(
         self,

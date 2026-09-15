@@ -82,6 +82,29 @@ export interface SegmentResultData {
   starts_with_keyframe: boolean | null
 }
 
+/**
+ * What segment sampling has done, and — when it has done nothing — why.
+ *
+ * `reason` is empty whenever any segment has been measured. It is filled in only for a
+ * session that sampled nothing, which is the case the screen could not otherwise explain.
+ */
+export interface SamplingState {
+  segments_sampled: number
+  reason: string
+  by_variant: {
+    variant: string
+    at: string
+    reason: string
+    /** The most recent poll. */
+    listed: number
+    eligible: number
+    fetched: number
+    /** The life of the session. */
+    polls: number
+    total_fetched: number
+  }[]
+}
+
 export interface VerdictData {
   status: string
   headline: string

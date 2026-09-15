@@ -125,6 +125,18 @@ cd backend
 .\deploy\windows\rba.cmd analyse "https://cdn.example/live/ch1/master.m3u8" --duration 5m --html out.html
 ```
 
+When a run measures no segment, `diagnose` says why. It reports the resolved ladder and,
+per rendition, the HTTP status, how many segments the playlist listed, how many were
+sampled, and any handler failure with its traceback:
+
+```bash
+.venv/bin/python -m app.cli diagnose "https://cdn.example/live/ch1/master.m3u8"
+```
+
+```powershell
+.\deploy\windows\rba.cmd diagnose "https://cdn.example/live/ch1/master.m3u8"
+```
+
 `analyse` exits `0` when no stream-side defect was found and `2` when one was, so it drops
 into a monitoring cron — or a Windows scheduled task — without further glue.
 

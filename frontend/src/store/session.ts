@@ -10,6 +10,7 @@ import type {
   EventData,
   FindingData,
   PlaylistSnapshotData,
+  SamplingState,
   SegmentResultData,
   ServerMessage,
   VerdictData,
@@ -59,6 +60,7 @@ export interface SessionState {
   findings: Record<string, FindingData>
   verdict: VerdictData | null
   counts: Record<string, number>
+  sampling: SamplingState | null
 
   snapshots: PlaylistSnapshotData[]
   segments: SegmentResultData[]
@@ -89,6 +91,7 @@ const initial = {
   findings: {},
   verdict: null,
   counts: {},
+  sampling: null,
   snapshots: [],
   segments: [],
   events: [],
@@ -160,6 +163,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           progress: Number(data.progress ?? state.progress),
           elapsed: Number(data.elapsed_s ?? state.elapsed),
           counts: (data.counts as Record<string, number>) ?? state.counts,
+          // Why sampling measured what it measured. Carried on the progress metric so the
+          // screen can explain a zero instead of showing an empty grid.
+          sampling: (data.sampling as SamplingState | undefined) ?? state.sampling,
         })
         break
       }
