@@ -63,7 +63,8 @@ python -m app.cli rules --markdown            # rule catalogue
 
 ```
 backend/app/
-  api/        REST routers (realtime, channels, aging, bulk, reports, proxy, settings, health)
+  api/        REST routers (realtime, catalogue, channels, aging, bulk, reports, proxy,
+              settings, health)
   ws/         WebSocket hub + typed message schemas
   jobs/       job manager, persistence, resume-on-restart
   net/        fetcher (manual redirects + timing split), dns, tls_inspect
@@ -73,8 +74,10 @@ backend/app/
   reports/    Jinja2 templates + HTML/PDF renderers + escalation blocks
   bulk/       csv/xlsx/json parsing with column alias mapping
   db/         SQLAlchemy models, repository, session factory
+  tvplus/     the live channel catalogue: country table, dbconnect mapping, row parser
 frontend/src/
-  tabs/       Realtime, Channels (analysed channels), Aging, Bulk, Reports, Settings
+  tabs/       Realtime, AllChannels (the TV Plus catalogue), Channels (analysed channels),
+              Aging, Bulk, Reports, Settings
   components/ Player, charts/, FindingCard, ManifestViewer, SequenceLadder
 ```
 
@@ -116,7 +119,14 @@ frontend/src/
   primitives in `src/components/ui/`. The rail and page header are in `src/components/layout/`.
   The same tokens are mirrored in `backend/app/reports/templates/` so a report looks like the
   screen it came from.
-- Results panels are hidden with CSS, never unmounted, so video element refs survive.
+- Results panels are hidden with CSS, never unmounted, so video element refs survive. There
+  is no router, so a channel sent from All channels into Realtime or Aging travels as state:
+  `src/lib/prefill.ts` seeds the target tab's form once per send and every field stays
+  editable. Nothing auto-starts.
+- The channel catalogue is fetched by the backend, never the browser: it sends no CORS
+  headers, and the country/environment to `dbconnect` mapping belongs in one place,
+  `app/tvplus/catalogue.py`. The tab reads the country list from `/api/catalogue/countries`
+  rather than holding a second copy.
 - Stopping a realtime session ends it: the player element is stopped and emptied, the store
   is reset, and the run is filed under Analysed channels. The Realtime tab returns to the
   state it was in before the analysis so the next one starts clean.

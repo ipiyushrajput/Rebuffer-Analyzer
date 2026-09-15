@@ -15,15 +15,24 @@ import {
   IconChannels,
   IconCollapse,
   IconExpand,
+  IconGlobe,
   IconRealtime,
   IconReports,
   IconSettings,
 } from '../ui/icons'
 
-export type TabId = 'realtime' | 'channels' | 'aging' | 'bulk' | 'reports' | 'settings'
+export type TabId =
+  | 'realtime'
+  | 'catalogue'
+  | 'channels'
+  | 'aging'
+  | 'bulk'
+  | 'reports'
+  | 'settings'
 
 const NAV: { id: TabId; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
   { id: 'realtime', label: 'Realtime', Icon: IconRealtime },
+  { id: 'catalogue', label: 'All channels', Icon: IconGlobe },
   { id: 'channels', label: 'Analysed channels', Icon: IconChannels },
   { id: 'aging', label: 'Aging', Icon: IconAging },
   { id: 'bulk', label: 'Bulk analysis', Icon: IconBulk },

@@ -11,11 +11,13 @@ import { useState } from 'react'
 import { endpoints } from './api/client'
 import { Sidebar, useRailCollapsed, type TabId } from './components/layout/Sidebar'
 import { AgingTab } from './tabs/Aging'
+import { AllChannelsTab } from './tabs/AllChannels'
 import { BulkTab } from './tabs/Bulk'
 import { ChannelsTab } from './tabs/Channels'
 import { RealtimeTab } from './tabs/Realtime'
 import { ReportsTab } from './tabs/Reports'
 import { SettingsTab } from './tabs/Settings'
+import type { ChannelPrefill } from './lib/prefill'
 
 const DEGRADED_NOTE: Record<string, string> = {
   ffmpeg: 'ffmpeg is absent, so the decode-error and quality detectors do not run.',
@@ -29,6 +31,25 @@ export default function App() {
   const [collapsed, setCollapsed] = useRailCollapsed()
   /* The channel the Analysed channels tab has open, so a stopped run lands on its own page. */
   const [openChannel, setOpenChannel] = useState<string | null>(null)
+  /*
+   * A channel sent from All channels into Realtime or Aging. There is no router — tabs stay
+   * mounted so a running session survives — so the channel travels as state. The token rises
+   * on every send, which is what lets the same channel be sent twice.
+   */
+  const [prefill, setPrefill] = useState<Record<'realtime' | 'aging', ChannelPrefill | null>>({
+    realtime: null,
+    aging: null,
+  })
+  const sendToAnalysis = (
+    target: 'realtime' | 'aging',
+    channel: Omit<ChannelPrefill, 'token'>,
+  ) => {
+    setPrefill((current) => ({
+      ...current,
+      [target]: { ...channel, token: (current[target]?.token ?? 0) + 1 },
+    }))
+    setTab(target)
+  }
   const queryClient = useQueryClient()
 
   const { data: health } = useQuery({
@@ -66,6 +87,7 @@ export default function App() {
         <div className={tab === 'realtime' ? '' : 'panel-hidden'}>
           <RealtimeTab
             thresholds={thresholds}
+            prefill={prefill.realtime}
             onArchived={(sessionId) => {
               void queryClient.invalidateQueries({ queryKey: ['channels'] })
               void queryClient.invalidateQueries({ queryKey: ['reports'] })
@@ -81,8 +103,11 @@ export default function App() {
             onOpenChange={setOpenChannel}
           />
         </div>
+        <div className={tab === 'catalogue' ? '' : 'panel-hidden'}>
+          <AllChannelsTab onAnalyse={sendToAnalysis} />
+        </div>
         <div className={tab === 'aging' ? '' : 'panel-hidden'}>
-          <AgingTab thresholds={thresholds} />
+          <AgingTab thresholds={thresholds} prefill={prefill.aging} />
         </div>
         <div className={tab === 'bulk' ? '' : 'panel-hidden'}>
           <BulkTab />

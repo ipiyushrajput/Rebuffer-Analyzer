@@ -59,6 +59,7 @@ import {
   type Severity,
 } from '../lib/constants'
 import { duration, localTime, ratio } from '../lib/format'
+import { usePrefill, type ChannelPrefill } from '../lib/prefill'
 import { findingList, useSessionStore } from '../store/session'
 import type { FindingData, VerdictData } from '../ws/messages'
 import { useSessionSocket } from '../ws/useSessionSocket'
@@ -78,10 +79,13 @@ interface Props {
   thresholds: Record<string, number>
   /** Called with the session id once a stopped analysis has been filed. */
   onArchived: (sessionId: string) => void
+  /** A channel sent from All channels. It seeds the form; it never starts the analysis. */
+  prefill?: ChannelPrefill | null
 }
 
-export function RealtimeTab({ thresholds, onArchived }: Props) {
+export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
   const [form, setForm] = useState<UrlFormValue>(emptyForm(false))
+  usePrefill(prefill, setForm, false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [evidenceTab, setEvidenceTab] = useState<EvidenceTab>('master')
