@@ -112,7 +112,10 @@ export interface CatalogueChannel {
   service_id: string
   country: string
   name: string
+  /** Empty when the catalogue lists the channel with no CNTN_URI. */
   playback_url: string
+  /** False when there is no playback URL, so there is nothing to analyse. */
+  analysable: boolean
   extra: string[]
 }
 

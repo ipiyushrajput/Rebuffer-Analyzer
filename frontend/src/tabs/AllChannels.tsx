@@ -18,7 +18,6 @@ import {
   EmptyState,
   InlineAlert,
   SegmentedControl,
-  cx,
 } from '../components/ui'
 import { IconAging, IconArrowLeft, IconArrowRight, IconPulse, IconSearch } from '../components/ui/icons'
 import type { ChannelPrefill } from '../lib/prefill'
@@ -320,22 +319,34 @@ function ChannelRow({
         {channel.name}
       </td>
       <td>
-        <div className="flex items-center gap-2">
-          <span
-            className={cx('block max-w-80 truncate font-mono text-micro text-ink-muted')}
-            title={channel.playback_url}
-          >
-            {channel.playback_url}
+        {channel.analysable ? (
+          <div className="flex items-center gap-2">
+            <span
+              className="block max-w-80 truncate font-mono text-micro text-ink-muted"
+              title={channel.playback_url}
+            >
+              {channel.playback_url}
+            </span>
+            <CopyButton text={channel.playback_url} label="Copy" />
+          </div>
+        ) : (
+          <span className="text-small text-ink-faint">
+            The catalogue lists no playback URL for this channel
           </span>
-          <CopyButton text={channel.playback_url} label="Copy" />
-        </div>
+        )}
       </td>
       <td>
         <div className="flex items-center justify-end gap-2">
+          {/* A channel with no URL is still listed — it exists — but there is nothing to run. */}
           <button
             type="button"
             className="btn-ghost btn-sm"
-            title="Open Realtime with this channel filled in"
+            disabled={!channel.analysable}
+            title={
+              channel.analysable
+                ? 'Open Realtime with this channel filled in'
+                : 'This channel has no playback URL to analyse'
+            }
             onClick={() => onAnalyse('realtime', prefill)}
           >
             <IconPulse size={13} />
@@ -344,7 +355,12 @@ function ChannelRow({
           <button
             type="button"
             className="btn-ghost btn-sm"
-            title="Open Aging with this channel filled in"
+            disabled={!channel.analysable}
+            title={
+              channel.analysable
+                ? 'Open Aging with this channel filled in'
+                : 'This channel has no playback URL to analyse'
+            }
             onClick={() => onAnalyse('aging', prefill)}
           >
             <IconAging size={13} />

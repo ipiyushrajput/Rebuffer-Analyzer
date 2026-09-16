@@ -134,10 +134,27 @@ def build_url(
 
 # -- response parsing --------------------------------------------------------
 
-# A channel is served as a positional array. Only the first five fields are displayed; the
-# rest are kept so a later column costs no parser change.
+# The catalogue serves each channel as a positional array and describes the columns in a
+# `metaData` block. The block is authoritative and is used when present; these positions are
+# the fallback for a response that omits it.
 IDX_NUMBER, IDX_SERVICE_ID, IDX_COUNTRY, IDX_NAME, IDX_URL = 0, 1, 2, 3, 4
 MIN_FIELDS = 5
+
+# The column the catalogue publishes for each field the tab shows.
+COLUMNS: dict[str, str] = {
+    "number": "CHN_NUM",
+    "service_id": "SVC_ID",
+    "country": "COUNTRY",
+    "name": "SVC_NAME",
+    "playback_url": "CNTN_URI",
+}
+DEFAULT_INDEX: dict[str, int] = {
+    "number": IDX_NUMBER,
+    "service_id": IDX_SERVICE_ID,
+    "country": IDX_COUNTRY,
+    "name": IDX_NAME,
+    "playback_url": IDX_URL,
+}
 
 TOTAL_KEYS = ("total", "totalCount", "totalCnt", "count", "totalRows", "totalElements")
 PAGES_KEYS = ("totalPage", "totalPages", "pageCount", "lastPage")
@@ -145,7 +162,13 @@ PAGES_KEYS = ("totalPage", "totalPages", "pageCount", "lastPage")
 
 @dataclass(slots=True)
 class Channel:
-    """One catalogue row, with the playback URL the analyzer can use as-is."""
+    """One catalogue row, with the playback URL the analyzer can use as-is.
+
+    `playback_url` is empty for a channel the catalogue lists with no CNTN_URI. Such a
+    channel is still shown — it exists, and an operator looking for it has to find it — but
+    there is nothing to analyse, which the tab says rather than offering an action that
+    cannot run.
+    """
 
     number: str
     service_id: str
@@ -154,6 +177,10 @@ class Channel:
     playback_url: str
     extra: list[str]
 
+    @property
+    def analysable(self) -> bool:
+        return bool(self.playback_url)
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "number": self.number,
@@ -161,26 +188,66 @@ class Channel:
             "country": self.country,
             "name": self.name,
             "playback_url": self.playback_url,
+            "analysable": self.analysable,
             "extra": self.extra,
         }
 
 
 def _looks_like_row(item: Any) -> bool:
-    """A channel row is a positional array whose fifth field is the playback URL."""
+    """A channel row is a positional array of scalars carrying a service id and a name.
+
+    The playback URL is deliberately not part of the test: the catalogue lists channels with
+    CNTN_URI null, and a row is no less a row for having no URL in it.
+    """
     return (
         isinstance(item, list)
         and len(item) >= MIN_FIELDS
-        and isinstance(item[IDX_URL], str)
-        and item[IDX_URL].lower().startswith("http")
+        and all(field is None or isinstance(field, str | int | float | bool) for field in item)
+        and isinstance(item[IDX_SERVICE_ID], str)
+        and isinstance(item[IDX_NAME], str)
     )
+
+
+def column_index(payload: Any) -> dict[str, int] | None:
+    """Field name to row position, read from the response's own column metadata.
+
+    The catalogue describes its columns in `metaData`, so the tab does not have to trust the
+    order they happen to arrive in. A block that does not name every column the tab shows is
+    not used at all, rather than used for half the fields.
+    """
+    if not isinstance(payload, dict):
+        return None
+    for value in payload.values():
+        if not isinstance(value, list) or not value:
+            continue
+        names = [
+            item.get("name") or item.get("dbColumnName") for item in value if isinstance(item, dict)
+        ]
+        if len(names) != len(value):
+            continue
+        positions = {str(name).upper(): index for index, name in enumerate(names) if name}
+        mapped = {
+            field: positions[column] for field, column in COLUMNS.items() if column in positions
+        }
+        if len(mapped) == len(COLUMNS):
+            return mapped
+    return None
+
+
+@dataclass(slots=True)
+class Table:
+    """The channel rows of one response, and where each field sits in them."""
+
+    rows: list[list[Any]]
+    index: dict[str, int]
 
 
 def find_rows(payload: Any) -> list[list[Any]]:
     """Locate the channel rows, whether they sit at the top level or under a key.
 
-    The catalogue is an internal service and its envelope is not published, so the rows are
-    found by their shape rather than by a key name that a future version may rename. A
-    payload carrying no row of that shape raises, and the caller reports what arrived.
+    The rows are found by their shape rather than by a key name, so a response that renames
+    its envelope still reads. A payload carrying no row of that shape raises, and the caller
+    reports what arrived.
     """
     if isinstance(payload, list):
         rows = [item for item in payload if _looks_like_row(item)]
@@ -205,9 +272,14 @@ def find_rows(payload: Any) -> list[list[Any]]:
         if any(isinstance(v, list) for v in payload.values()):
             return []
     raise CatalogueError(
-        "The catalogue response carries no channel rows. A row is an array whose fifth "
-        f"field is a playback URL; the response was {type(payload).__name__}."
+        "The catalogue response carries no channel rows. A row is an array carrying a "
+        f"service id and a channel name; the response was {type(payload).__name__}."
     )
+
+
+def find_table(payload: Any) -> Table:
+    """The rows of a response together with the column positions to read them by."""
+    return Table(rows=find_rows(payload), index=column_index(payload) or dict(DEFAULT_INDEX))
 
 
 def _first_int(payload: Any, keys: tuple[str, ...]) -> int | None:
@@ -227,21 +299,25 @@ def _first_int(payload: Any, keys: tuple[str, ...]) -> int | None:
     return None
 
 
-def parse_row(row: list[Any]) -> Channel:
+def parse_row(row: list[Any], index: dict[str, int] | None = None) -> Channel:
     """One positional array as a channel, with the routing marker removed from the URL."""
+    position = index or DEFAULT_INDEX
 
-    def text(index: int) -> str:
-        value = row[index] if index < len(row) else ""
-        return "" if value is None else str(value)
+    def text(field: str) -> str:
+        at = position.get(field, DEFAULT_INDEX[field])
+        value = row[at] if 0 <= at < len(row) else None
+        # A column the catalogue leaves null is an absent value, not the word "None".
+        return "" if value is None else str(value).strip()
 
+    shown = set(position.values())
     return Channel(
-        number=text(IDX_NUMBER),
-        service_id=text(IDX_SERVICE_ID),
-        country=text(IDX_COUNTRY),
-        name=text(IDX_NAME),
+        number=text("number"),
+        service_id=text("service_id"),
+        country=text("country"),
+        name=text("name"),
         # Every consumer — the table, the copy button, Realtime and Aging — gets the clean URL.
-        playback_url=strip_component_suffix(text(IDX_URL).strip()),
-        extra=[text(i) for i in range(MIN_FIELDS, len(row))],
+        playback_url=strip_component_suffix(text("playback_url")),
+        extra=["" if row[i] is None else str(row[i]) for i in range(len(row)) if i not in shown],
     )
 
 
@@ -285,8 +361,8 @@ def parse_page(body: str, *, page: int, page_size: int, url: str, today: str) ->
             f"The catalogue returned {len(body)} byte(s) that do not parse as JSON: {exc}."
         ) from exc
 
-    rows = find_rows(payload)
-    channels = [parse_row(row) for row in rows]
+    table = find_table(payload)
+    channels = [parse_row(row, table.index) for row in table.rows]
 
     total = _first_int(payload, TOTAL_KEYS)
     total_pages = _first_int(payload, PAGES_KEYS)
