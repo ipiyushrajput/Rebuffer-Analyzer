@@ -701,7 +701,7 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 | `MED-012` | ERROR | Packager | Playlist declares EXT-X-GAP | direct | — | Qosifire 'Gap in chunklist' |
 | `MED-013` | ERROR | Packager | Subtitle playlist advertises a new media sequence number with an unchanged segment list | indirect | — | A-Sequence Detector web.vtt escalation |
 | `MED-014` | ERROR | Packager | Media playlist left the LIVE state | direct | — | HLSAnalyzer media playlist state machine |
-| `MED-015` | WARN | Packager | Segments are published faster than real time | indirect | `vpb_max_buffer_s` | HLSAnalyzer EC-1004; Qosifire 'Buffer too long' |
+| `MED-015` | WARN | Packager | Segments are published faster than real time | indirect | `vpb_fhd_total_mb`, `vpb_fhd_total_s`, `vpb_uhd_total_mb`, `vpb_uhd_total_s` | HLSAnalyzer EC-1004; Qosifire 'Buffer too long' |
 | `MED-016` | ERROR | CDN | Segment URI changed for an unchanged media sequence number | direct | — | Qosifire 'Chunklist params changed' |
 | `MED-017` | WARN | Packager | Playlist carries no EXT-X-PROGRAM-DATE-TIME | indirect | — | HLS AV Doctor DemuxAnalyzer |
 | `MED-018` | ERROR | Packager | EXT-X-PROGRAM-DATE-TIME moves backwards | direct | — | — |
@@ -1325,8 +1325,8 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 | ID | Severity | Owner | Title | Impact | Thresholds | Reference |
 |---|---|---|---|---|---|---|
 | `VPB-001` | CRITICAL | CDN | Simulated rebuffering ratio is above the threshold | direct | `rebuffer_ratio_threshold`, `vpb_mode` | HLSAnalyzer virtual buffer; Qosifire per-rendition buffer |
-| `VPB-002` | WARN | CDN | Simulated player buffer reached zero | direct | `vpb_startup_buffer_td_multiple`, `vpb_rebuffer_resume_td_multiple` | HLSAnalyzer virtual buffer; Qosifire 'Buffer too short' |
-| `VPB-003` | WARN | Packager | Simulated player buffer exceeded the maximum a player holds | indirect | `vpb_max_buffer_s` | Qosifire 'Buffer too long'; HLSAnalyzer EC-1004 |
+| `VPB-002` | WARN | CDN | Simulated player buffer reached zero | direct | `vpb_startup_fraction`, `vpb_resume_fraction`, `vpb_low_watermark_fraction` | HLSAnalyzer virtual buffer; Qosifire 'Buffer too short' |
+| `VPB-003` | WARN | Packager | Simulated player buffer exceeded the maximum a player holds | indirect | `vpb_fhd_total_mb`, `vpb_fhd_total_s`, `vpb_uhd_total_mb`, `vpb_uhd_total_s` | Qosifire 'Buffer too long'; HLSAnalyzer EC-1004 |
 | `VPB-004` | CRITICAL | CDN | No segment on this rung was downloadable for a continuous period | direct | `vpb_outage_threshold_s` | HLSAnalyzer outage mode |
 | `VPB-900` | PASS | CDN | Simulated player buffer never emptied | none | — | — |
 
@@ -1387,9 +1387,15 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 | `av_pts_delta_critical_ms` | `1000` |
 | `master_repoll_interval_s` | `20` |
 | `bandwidth_variation_tolerance` | `0.05` |
-| `vpb_startup_buffer_td_multiple` | `3.0` |
-| `vpb_rebuffer_resume_td_multiple` | `1.0` |
-| `vpb_max_buffer_s` | `60.0` |
+| `vpb_apply_byte_caps` | `False` |
+| `vpb_fhd_total_mb` | `3.0` |
+| `vpb_fhd_total_s` | `15.0` |
+| `vpb_uhd_total_mb` | `60.0` |
+| `vpb_uhd_total_s` | `15.0` |
+| `vpb_uhd_min_height` | `2160` |
+| `vpb_startup_fraction` | `0.33` |
+| `vpb_resume_fraction` | `0.66` |
+| `vpb_low_watermark_fraction` | `0.01` |
 | `vpb_mode` | `NORMAL` |
 | `vpb_outage_threshold_s` | `2.0` |
 | `incident_open_s` | `10.0` |

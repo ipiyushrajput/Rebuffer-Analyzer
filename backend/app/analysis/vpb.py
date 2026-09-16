@@ -4,17 +4,26 @@ Models a Tizen-like player against the delivery timings actually measured, so Ag
 Bulk produce a rebuffering ratio with no player attached, and Realtime can show the model
 next to the real hls.js buffer.
 
-The model, combining the HLSAnalyzer and Qosifire mechanisms:
+The model follows Plus Player's documented buffering configuration:
 
-* Playback starts once `vpb_startup_buffer_td_multiple × TARGETDURATION` of media has been
-  fully downloaded.
-* A segment adds its EXTINF to the buffer at the wall-clock instant its download
-  **completes**, not when it is listed.
-* The buffer drains at one second per wall-clock second while playing.
-* At zero the state becomes `REBUFFERING`; playback resumes once
-  `vpb_rebuffer_resume_td_multiple × TARGETDURATION` has accumulated.
-* A segment that never downloads adds nothing.
-* Above `vpb_max_buffer_s` the model emits `BUFFER_TOO_LONG`.
+* The queue is bounded by a **byte cap and a time cap together**, and the smaller binds.
+  FHD holds 3 MB or 15 s; UHD holds 60 MB or 15 s. At 7.5 Mbit/s the FHD byte cap is
+  3.2 s of media, so a high rung buffers far less than its 15 s suggests — which is why a
+  time-only model under-reported rebuffering on exactly the rungs most at risk.
+* The profile comes from the tallest rung the ladder offers: 2160p and above is UHD,
+  anything below is FHD.
+* Playback starts at the startup watermark, 33% of the total, and a resume after an
+  underrun waits for 66%. Both are reached on whichever dimension fills first.
+* A segment adds its EXTINF and its measured bytes at the wall-clock instant its download
+  **completes**, not when it is listed. A segment that never downloads adds nothing.
+* The buffer drains at one second per wall-clock second while playing, and the bytes of
+  the media played leave with it.
+* Playback underruns at the low watermark, 1% of the total, rather than at exactly zero.
+* A queue that reaches its cap emits `BUFFER_TOO_LONG`: the real player would have stopped
+  fetching, so media arriving past the cap is media the player never asked for.
+
+Every number above is a threshold in `app/config.py`, so a player change is a settings
+change rather than a code change.
 """
 
 from __future__ import annotations
@@ -46,6 +55,97 @@ class SegmentDelivery:
     available: bool = True
     download_ms: float = 0.0
     uri: str = ""
+    # Measured transfer size. Zero means the size is unknown, and the byte cap cannot bind
+    # on media that never reported one.
+    bytes: int = 0
+
+
+BYTES_PER_MB = 1_000_000
+
+
+@dataclass(frozen=True, slots=True)
+class BufferProfile:
+    """The queue Plus Player gives one content type: a byte cap and a time cap together.
+
+    Both caps apply at once and the smaller one binds, which is what makes a high-bitrate
+    rung buffer so much less than the time cap alone implies.
+    """
+
+    name: str
+    total_bytes: float
+    total_s: float
+    startup_fraction: float
+    resume_fraction: float
+    low_fraction: float
+    # False leaves the queue bounded by time alone. See `vpb_apply_byte_caps`.
+    apply_bytes: bool = True
+
+    def at(self, fraction: float) -> tuple[float, float]:
+        """The byte and time watermark at this fraction of the total."""
+        return self.total_bytes * fraction, self.total_s * fraction
+
+    @property
+    def startup(self) -> tuple[float, float]:
+        return self.at(self.startup_fraction)
+
+    @property
+    def resume(self) -> tuple[float, float]:
+        return self.at(self.resume_fraction)
+
+    @property
+    def low_s(self) -> float:
+        """Playback underruns here. Time only: playback consumes media time, not bytes."""
+        return self.total_s * self.low_fraction
+
+    def seconds_at(self, bitrate_bps: float) -> float:
+        """What the total holds, in seconds, for media at this rate."""
+        if bitrate_bps <= 0 or not self.apply_bytes:
+            return self.total_s
+        return min(self.total_s, self.total_bytes * 8 / bitrate_bps)
+
+    def as_dict(self) -> dict[str, Any]:
+        startup_bytes, startup_s = self.startup
+        resume_bytes, resume_s = self.resume
+        return {
+            "name": self.name,
+            "byte_caps_applied": self.apply_bytes,
+            "total_mb": round(self.total_bytes / BYTES_PER_MB, 3),
+            "total_s": self.total_s,
+            "startup_mb": round(startup_bytes / BYTES_PER_MB, 3),
+            "startup_s": round(startup_s, 3),
+            "resume_mb": round(resume_bytes / BYTES_PER_MB, 3),
+            "resume_s": round(resume_s, 3),
+            "low_s": round(self.low_s, 3),
+        }
+
+
+def profile_for(top_height: int | None, thresholds: Thresholds) -> BufferProfile:
+    """The buffering profile a ladder gets, from the tallest rung it offers.
+
+    A ladder reaching 2160p is a UHD channel and the device gives it the larger queue; one
+    topping out at 1080p or below is FHD. The choice is per channel, not per rung, because
+    the player configures its queue once for the content it is about to play.
+    """
+    uhd = top_height is not None and top_height >= thresholds.vpb_uhd_min_height
+    total_mb = thresholds.vpb_uhd_total_mb if uhd else thresholds.vpb_fhd_total_mb
+    total_s = thresholds.vpb_uhd_total_s if uhd else thresholds.vpb_fhd_total_s
+    return BufferProfile(
+        name="UHD" if uhd else "FHD",
+        total_bytes=total_mb * BYTES_PER_MB,
+        total_s=total_s,
+        startup_fraction=thresholds.vpb_startup_fraction,
+        resume_fraction=thresholds.vpb_resume_fraction,
+        low_fraction=thresholds.vpb_low_watermark_fraction,
+        apply_bytes=thresholds.vpb_apply_byte_caps,
+    )
+
+
+@dataclass(slots=True)
+class _Chunk:
+    """One segment sitting in the queue, drained from the head as playback consumes it."""
+
+    seconds: float
+    bytes: float
 
 
 @dataclass(slots=True)
@@ -80,6 +180,8 @@ class Stall:
 class VpbResult:
     variant: str
     mode: VpbMode
+    # The queue the replay used, so a report states the player it modelled.
+    profile: dict[str, Any] = field(default_factory=dict)
     points: list[BufferPoint] = field(default_factory=list)
     stalls: list[Stall] = field(default_factory=list)
     buffer_too_long_events: list[dt.datetime] = field(default_factory=list)
@@ -114,6 +216,7 @@ class VpbResult:
         return {
             "variant": self.variant,
             "mode": self.mode.value,
+            "profile": self.profile,
             "rebuffer_ratio": self.rebuffer_ratio,
             "playing_s": self.playing_s,
             "stall_s": self.stall_s,
@@ -141,17 +244,20 @@ class VirtualPlayerBuffer:
         target_duration: float,
         thresholds: Thresholds,
         mode: VpbMode | None = None,
+        top_height: int | None = None,
+        profile: BufferProfile | None = None,
     ) -> None:
         self.variant = variant
         self.target_duration = max(target_duration, 0.1)
         self.thresholds = thresholds
         self.mode = mode or thresholds.vpb_mode
-        self.startup_target = self.target_duration * thresholds.vpb_startup_buffer_td_multiple
-        self.resume_target = self.target_duration * thresholds.vpb_rebuffer_resume_td_multiple
+        self.profile = profile or profile_for(top_height, thresholds)
 
+        self.queue: list[_Chunk] = []
         self.level_s = 0.0
+        self.level_bytes = 0.0
         self.state = BufferState.STARTUP
-        self.result = VpbResult(variant=variant, mode=self.mode)
+        self.result = VpbResult(variant=variant, mode=self.mode, profile=self.profile.as_dict())
         self._last_at: dt.datetime | None = None
         self._first_at: dt.datetime | None = None
         self._open_stall: Stall | None = None
@@ -183,20 +289,15 @@ class VirtualPlayerBuffer:
             self._consecutive_unavailable_from = None
             self._last_unavailable_at = None
 
-        self.level_s += max(delivery.duration_s, 0.0)
+        self._enqueue(max(delivery.duration_s, 0.0), max(delivery.bytes, 0), delivery.completed_at)
 
-        if self.level_s > self.thresholds.vpb_max_buffer_s:
-            self.result.buffer_too_long_events.append(delivery.completed_at)
-            # A real player discards what it cannot hold.
-            self.level_s = self.thresholds.vpb_max_buffer_s
-
-        if self.state is BufferState.STARTUP and self.level_s >= self.startup_target:
+        if self.state is BufferState.STARTUP and self._reached(*self.profile.startup):
             self.state = BufferState.PLAYING
             self.result.started_playback = True
             self.result.startup_s = (
                 (delivery.completed_at - self._first_at).total_seconds() if self._first_at else 0.0
             )
-        elif self.state is BufferState.REBUFFERING and self.level_s >= self.resume_target:
+        elif self.state is BufferState.REBUFFERING and self._reached(*self.profile.resume):
             self._close_stall(delivery.completed_at)
             self.state = BufferState.PLAYING
 
@@ -232,12 +333,13 @@ class VirtualPlayerBuffer:
             self.result.stall_s += elapsed
             return
 
-        playable = min(self.level_s, elapsed)
-        self.level_s -= playable
+        playable = self._play(elapsed)
         self.result.playing_s += playable
 
         shortfall = elapsed - playable
-        if shortfall > 0 or self.level_s <= 0:
+        # The queue underruns at the low watermark, which is where the player stops, not at
+        # a level of exactly zero.
+        if shortfall > 0 or self.level_s <= self.profile.low_s:
             if self._open_stall is None:
                 stall_start = moment - dt.timedelta(seconds=shortfall)
                 self._open_stall = Stall(started_at=stall_start)
@@ -253,6 +355,69 @@ class VirtualPlayerBuffer:
         self.result.stalls.append(self._open_stall)
         self._open_stall = None
 
+    def _reached(self, bytes_mark: float, seconds_mark: float) -> bool:
+        """A multiqueue watermark is met on whichever dimension fills first."""
+        if self.profile.apply_bytes and self.level_bytes >= bytes_mark:
+            return True
+        return self.level_s >= seconds_mark
+
+    def _enqueue(self, seconds: float, size: int, at: dt.datetime) -> None:
+        """Add one downloaded segment, up to whichever cap it reaches.
+
+        A real player that has filled its queue stops requesting, so media beyond the cap is
+        media it never asked for. The model records that rather than pretending the queue
+        grew: the level is what the device could hold.
+        """
+        if seconds <= 0 and size <= 0:
+            return
+        capped_on_bytes = self.profile.apply_bytes and self.level_bytes >= self.profile.total_bytes
+        if self.level_s >= self.profile.total_s or capped_on_bytes:
+            self.result.buffer_too_long_events.append(at)
+            return
+
+        room_s = self.profile.total_s - self.level_s
+        room_bytes = self.profile.total_bytes - self.level_bytes
+        # Bytes and seconds are trimmed together so the chunk keeps the rate it arrived at.
+        keep = 1.0
+        if seconds > room_s:
+            keep = min(keep, room_s / seconds)
+        if self.profile.apply_bytes and size > 0 and size > room_bytes:
+            keep = min(keep, room_bytes / size)
+        if keep < 1.0:
+            self.result.buffer_too_long_events.append(at)
+
+        chunk = _Chunk(seconds=seconds * keep, bytes=size * keep)
+        self.queue.append(chunk)
+        self.level_s += chunk.seconds
+        self.level_bytes += chunk.bytes
+
+    def _play(self, elapsed: float) -> float:
+        """Consume up to `elapsed` seconds from the head, taking their bytes with them."""
+        played = 0.0
+        remaining = elapsed
+        while remaining > 0 and self.queue:
+            head = self.queue[0]
+            if head.seconds <= remaining:
+                played += head.seconds
+                remaining -= head.seconds
+                self.level_s -= head.seconds
+                self.level_bytes -= head.bytes
+                self.queue.pop(0)
+                continue
+            share = remaining / head.seconds if head.seconds > 0 else 1.0
+            gone_bytes = head.bytes * share
+            head.seconds -= remaining
+            head.bytes -= gone_bytes
+            self.level_s -= remaining
+            self.level_bytes -= gone_bytes
+            played += remaining
+            remaining = 0.0
+        # Floating-point residue must not leave a queue that reads as non-empty.
+        if not self.queue:
+            self.level_s = 0.0
+            self.level_bytes = 0.0
+        return played
+
     def _record_point(self, at: dt.datetime) -> None:
         self.result.points.append(
             BufferPoint(at=at, level_s=round(self.level_s, 3), state=self.state)
@@ -267,10 +432,15 @@ def run(
     thresholds: Thresholds,
     mode: VpbMode | None = None,
     end_at: dt.datetime | None = None,
+    top_height: int | None = None,
 ) -> VpbResult:
     """Convenience wrapper: replay a whole list of deliveries."""
     buffer = VirtualPlayerBuffer(
-        variant, target_duration=target_duration, thresholds=thresholds, mode=mode
+        variant,
+        target_duration=target_duration,
+        thresholds=thresholds,
+        mode=mode,
+        top_height=top_height,
     )
     for delivery in deliveries:
         buffer.feed(delivery)
@@ -325,16 +495,21 @@ def findings_for(result: VpbResult, *, layer: StreamLayer, thresholds: Threshold
         )
 
     if result.buffer_too_long_events:
+        profile = result.profile
+        # Name the caps that are in force, so the finding states the queue it measured.
+        cap = f"{profile['total_s']:.0f} s"
+        if profile.get("byte_caps_applied"):
+            cap = f"{profile['total_mb']:.0f} MB or {cap}"
         findings.append(
             R.VPB_BUFFER_LONG.raise_finding(
-                f"The modelled player buffer on {result.variant} exceeded "
-                f"{thresholds.vpb_max_buffer_s:.0f} s on "
+                f"The modelled {profile['name']} player queue on {result.variant} reached its "
+                f"cap of {cap} on "
                 f"{len(result.buffer_too_long_events)} occasion(s), first at "
                 f"{result.buffer_too_long_events[0].isoformat()}.",
                 evidence={
                     "variant": result.variant,
                     "count": len(result.buffer_too_long_events),
-                    "max_buffer_s": thresholds.vpb_max_buffer_s,
+                    "profile": profile,
                 },
                 stream_layer=layer,
                 variant=result.variant,

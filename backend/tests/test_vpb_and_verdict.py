@@ -100,10 +100,18 @@ def test_outage_only_mode_counts_only_stalls_inside_an_outage() -> None:
     assert outage_only.counted_stalls == []
 
 
-def test_playback_does_not_start_before_the_startup_buffer_is_full() -> None:
-    result = vpb.run("720p", [delivery(0, 0.5)], target_duration=6.0, thresholds=T, end_at=at(30))
-    assert result.started_playback is False
-    assert result.playing_s == 0.0
+def test_playback_does_not_start_before_the_startup_watermark_is_reached() -> None:
+    """FHD starts at 33% of 15 s, so under five seconds of media is not enough."""
+    short = vpb.run(
+        "720p", [delivery(0, 0.5, duration=2.0)], target_duration=6.0, thresholds=T, end_at=at(30)
+    )
+    assert short.started_playback is False
+    assert short.playing_s == 0.0
+
+    enough = vpb.run(
+        "720p", [delivery(0, 0.5, duration=6.0)], target_duration=6.0, thresholds=T, end_at=at(30)
+    )
+    assert enough.started_playback is True
 
 
 # ---------------------------------------------------------------------------

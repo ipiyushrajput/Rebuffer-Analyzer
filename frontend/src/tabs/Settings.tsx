@@ -24,8 +24,8 @@ import { IconCheck, IconSearch } from '../components/ui/icons'
 import { UA_PROFILES, VPB_MODES, type Severity } from '../lib/constants'
 
 interface SettingsPayload {
-  thresholds: Record<string, number | string>
-  defaults: Record<string, number | string>
+  thresholds: Record<string, number | string | boolean>
+  defaults: Record<string, number | string | boolean>
   preferences: Record<string, number | boolean | string>
   ua_profiles: string[]
 }
@@ -48,9 +48,15 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
     keys: [
       'rebuffer_ratio_threshold',
       'vpb_mode',
-      'vpb_startup_buffer_td_multiple',
-      'vpb_rebuffer_resume_td_multiple',
-      'vpb_max_buffer_s',
+      'vpb_apply_byte_caps',
+      'vpb_fhd_total_mb',
+      'vpb_fhd_total_s',
+      'vpb_uhd_total_mb',
+      'vpb_uhd_total_s',
+      'vpb_uhd_min_height',
+      'vpb_startup_fraction',
+      'vpb_resume_fraction',
+      'vpb_low_watermark_fraction',
       'vpb_outage_threshold_s',
     ],
   },
@@ -134,7 +140,7 @@ export function SettingsTab() {
   const settings = data as SettingsPayload | undefined
 
   const [tab, setTab] = useState<GroupId>('profile')
-  const [thresholds, setThresholds] = useState<Record<string, number | string>>({})
+  const [thresholds, setThresholds] = useState<Record<string, number | string | boolean>>({})
   const [preferences, setPreferences] = useState<Record<string, number | boolean | string>>({})
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -290,7 +296,21 @@ export function SettingsTab() {
                           </span>
                         )}
                       </label>
-                      {key === 'vpb_mode' ? (
+                      {typeof thresholds[key] === 'boolean' ? (
+                        /* A threshold that is on or off, not a quantity. */
+                        <label className="flex items-center gap-2 pt-1 text-small text-ink-soft">
+                          <input
+                            id={`threshold-${key}`}
+                            type="checkbox"
+                            className="h-4 w-4 accent-brand-600"
+                            checked={Boolean(thresholds[key])}
+                            onChange={(e) =>
+                              setThresholds({ ...thresholds, [key]: e.target.checked })
+                            }
+                          />
+                          {thresholds[key] ? 'Applied' : 'Not applied'}
+                        </label>
+                      ) : key === 'vpb_mode' ? (
                         <select
                           id={`threshold-${key}`}
                           className="input"

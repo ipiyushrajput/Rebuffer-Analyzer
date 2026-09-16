@@ -84,10 +84,31 @@ class Thresholds(BaseModel):
     # picks against a figure that is not true.
     bandwidth_variation_tolerance: float = 0.05
 
-    # Virtual Player Buffer
-    vpb_startup_buffer_td_multiple: float = 3.0
-    vpb_rebuffer_resume_td_multiple: float = 1.0
-    vpb_max_buffer_s: float = 60.0
+    # Virtual Player Buffer.
+    #
+    # Plus Player's multiqueue is bounded by a byte cap and a time cap together, and the
+    # smaller one binds: at 7.5 Mbit/s the FHD cap of 3 MB is 3.2 s of media, nowhere near
+    # its 15 s. The profile is chosen from the tallest rung the ladder offers — a ladder
+    # topping out at 1080p is FHD, one reaching 2160p is UHD.
+    # The byte caps are implemented and configurable, and applied only when this is on.
+    # Taken literally they say a healthy 1080p channel underruns every segment — 3 MB is
+    # 3.2 s at 7.5 Mbit/s, less than one segment — which is not what devices do. Section 2
+    # of the player document lists `OutputMgr` as a separate queue holding downloaded
+    # segments, so the byte figures describe the decoder-side multiqueue rather than the
+    # buffer that governs rebuffering. The time figures are applied; these wait on the
+    # player team confirming which queue they size.
+    vpb_apply_byte_caps: bool = False
+    vpb_fhd_total_mb: float = 3.0
+    vpb_fhd_total_s: float = 15.0
+    vpb_uhd_total_mb: float = 60.0
+    vpb_uhd_total_s: float = 15.0
+    vpb_uhd_min_height: int = 2160
+    # Multiqueue watermarks, as fractions of the profile total. Startup fills to the lower
+    # one so playback begins quickly; a resume after an underrun fills to the higher one so
+    # it does not empty again immediately.
+    vpb_startup_fraction: float = 0.33
+    vpb_resume_fraction: float = 0.66
+    vpb_low_watermark_fraction: float = 0.01
     vpb_mode: VpbMode = VpbMode.NORMAL
     vpb_outage_threshold_s: float = 2.0
 

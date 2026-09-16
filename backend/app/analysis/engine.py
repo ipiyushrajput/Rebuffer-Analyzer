@@ -770,6 +770,9 @@ class AnalysisSession:
                 target_duration=context.target_duration_by_variant.get(target.variant, 6.0),
                 thresholds=self.thresholds,
                 mode=_vpb_mode(self.options.vpb_mode),
+                # The device configures its queue for the channel, so every rung of one
+                # ladder is modelled with the profile the tallest rung earns.
+                top_height=_top_height(context),
             )
             context.buffers[target.variant] = buffer
 
@@ -834,6 +837,8 @@ class AnalysisSession:
                 available=sample.available,
                 download_ms=sample.download_ms,
                 uri=sample.uri,
+                # The byte cap is half the buffer model, so the measured size travels with it.
+                bytes=sample.result.bytes_received,
             )
         )
 
@@ -1295,6 +1300,14 @@ def _worst_ratio(
     worst_key = max(vpb_results, key=lambda k: vpb_results[k].rebuffer_ratio)
     del player_events
     return vpb_results[worst_key].variant, vpb_results[worst_key].rebuffer_ratio
+
+
+def _top_height(context: LayerContext) -> int | None:
+    """The tallest rung the ladder offers, which decides the buffering profile."""
+    if context.master is None:
+        return None
+    heights = [v.height for v in context.master.variants if v.height]
+    return max(heights) if heights else None
 
 
 def _vpb_mode(value: str | None) -> Any:
