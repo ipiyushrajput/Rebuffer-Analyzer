@@ -279,6 +279,12 @@ Each row opens Realtime or Aging with the channel filled in — name, service ID
 in the channel name, and the clean playback URL. Nothing starts on its own, and every field
 stays editable.
 
+The catalogue lists channels with no `CNTN_URI`; on a staging country that can be half the
+page. Those channels are shown with the rest, stated as carrying no playback URL, and their
+two actions are disabled — a channel that exists but cannot be analysed is a fact worth
+seeing, not a row to drop. Column positions are read from the response's own `metaData`
+block rather than from the order the fields arrive in.
+
 Countries are grouped by the data set they read: **Group A** (AU, BR, CA, IN, KR, MX, NZ,
 TH, US, PH, SG) and **Group B** (AT, BE, DE, DK, FI, FR, IE, IT, LU, NL, NO, PT, ES, SE, CH,
 GB, EG, SA, AE). Adding a country or moving an environment is one edit in

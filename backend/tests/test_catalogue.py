@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -177,6 +178,82 @@ def test_an_empty_page_is_empty_rather_than_unreadable() -> None:
 def test_a_body_that_is_not_json_names_what_arrived() -> None:
     with pytest.raises(cat.CatalogueError, match="do not parse as JSON"):
         cat.parse_page("<html>503</html>", page=1, page_size=100, url="u", today="20260915")
+
+
+# -- the response the catalogue actually serves -------------------------------
+
+LIVE_RESPONSE = (
+    Path(__file__).resolve().parent / "fixtures" / "catalogue_response.json"
+).read_text(encoding="utf-8")
+
+
+def _live_page() -> cat.Page:
+    return cat.parse_page(LIVE_RESPONSE, page=1, page_size=100, url="u", today="20260916")
+
+
+def test_the_live_envelope_is_read_rows_metadata_and_pagination() -> None:
+    """One page as the catalogue serves it: rows under a key, columns declared, count nested."""
+    page = _live_page()
+    assert len(page.channels) == 14
+    assert (page.total, page.total_pages, page.has_next) == (255, 3, True)
+
+
+def test_the_column_positions_come_from_the_response_rather_than_from_order() -> None:
+    """`metaData` names the columns, so the tab does not trust the order they arrive in."""
+    payload = json.loads(LIVE_RESPONSE)
+    assert cat.column_index(payload) == {
+        "number": 0,
+        "service_id": 1,
+        "country": 2,
+        "name": 3,
+        "playback_url": 4,
+    }
+
+
+def test_metadata_that_does_not_name_every_column_is_not_used_at_all() -> None:
+    """Half a mapping would read half the fields from the wrong place."""
+    assert cat.column_index({"metaData": [{"name": "CHN_NUM"}, {"name": "SVC_ID"}]}) is None
+    assert cat.column_index({"rows": [ROW]}) is None
+
+
+def test_a_channel_listed_with_no_playback_url_is_still_listed() -> None:
+    """
+    Seven of the fourteen channels on this page carry CNTN_URI null.
+
+    Dropping them lost half the catalogue with nothing on screen to say so. They are listed,
+    marked as carrying no URL, and the tab offers no action that cannot run.
+    """
+    page = _live_page()
+    without = [c for c in page.channels if not c.analysable]
+    assert len(without) == 7
+    assert [c.name for c in without][:2] == ["The Bob Ross Channel", "360° Fernweh"]
+    assert all(c.playback_url == "" for c in without)
+    # A row with no URL still carries everything else the table shows.
+    assert without[0].number == "10008"
+    assert without[0].service_id == "AT16000010Y"
+    assert without[0].country == "AT"
+
+
+def test_every_playback_url_on_the_page_is_clean_and_usable() -> None:
+    page = _live_page()
+    usable = [c for c in page.channels if c.analysable]
+    assert len(usable) == 7
+    assert all(c.playback_url.startswith("https://") for c in usable)
+    assert not any("COMPONENT=HLS" in c.playback_url for c in usable)
+    # The `ads.*` parameters the analyzer needs survive; only the marker went.
+    assert usable[0].playback_url.endswith("&ads.service_id=AT26000101V")
+
+
+def test_a_name_the_catalogue_padded_is_trimmed_and_one_with_accents_is_kept() -> None:
+    names = {c.number: c.name for c in _live_page().channels}
+    assert names["4001"] == "NCIS: New Orleans"
+    assert names["4063"] == "Bares für Rares"
+    assert names["10067"] == "360° Fernweh"
+
+
+def test_the_columns_the_tab_does_not_show_are_kept_on_the_channel() -> None:
+    first = _live_page().channels[0]
+    assert first.extra == ["N", "LIVE"]
 
 
 # -- pagination --------------------------------------------------------------

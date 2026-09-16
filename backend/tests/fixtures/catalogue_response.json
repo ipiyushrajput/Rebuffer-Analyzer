@@ -1,0 +1,28 @@
+{
+  "metaData": [
+    { "name": "CHN_NUM", "dbColumnName": "CHN_NUM", "byteSize": 10, "dbTypeName": "VARCHAR2" },
+    { "name": "SVC_ID", "dbColumnName": "SVC_ID", "byteSize": 50, "dbTypeName": "VARCHAR2" },
+    { "name": "COUNTRY", "dbColumnName": "COUNTRY", "byteSize": 2, "dbTypeName": "VARCHAR2" },
+    { "name": "SVC_NAME", "dbColumnName": "SVC_NAME", "byteSize": 80, "dbTypeName": "VARCHAR2" },
+    { "name": "CNTN_URI", "dbColumnName": "CNTN_URI", "byteSize": 2000, "dbTypeName": "VARCHAR2" },
+    { "name": "SCHEDULE_YN", "dbColumnName": "SCHEDULE_YN", "byteSize": 1, "dbTypeName": "CHAR" },
+    { "name": "STRM_TP", "dbColumnName": "STRM_TP", "byteSize": 7, "dbTypeName": "VARCHAR2" }
+  ],
+  "rows": [
+    ["10008", "AT16000010Y", "AT", "The Bob Ross Channel", null, "N", "LIVE"],
+    ["10067", "AT2500001DQ", "AT", "360° Fernweh", null, "N", "LIVE"],
+    ["10068", "AT26000101V", "AT", "Movie Mix", "https://sis-global.prod.samsungtv.plus/v1/tvpstg/sc-aohx3by0d57oh.m3u8?ads.device_did=%7BPSID%7D&ads.device_dnt=%7BTARGETOPT%7D&ads.app_domain=%7BAPP_DOMAIN%7D&ads.app_name=%7BAPP_NAME%7D&ads.consent=%7BTC_STRING%7D&ads.ssai_vendor=SSSLIVE&ads.service_id=AT26000101V%7CCOMPONENT=HLS", "Y", "LIVE"],
+    ["10069", "AT27000035R", "AT", "ZDF Zuhause", "https://amg00771-amg00771c21-amgplt0009.playout.now3.amagi.tv/ts-eu-w1-n2/playlist/amg00771-amg00771c21-amgplt0009/playlist.m3u8?ads.did=%7BPSID%7D&ads.dnt=%7BTARGETOPT%7D&ads.app_domain=%7BAPP_DOMAIN%7D&ads.app_name=%7BAPP_NAME%7D&ads.tc_string=%7BTC_STRING%7D&ads.coppa=0%7CCOMPONENT=HLS", "Y", "LIVE"],
+    ["10072", "AT2800004LE", "AT", "Candice Renoir", null, "N", "LIVE"],
+    ["10073", "AT28000054P", "AT", "Find the Pro", null, "N", "LIVE"],
+    ["10074", "AT2800006N0", "AT", "TV total", null, "N", "LIVE"],
+    ["10075", "AT320001351", "AT", "Faraway Village", null, "N", "LIVE"],
+    ["10076", "AT3600001W4", "AT", "Real Madrid TV", null, "N", "LIVE"],
+    ["4001", "AT20000055C", "AT", "NCIS: New Orleans ", "https://sis-global.prod.samsungtv.plus/v1/tvpstg/sc-8huwx5du4a62j.m3u8?ads.device_did=%7BPSID%7D&ads.service_id=AT20000055C%7CCOMPONENT=HLS", "Y", "LIVE"],
+    ["4002", "AT4800002G5", "AT", "Hudson & Rex", "https://d2lwp940llv1qk.cloudfront.net/v1/master/3722c60a815c199d9c0ef36c5b73da68a62b09d1/cc-5tvx8d07cp3mm/Rex_DE.m3u8?ads.device_did=%7BPSID%7D&ads.service_id=AT4800002G5%7CCOMPONENT=HLS", "Y", "LIVE"],
+    ["4003", "AT300044H2", "AT", "Vera", "https://d2rit9oi9146e0.cloudfront.net/v1/master/3722c60a815c199d9c0ef36c5b73da68a62b09d1/cc-slfhabmdzdsk9/out/v1/dcf3ec8026a744038d4e65ec29c76215/HLS_CMAF_DRM/index.m3u8?ads.device_did=%7BPSID%7D&ads.service_id=AT300044H2%7CCOMPONENT=HLS", "Y", "LIVE"],
+    ["4063", "AT1800008KG", "AT", "Bares für Rares", "https://sis-global.prod.samsungtv.plus/v1/tvpstg/sc-lwur0rsa441xi.m3u8?ads.device_did=%7BPSID%7D&ads.service_id=AT1800008KG%7CCOMPONENT=HLS", "Y", "LIVE"],
+    ["4067", "AT1800002AS", "AT", "The Real Housewives", "https://sis-global.prod.samsungtv.plus/v1/tvpstg/sc-kzmwpahbpitwh.m3u8?ads.device_did=%7BPSID%7D&ads.service_id=AT1800002AS%7CCOMPONENT=HLS", "Y", "LIVE"]
+  ],
+  "pagination": { "page": 1, "pageSize": 100, "totalCount": 255, "totalPages": 3 }
+}
