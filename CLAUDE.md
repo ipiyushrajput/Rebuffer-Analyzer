@@ -89,6 +89,14 @@ frontend/src/
   `rebuffer_impact`. Text is written in present-tense definite statements.
 - Thresholds are never inlined. They live in `app/config.py` (`Thresholds`), are editable
   in the Settings tab, and are persisted in the DB.
+- **The Virtual Player Buffer models Plus Player, not a generic player.** `app/analysis/vpb.py`
+  carries the buffering configuration from section 3 of the TV Plus player document: a
+  profile picked from the tallest rung in the ladder (1080p → FHD, 2160p → UHD), a 15 s time
+  cap, and the multiqueue watermarks 1% low / 33% startup / 66% resume. The documented byte
+  caps (3 MB FHD, 60 MB UHD) are implemented behind `vpb_apply_byte_caps`, off by default
+  because applied literally they call an on-time 1080p channel a continuous rebuffer; section
+  2 lists `OutputMgr` as the separate download queue. A change here needs a number from the
+  player document or from the player team, never a guess.
 - **The database holds everything.** Jobs, findings, incidents, samples, snapshots, settings
   and the rendered reports (`reports.content`, LONGBLOB on MySQL). The analyzer host keeps no
   state, so a second instance serves a report it did not render. `RBA_REPORT_STORAGE` is

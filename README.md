@@ -54,10 +54,13 @@ Every finding states the measurement, the root cause, the responsible party and 
 - **181 rules** across DNS, TLS, HTTP, CDN, master playlist, media playlist, sequence
   numbers, segments, video bitstream, audio, A/V sync, subtitles, SSAI and player telemetry.
   See [`docs/RULES.md`](docs/RULES.md).
-- **Virtual Player Buffer.** A Tizen-like player modelled against the delivery timings
-  actually measured, so Aging and Bulk produce a rebuffering ratio with no player attached,
-  and Realtime shows the model next to the real hls.js buffer. Three sensitivity modes:
-  `STRICT`, `NORMAL`, `OUTAGE_ONLY`.
+- **Virtual Player Buffer.** Plus Player's own buffering configuration modelled against the
+  delivery timings actually measured, so Aging and Bulk produce a rebuffering ratio with no
+  player attached, and Realtime shows the model next to the real hls.js buffer. The profile
+  comes from the tallest rung the ladder offers: a ladder topping out at 1080p buffers as
+  FHD, one reaching 2160p as UHD. Playback starts at the 33% multiqueue watermark, underruns
+  at the 1% one, and resumes at 66%. Three sensitivity modes: `STRICT`, `NORMAL`,
+  `OUTAGE_ONLY`.
 - **Correlation.** Every stall — real or simulated — is matched to the events measured in
   `[stall_start − 2 × TARGETDURATION, stall_end]` on its rung and rendered as one chain:
   `CDN stale playlist 720p 12:03:02–12:03:20 (MED-004) → segment 48213 listed late → player
@@ -357,6 +360,18 @@ on a clean stream, fails the build.
 Player metrics shown in the Realtime tab are **measured from the analyzer host**. They
 reflect the analyzer's network path, not a TV's; the UI labels them so everywhere they
 appear. The Virtual Player Buffer is what produces a rebuffering ratio for Aging and Bulk.
+
+The Virtual Player Buffer follows the buffering configuration in section 3 of the Samsung TV
+Plus player document: 15 s total for both FHD and UHD, with the multiqueue low watermark at
+1%, the startup high watermark at 33% and the resume/seek high watermark at 66%. That
+reproduces the 5 s startup and 10 s resume figures the same table states. The document also
+gives byte caps — 3 MB for FHD, 60 MB for UHD — and these are implemented, configurable and
+**off by default** (`vpb_apply_byte_caps`). Applied literally the FHD cap holds 3.2 s of
+7.5 Mbit/s media, less than a single 6 s segment, so it calls an on-time 1080p channel a
+continuous rebuffer. Section 2 of the same document lists `OutputMgr` as a separate queue
+holding downloaded segments, so the byte figures size the decoder-side multiqueue rather than
+the buffer that governs rebuffering. The switch turns them on once the player team confirms
+which queue they describe.
 
 TLS verification is disabled on every outbound fetch so a broken chain never blocks analysis.
 The certificate chain is still inspected and reported — disabling verification hides nothing.

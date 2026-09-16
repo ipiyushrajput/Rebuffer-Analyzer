@@ -1016,7 +1016,7 @@ MED_BUFFER_TOO_LONG = _r(
     "Publish segments at the rate they are produced.",
     INDIRECT,
     "HLSAnalyzer EC-1004; Qosifire 'Buffer too long'",
-    ("vpb_max_buffer_s",),
+    ("vpb_fhd_total_mb", "vpb_fhd_total_s", "vpb_uhd_total_mb", "vpb_uhd_total_s"),
 )
 MED_URI_CHANGED = _r(
     "MED-016",
@@ -2162,7 +2162,7 @@ VPB_STALL = _r(
     "Resolve the correlated delivery defect named in the incident chain.",
     DIRECT,
     "HLSAnalyzer virtual buffer; Qosifire 'Buffer too short'",
-    ("vpb_startup_buffer_td_multiple", "vpb_rebuffer_resume_td_multiple"),
+    ("vpb_startup_fraction", "vpb_resume_fraction", "vpb_low_watermark_fraction"),
 )
 VPB_BUFFER_LONG = _r(
     "VPB-003",
@@ -2175,7 +2175,7 @@ VPB_BUFFER_LONG = _r(
     "Publish segments at the rate they are produced.",
     INDIRECT,
     "Qosifire 'Buffer too long'; HLSAnalyzer EC-1004",
-    ("vpb_max_buffer_s",),
+    ("vpb_fhd_total_mb", "vpb_fhd_total_s", "vpb_uhd_total_mb", "vpb_uhd_total_s"),
 )
 VPB_OUTAGE = _r(
     "VPB-004",
