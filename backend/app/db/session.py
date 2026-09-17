@@ -32,6 +32,27 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 schema_mode: str = "unknown"
 
 
+def describe_error(exc: BaseException) -> str:
+    """A database failure an operator can act on, with the credentials taken out.
+
+    The class name alone is not enough to act on: a driver that will not import, a host that
+    refuses the connection and a password that is wrong all arrive as one word, and the
+    operator is left reading tracebacks to find out which. The message says which — but a
+    SQLAlchemy error can quote the connection URL, so the configured password is removed
+    from it first, in both its raw and percent-encoded spellings.
+    """
+    from urllib.parse import quote_plus
+
+    message = f"{type(exc).__name__}: {exc}".strip()
+    password = get_settings().db_password
+    if not password:
+        return message
+    for secret in (password, quote_plus(password)):
+        if secret:
+            message = message.replace(secret, "***")
+    return message
+
+
 def engine() -> AsyncEngine:
     global _engine
     if _engine is None:
@@ -102,8 +123,8 @@ async def ensure_database() -> str:
     except Exception as exc:
         logger.warning(
             "Dedicated database could not be created; RBA tables use the configured prefix. "
-            "Reason class: %s",
-            type(exc).__name__,
+            "Reason: %s",
+            describe_error(exc),
         )
         schema_mode = "table_prefix" if settings.db_table_prefix else "database"
     return schema_mode
@@ -125,7 +146,7 @@ async def healthcheck() -> dict[str, Any]:
             "ok": False,
             "engine": get_settings().db_engine,
             "schema_mode": schema_mode,
-            "error": type(exc).__name__,
+            "error": describe_error(exc),
         }
 
 

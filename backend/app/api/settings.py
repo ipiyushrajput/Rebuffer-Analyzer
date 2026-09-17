@@ -41,7 +41,7 @@ async def load_thresholds_from_db() -> Thresholds:
             if row is not None:
                 return set_thresholds(Thresholds(**row.value))
     except Exception as exc:
-        logger.warning("stored thresholds could not be loaded: %s", type(exc).__name__)
+        logger.warning("stored thresholds could not be loaded: %s", db_session.describe_error(exc))
     return get_thresholds()
 
 
@@ -52,7 +52,7 @@ async def _load_preferences() -> dict[str, Any]:
             if row is not None:
                 return {**DEFAULT_PREFERENCES, **row.value}
     except Exception as exc:
-        logger.warning("stored preferences could not be loaded: %s", type(exc).__name__)
+        logger.warning("stored preferences could not be loaded: %s", db_session.describe_error(exc))
     settings = get_settings()
     return {
         **DEFAULT_PREFERENCES,

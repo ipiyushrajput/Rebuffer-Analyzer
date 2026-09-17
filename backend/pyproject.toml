@@ -13,7 +13,12 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.14",
     "aiomysql>=0.2",
-    "pymysql>=1.1",
+    # aiomysql imports `escape_bytes_prefixed` from `pymysql.converters`, which PyMySQL
+    # removed in 1.1.2. aiomysql asks only for `PyMySQL>=1.0`, so nothing else stops a fresh
+    # install from taking a release it cannot import — the driver then fails at the first
+    # query with an ImportError and every database call fails with it. The upper bound lives
+    # here; `tests/test_dependencies.py` fails the build if it is widened.
+    "pymysql>=1.1,<1.1.2",
     "jinja2>=3.1",
     "pandas>=2.2",
     "openpyxl>=3.1",
