@@ -6,8 +6,8 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
-import { api, endpoints } from '../api/client'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, endpoints, type JobSummary } from '../api/client'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import {
   Card,
@@ -22,7 +22,7 @@ import {
   cx,
 } from '../components/ui'
 import { IconDownload, IconSearch, IconStop, IconUpload } from '../components/ui/icons'
-import { AGING_PRESETS } from '../lib/constants'
+import { AGING_PRESETS, LIVE_POLL_MS, isTerminal } from '../lib/constants'
 import { ratio } from '../lib/format'
 
 interface ValidationRow {
@@ -54,8 +54,6 @@ interface BulkItem {
 type SortKey = 'risk_score' | 'channel_name' | 'status'
 
 const STEPS = ['Choose a file', 'Review the rows', 'Run the batch']
-
-const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED']
 
 function riskTone(score: number | null): string {
   if (score == null) return 'text-ink-faint'
@@ -127,6 +125,7 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
       setJobId(job.id)
       setSetupOpen(false)
       void queryClient.invalidateQueries({ queryKey: ['bulk-job'] })
+      void queryClient.invalidateQueries({ queryKey: ['bulk-jobs'] })
     },
     onError: (err: Error) => setError(err.message),
   })
@@ -137,9 +136,39 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
     enabled: jobId != null,
     refetchInterval: (query) => {
       const status = (query.state.data as { status?: string } | undefined)?.status
-      return status && TERMINAL.includes(status) ? false : 3000
+      return isTerminal(status) ? false : LIVE_POLL_MS
     },
   })
+
+  /*
+   * Every batch this deployment knows about, running or finished.
+   *
+   * A batch runs on the backend, not in the tab. Reloading the page only lost the id of the
+   * one being watched — the run itself carried on, its rows were being written, and its
+   * report was filed at the end. The list is what the tab reattaches to, so a refresh, a new
+   * browser or a second operator all find the batch that is in flight.
+   */
+  const batchesQuery = useQuery({
+    queryKey: ['bulk-jobs'],
+    queryFn: endpoints.listBulk,
+    refetchInterval: (query) =>
+      ((query.state.data as { jobs?: JobSummary[] } | undefined)?.jobs ?? []).some(
+        (batch) => !isTerminal(batch.status),
+      )
+        ? LIVE_POLL_MS
+        : false,
+  })
+  const batches = batchesQuery.data?.jobs ?? []
+  const running = batches.filter((batch) => !isTerminal(batch.status))
+
+  /* Attach to a batch that is still running, once, when the tab opens with nothing chosen. */
+  const attached = useRef(false)
+  useEffect(() => {
+    if (attached.current || jobId !== null || file !== null || running.length === 0) return
+    attached.current = true
+    setJobId(running[0].id)
+    setSetupOpen(false)
+  }, [running, jobId, file])
 
   const choose = useCallback(
     (chosen: File | null) => {
@@ -147,10 +176,21 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
       setValidation(null)
       setJobId(null)
       setSetupOpen(true)
+      // Choosing a file is a new batch; it must not be pulled back to the running one.
+      attached.current = true
       if (chosen) validate.mutate(chosen)
     },
     [validate],
   )
+
+  /** Open a batch the operator picked from the list, rather than the one auto-attached. */
+  const openBatch = (id: string) => {
+    attached.current = true
+    setFile(null)
+    setValidation(null)
+    setJobId(id)
+    setSetupOpen(false)
+  }
 
   /* A set of channels sent from another tab is chosen for the operator; nothing auto-starts. */
   useEffect(() => {
@@ -187,7 +227,7 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
         subtitle="One file, one batch, one consolidated report — every channel analysed by the same rules."
         status={
           job ? (
-            <span className={TERMINAL.includes(job.status) ? 'chip-clean' : 'chip-blue'}>
+            <span className={isTerminal(job.status) ? 'chip-clean' : 'chip-blue'}>
               {job.status}
             </span>
           ) : (
@@ -209,7 +249,7 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
                 <IconDownload size={14} />
                 All reports
               </a>
-              {!TERMINAL.includes(job.status) && (
+              {!isTerminal(job.status) && (
                 <button
                   type="button"
                   className="btn-accent btn-sm"
@@ -225,6 +265,70 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
       />
 
       <PageBody>
+        {/* --- batches this deployment is running or has run --------------------- */}
+        {batches.length > 0 && (
+          <Card>
+            <CardHeader
+              title="Batches"
+              subtitle="A batch runs on the analyzer, not in this tab. Closing the page or reloading it leaves the run going; open it again here."
+              actions={
+                running.length > 0 ? (
+                  <span className="chip-blue">{running.length} running</span>
+                ) : (
+                  <span className="chip-neutral">none running</span>
+                )
+              }
+            />
+            <div className="overflow-x-auto">
+              <table className="table table-hover">
+                <thead>
+                  <tr>
+                    <th>Batch</th>
+                    <th>Status</th>
+                    <th className="text-right">Channels</th>
+                    <th>Started</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {batches.map((batch) => {
+                    const done = Number((batch as unknown as { completed?: number }).completed ?? 0)
+                    const total = Number((batch as unknown as { total?: number }).total ?? 0)
+                    return (
+                      <tr key={batch.id} className={batch.id === jobId ? 'bg-brand-50' : undefined}>
+                        <td className="max-w-72 truncate font-medium text-ink" title={batch.channel_name}>
+                          {batch.channel_name || batch.id.slice(0, 8)}
+                        </td>
+                        <td>
+                          <span className={isTerminal(batch.status) ? 'chip-clean' : 'chip-blue'}>
+                            {batch.status}
+                          </span>
+                        </td>
+                        <td className="text-right font-mono text-small text-ink-soft">
+                          {total > 0 ? `${done} / ${total}` : '—'}
+                        </td>
+                        <td className="font-mono text-micro text-ink-muted">
+                          {(batch.started_at ?? batch.created_at).replace('T', ' ').slice(0, 19)}
+                        </td>
+                        <td className="text-right">
+                          <button
+                            type="button"
+                            className="btn-ghost btn-sm"
+                            disabled={batch.id === jobId}
+                            onClick={() => openBatch(batch.id)}
+                          >
+                            Open
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+
         <Card className="card-pad">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-[320px] flex-1">

@@ -86,10 +86,15 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
+  /*
+   * Analysed channels are finished runs: the list changes when a session is archived and at
+   * no other time. Realtime invalidates this query the moment that happens, so polling it on
+   * a timer asked the backend the same question every twenty seconds to be told nothing had
+   * changed. It refreshes on that invalidation and when the operator returns to the tab.
+   */
   const listQuery = useQuery({
     queryKey: ['channels'],
     queryFn: endpoints.listChannels,
-    refetchInterval: 20000,
   })
 
   const remove = useMutation({

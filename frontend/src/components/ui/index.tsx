@@ -8,7 +8,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { copyText } from '../../lib/clipboard'
 import { SEVERITY_STYLE, type Severity } from '../../lib/constants'
-import { IconCheck } from './icons'
+import { IconArrowLeft, IconArrowRight, IconCheck } from './icons'
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ')
@@ -370,5 +370,57 @@ export function CopyButton({
         label
       )}
     </button>
+  )
+}
+
+/**
+ * Page controls for a long table.
+ *
+ * Rendered above and below the rows: a hundred-row page is taller than the viewport, and an
+ * operator who has read to the bottom should not have to scroll back up to move on — nor
+ * scroll down to move on after reading the top. Both copies drive the same state, so the
+ * pair always agrees.
+ */
+export function Pagination({
+  label,
+  hasPrevious,
+  hasNext,
+  busy,
+  onPrevious,
+  onNext,
+  className,
+}: {
+  label: string
+  hasPrevious: boolean
+  hasNext: boolean
+  busy?: boolean
+  onPrevious: () => void
+  onNext: () => void
+  className?: string
+}) {
+  return (
+    <div className={cx('flex flex-wrap items-center justify-between gap-3', className)}>
+      <span className="font-mono text-micro text-ink-muted">{label}</span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="btn-ghost btn-sm"
+          disabled={!hasPrevious || busy}
+          onClick={onPrevious}
+        >
+          <IconArrowLeft size={14} />
+          Previous
+        </button>
+        <button
+          type="button"
+          className="btn-ghost btn-sm"
+          disabled={!hasNext || busy}
+          onClick={onNext}
+        >
+          Next
+          <IconArrowRight size={14} />
+        </button>
+      </div>
+    </div>
   )
 }

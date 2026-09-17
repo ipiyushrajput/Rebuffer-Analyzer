@@ -33,13 +33,12 @@ import {
   CardHeader,
   EmptyState,
   InlineAlert,
+  Pagination,
   ProgressBar,
   cx,
 } from '../components/ui'
 import {
   IconAging,
-  IconArrowLeft,
-  IconArrowRight,
   IconBulk,
   IconDownload,
   IconPulse,
@@ -441,6 +440,18 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
             }
           />
 
+          {page && (
+            <Pagination
+              className="border-b border-surface-line px-5 py-2.5"
+              label={pageLabel}
+              hasPrevious={page.has_previous}
+              hasNext={page.has_next}
+              busy={load.isPending}
+              onPrevious={() => search && runSearch({ ...search, page: page.page - 1 })}
+              onNext={() => search && runSearch({ ...search, page: page.page + 1 })}
+            />
+          )}
+
           {load.isPending ? (
             <div className="px-5 py-10 text-center text-small text-ink-muted">
               Fetching the channel list from the catalogue…
@@ -477,9 +488,11 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((item) => (
+                  {visible.map((item, index) => (
                     <ChannelRow
-                      key={`${item.service_id}-${item.number}`}
+                      /* The backend drops rows the catalogue publishes twice; the index keeps
+                         the key unique even if an origin finds a new way to repeat one. */
+                      key={`${item.service_id}-${item.number}-${index}`}
                       channel={item}
                       measured={measured.get(item.service_id) ?? null}
                       onOpen={() =>
@@ -498,29 +511,15 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
           )}
 
           {page && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-line px-5 py-3">
-              <span className="font-mono text-micro text-ink-muted">{pageLabel}</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="btn-ghost btn-sm"
-                  disabled={!page.has_previous || load.isPending}
-                  onClick={() => search && runSearch({ ...search, page: page.page - 1 })}
-                >
-                  <IconArrowLeft size={14} />
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost btn-sm"
-                  disabled={!page.has_next || load.isPending}
-                  onClick={() => search && runSearch({ ...search, page: page.page + 1 })}
-                >
-                  Next
-                  <IconArrowRight size={14} />
-                </button>
-              </div>
-            </div>
+            <Pagination
+              className="border-t border-surface-line px-5 py-3"
+              label={pageLabel}
+              hasPrevious={page.has_previous}
+              hasNext={page.has_next}
+              busy={load.isPending}
+              onPrevious={() => search && runSearch({ ...search, page: page.page - 1 })}
+              onNext={() => search && runSearch({ ...search, page: page.page + 1 })}
+            />
           )}
         </Card>
       </PageBody>

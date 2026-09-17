@@ -340,6 +340,13 @@ existing Bulk analysis tab as the file it already parses. Above-threshold channe
 catalogue lists with no playback URL stay in the report and are counted out of the hand-off
 with the reason.
 
+Both reports are written as a table: the column names sit on row 1 and each record runs left
+to right beneath them, which is what a spreadsheet sorts, filters and pivots. The window, the
+threshold and the scope follow the data in a CSV and sit on an `about` sheet in a workbook —
+an average means nothing without them, but they must not push the header row down the sheet.
+The country report carries each channel's `playback_url` from the catalogue, so it is enough
+on its own to hand a channel to whoever has to analyse it.
+
 **The session.** CASCADA sits behind the corporate identity provider and that provider
 requires MFA, so the analyzer cannot sign itself in. It carries an operator's session
 instead, pasted in Settings → CASCADA. A browser cannot hand its own session over: those

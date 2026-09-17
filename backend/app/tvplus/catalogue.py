@@ -321,6 +321,29 @@ def parse_row(row: list[Any], index: dict[str, int] | None = None) -> Channel:
     )
 
 
+def dedupe(channels: list[Channel]) -> tuple[list[Channel], int]:
+    """Drop rows the catalogue lists more than once, keeping the first of each.
+
+    A page can carry the same channel twice — same service id, same channel number, same
+    name. Two identical rows are one channel however many times it is published, and
+    carrying both makes every consumer handle a channel that is its own duplicate: the
+    table renders two rows under one identity, and a country scan measures it twice.
+
+    Identity is the service id and the channel number together, which is what names a
+    channel in the listing. A row the catalogue publishes twice with different numbers is
+    two listings of one service and both are kept.
+    """
+    seen: set[tuple[str, str]] = set()
+    kept: list[Channel] = []
+    for channel in channels:
+        identity = (channel.service_id, channel.number)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        kept.append(channel)
+    return kept, len(channels) - len(kept)
+
+
 @dataclass(slots=True)
 class Page:
     """One page of the catalogue, and what is known about the pages around it."""
@@ -333,6 +356,9 @@ class Page:
     has_next: bool
     url: str
     today: str
+    # How many rows this page published twice. Reported rather than dropped quietly, so a
+    # count that does not match the origin's total has a stated reason.
+    duplicates_removed: int = 0
 
     @property
     def has_previous(self) -> bool:
@@ -349,6 +375,7 @@ class Page:
             "has_previous": self.has_previous,
             "url": self.url,
             "today": self.today,
+            "duplicates_removed": self.duplicates_removed,
         }
 
 
@@ -362,18 +389,21 @@ def parse_page(body: str, *, page: int, page_size: int, url: str, today: str) ->
         ) from exc
 
     table = find_table(payload)
-    channels = [parse_row(row, table.index) for row in table.rows]
+    channels, duplicates = dedupe([parse_row(row, table.index) for row in table.rows])
 
     total = _first_int(payload, TOTAL_KEYS)
     total_pages = _first_int(payload, PAGES_KEYS)
     if total_pages is None and total is not None and page_size > 0:
         total_pages = max(1, -(-total // page_size))
 
-    # Without a count from the origin, a short page is the last one.
-    counted = page < total_pages if total_pages is not None else len(channels) >= page_size
+    # Without a count from the origin, a short page is the last one. The rows the origin
+    # served decide that, not the rows left after de-duplication: a full page that carried a
+    # duplicate is still a full page, and the next one still exists.
+    counted = page < total_pages if total_pages is not None else len(table.rows) >= page_size
 
     return Page(
         channels=channels,
+        duplicates_removed=duplicates,
         page=page,
         page_size=page_size,
         total=total,

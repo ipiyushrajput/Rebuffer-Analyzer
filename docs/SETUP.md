@@ -347,6 +347,13 @@ replaced `-` with `—`.
 and quality detectors are affected; install it with `winget install Gyan.FFmpeg` to enable
 them.
 
+**`NotImplementedError` from `asyncio.create_subprocess_exec` during an analysis.** Fixed —
+the quality detectors no longer use an asyncio subprocess. It happened because `uvicorn`
+selects `SelectorEventLoop` on Windows whenever it is started with `--reload` (which `rba.cmd
+dev` does), and that loop implements no subprocess transport, so every ffprobe call failed on
+a development run while working on the deployed one. ffprobe and ffmpeg now run on a worker
+thread, which behaves the same under whichever loop the server chose.
+
 **The health check lists `database`.** The backend cannot reach the database named in
 `backend/.env`. Jobs and reports are not persisted until it can. The startup log says why —
 `database schema creation failed: <reason>` — with the password removed from the reason. Set

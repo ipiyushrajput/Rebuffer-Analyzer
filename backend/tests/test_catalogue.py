@@ -259,8 +259,19 @@ def test_the_columns_the_tab_does_not_show_are_kept_on_the_channel() -> None:
 # -- pagination --------------------------------------------------------------
 
 
+def _rows(count: int) -> list[list[Any]]:
+    """Distinct channels, because a page of one channel repeated is a de-duplication case."""
+    made: list[list[Any]] = []
+    for index in range(count):
+        row = list(ROW)
+        row[cat.IDX_NUMBER] = str(1000 + index)
+        row[cat.IDX_SERVICE_ID] = f"US{300000 + index}"
+        made.append(row)
+    return made
+
+
 def _page(rows: int, envelope: dict[str, Any] | None = None, page: int = 1) -> cat.Page:
-    body: Any = [ROW] * rows if envelope is None else {**envelope, "channels": [ROW] * rows}
+    body: Any = _rows(rows) if envelope is None else {**envelope, "channels": _rows(rows)}
     return cat.parse_page(json.dumps(body), page=page, page_size=100, url="u", today="20260915")
 
 
@@ -390,3 +401,63 @@ def test_a_page_is_served_with_clean_urls_and_the_date_it_used(
     assert body["total_pages"] == 3
     assert (body["has_previous"], body["has_next"]) == (True, True)
     assert body["channels"][0]["playback_url"] == CLEAN_URL
+
+
+# -- rows the catalogue publishes twice ---------------------------------------
+
+
+def _duplicate_page(rows: list[list[Any]]) -> cat.Page:
+    return cat.parse_page(json.dumps(rows), page=1, page_size=100, url="u", today="20260915")
+
+
+def test_a_channel_listed_twice_is_carried_once() -> None:
+    """
+    The catalogue repeats a row: same service id, same number, same name.
+
+    Two identical rows are one channel however many times it is published. Carrying both made
+    every consumer handle a channel that is its own duplicate — the table rendered two rows
+    under one identity, which React refuses to key, and a country scan measured it twice.
+    """
+    page = _duplicate_page([ROW, ROW, ROW])
+
+    assert len(page.channels) == 1
+    assert page.duplicates_removed == 2
+    assert page.channels[0].service_id == ROW[cat.IDX_SERVICE_ID]
+
+
+def test_the_first_of_a_repeated_row_is_the_one_kept() -> None:
+    second = list(ROW)
+    second[cat.IDX_NAME] = "A later spelling of the same channel"
+    page = _duplicate_page([ROW, second])
+
+    assert len(page.channels) == 1
+    assert page.channels[0].name == ROW[cat.IDX_NAME]
+
+
+def test_two_listings_of_one_service_under_different_numbers_are_both_kept() -> None:
+    """A service published on two channel numbers is two listings, not one repeated."""
+    other = list(ROW)
+    other[cat.IDX_NUMBER] = "2000"
+    page = _duplicate_page([ROW, other])
+
+    assert [c.number for c in page.channels] == [ROW[cat.IDX_NUMBER], "2000"]
+    assert page.duplicates_removed == 0
+
+
+def test_a_full_page_carrying_a_duplicate_still_offers_the_next_page() -> None:
+    """
+    Whether a page is the last one is decided by the rows the origin served.
+
+    De-duplication shortens the list; it does not mean the catalogue has run out of channels.
+    """
+    rows = _rows(99)
+    page = _duplicate_page([*rows, rows[0]])
+
+    assert len(page.channels) == 99
+    assert page.duplicates_removed == 1
+    assert page.has_next is True
+
+
+def test_the_count_of_removed_rows_reaches_the_response() -> None:
+    """A page shorter than the origin's total has a stated reason rather than a silent one."""
+    assert _duplicate_page([ROW, ROW]).as_dict()["duplicates_removed"] == 1
