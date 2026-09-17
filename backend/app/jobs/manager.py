@@ -321,7 +321,9 @@ class JobManager:
                 if handle.result is not None:
                     row.verdict = handle.result.verdict.as_dict()
         except Exception as exc:
-            logger.warning("job %s could not be persisted: %s", handle.id, type(exc).__name__)
+            logger.warning(
+                "job %s could not be persisted: %s", handle.id, db_session.describe_error(exc)
+            )
 
     async def _persist_result(self, handle: JobHandle, result: AnalysisResult) -> None:
         try:
@@ -422,7 +424,9 @@ class JobManager:
                     )
                     resumed += 1
         except Exception as exc:
-            logger.warning("persisted jobs could not be resumed: %s", type(exc).__name__)
+            logger.warning(
+                "persisted jobs could not be resumed: %s", db_session.describe_error(exc)
+            )
         if resumed:
             logger.info("resumed %d job(s) after restart", resumed)
         return resumed

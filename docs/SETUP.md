@@ -348,8 +348,18 @@ and quality detectors are affected; install it with `winget install Gyan.FFmpeg`
 them.
 
 **The health check lists `database`.** The backend cannot reach the database named in
-`backend/.env`. Jobs and reports are not persisted until it can. Set `DB_ENGINE=sqlite` to
-run against a local file instead.
+`backend/.env`. Jobs and reports are not persisted until it can. The startup log says why —
+`database schema creation failed: <reason>` — with the password removed from the reason. Set
+`DB_ENGINE=sqlite` to run against a local file instead.
+
+**`ImportError: cannot import name 'escape_bytes_prefixed' from 'pymysql.converters'`.** The
+venv holds PyMySQL 1.1.2 or newer, which removed a name `aiomysql` imports, so every database
+call fails. `aiomysql` asks only for `PyMySQL>=1.0`, so a venv built before the upper bound
+was added can hold a release it cannot use. Re-run the installer, or fix the one package:
+
+```
+backend\.venv\Scripts\python.exe -m pip install "pymysql>=1.1,<1.1.2"
+```
 
 **A long path error during `npm install` on Windows.** Enable long paths once:
 `git config --system core.longpaths true`, and set `LongPathsEnabled` to `1` under

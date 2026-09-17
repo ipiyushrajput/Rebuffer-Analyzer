@@ -40,7 +40,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         await db_session.create_all()
     except Exception as exc:
-        logger.error("database schema creation failed: %s", type(exc).__name__)
+        # Without the reason an operator cannot tell a missing driver from a refused
+        # connection, and every later request fails the same way with no explanation.
+        logger.error("database schema creation failed: %s", db_session.describe_error(exc))
 
     from app.api import settings as settings_api
 
