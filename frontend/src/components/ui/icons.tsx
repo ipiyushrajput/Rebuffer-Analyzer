@@ -164,6 +164,15 @@ export const IconPulse = (p: IconProps) => (
   </Svg>
 )
 
+/** A measured trend over time: the field rebuffering metric. */
+export const IconTrend = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 19V5" />
+    <path d="M4 19h16" />
+    <path d="m7 15 4-5 3 3 5-6" />
+  </Svg>
+)
+
 /**
  * The product mark: the Samsung TV Plus icon, served from `public/` rather than hotlinked,
  * so the rail renders on a deployment with no route to the internet. The same source

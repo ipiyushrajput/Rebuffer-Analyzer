@@ -12,7 +12,8 @@ import { endpoints } from './api/client'
 import { Sidebar, useRailCollapsed, type TabId } from './components/layout/Sidebar'
 import { AgingTab } from './tabs/Aging'
 import { AllChannelsTab } from './tabs/AllChannels'
-import { BulkTab } from './tabs/Bulk'
+import { BulkTab, type BulkPrefill } from './tabs/Bulk'
+import { CascadaDataTab } from './tabs/CascadaData'
 import { ChannelsTab } from './tabs/Channels'
 import { RealtimeTab } from './tabs/Realtime'
 import { ReportsTab } from './tabs/Reports'
@@ -49,6 +50,16 @@ export default function App() {
       [target]: { ...channel, token: (current[target]?.token ?? 0) + 1 },
     }))
     setTab(target)
+  }
+  /*
+   * A file of channels sent from CASCADA Data into Bulk analysis. It travels the same way a
+   * channel does, for the same reason: the Bulk tab stays mounted with whatever batch it is
+   * running, and the token is what lets the same set be sent twice.
+   */
+  const [bulkPrefill, setBulkPrefill] = useState<BulkPrefill | null>(null)
+  const sendToBulk = (file: File) => {
+    setBulkPrefill((current) => ({ file, token: (current?.token ?? 0) + 1 }))
+    setTab('bulk')
   }
   const queryClient = useQueryClient()
 
@@ -106,11 +117,14 @@ export default function App() {
         <div className={tab === 'catalogue' ? '' : 'panel-hidden'}>
           <AllChannelsTab onAnalyse={sendToAnalysis} />
         </div>
+        <div className={tab === 'cascada' ? '' : 'panel-hidden'}>
+          <CascadaDataTab onAnalyse={sendToAnalysis} onBulk={sendToBulk} />
+        </div>
         <div className={tab === 'aging' ? '' : 'panel-hidden'}>
           <AgingTab thresholds={thresholds} prefill={prefill.aging} />
         </div>
         <div className={tab === 'bulk' ? '' : 'panel-hidden'}>
-          <BulkTab />
+          <BulkTab prefill={bulkPrefill} />
         </div>
         <div className={tab === 'reports' ? '' : 'panel-hidden'}>
           <ReportsTab />

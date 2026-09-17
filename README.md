@@ -262,6 +262,12 @@ GET    /api/bulk/template.{csv|xlsx|json}
 GET    /api/catalogue/countries              every selectable country and environment
 GET    /api/catalogue/channels?country=&env=&page=&today=    one page of the TV Plus list
 
+GET|PUT|DELETE /api/cascada/session   ·  POST /api/cascada/session/validate
+GET    /api/cascada/channel?service_id=&channel_name=&country=&refresh=
+GET    /api/cascada/channel/report.{csv|xlsx}
+POST   /api/cascada/scans   ·  GET|DELETE /api/cascada/scans/{id}
+GET    /api/cascada/scans/{id}/report.{csv|xlsx}
+
 GET    /api/reports  ·  GET|DELETE /api/reports/{id}  ·  GET /api/reports/{id}/download
 GET    /api/jobs/{id}/evidence.zip   ·  GET /api/jobs/{id}/snapshots?variant=&at=
 GET    /api/proxy?u=<urlencoded>
@@ -292,6 +298,57 @@ Countries are grouped by the data set they read: **Group A** (AU, BR, CA, IN, KR
 TH, US, PH, SG) and **Group B** (AT, BE, DE, DK, FI, FR, IE, IT, LU, NL, NO, PT, ES, SE, CH,
 GB, EG, SA, AE). Adding a country or moving an environment is one edit in
 `backend/app/tvplus/catalogue.py`.
+
+### CASCADA Data
+
+Every other tab measures a channel from the outside. This one reads what real televisions
+reported: CASCADA publishes a per-minute `rebuffering_ratio` per channel, so the field signal
+picks the targets and the rest of the product explains the cause.
+
+The channel list is the same catalogue All channels shows, production only. The rebuffering
+figures are fetched by the backend, never the browser — the API needs a session cookie and
+sends no CORS headers.
+
+**The window.** `from` is 00:00:00 UTC seven days before today, `to` is the minute of the
+call. CASCADA returns that window tagged `date_category=origin` and the seven days before it
+tagged `comparison`. Every figure the product states — the average, the maximum, the minutes
+above threshold, the red row, both reports — comes from the `origin` rows. The `comparison`
+rows draw the previous-week overlay and the week-on-week chip, and nothing else: mixing them
+would average a fortnight into a number labelled as this week. `limit` is computed from the
+window rather than fixed, and a response shorter than the window asked for is reported as
+short rather than averaged as if it were whole.
+
+**The threshold is a percentage.** `unit.rebuffering_ratio` is `%`, so a value of 0.159 means
+0.159% of viewing time. That is not the fraction `rebuffer_ratio_threshold` holds, where 0.25
+means 25% — the two are a hundredfold apart, so the field metric carries its own threshold,
+`cascada_rebuffering_threshold_pct`, and one helper applies it.
+
+**A channel qualifies on its average.** One minute spiking above the threshold does not make
+a rebuffering channel; a week averaging above it does. A minute CASCADA reported nothing for
+is a gap, never a zero.
+
+**The scan** walks every channel in a country, across every page, a few at a time, with
+progress, cancellation and a named list of the channels that failed. Each result is stored in
+`cascada_samples` keyed by service ID and window, so a finished scan survives a restart, a
+reopened panel costs nothing, and a second analyzer instance serves the same country report.
+A stored window is served without a session — it was already measured — while a fresh
+measurement needs one.
+
+From there the country report downloads as CSV or XLSX, listing only the channels above
+threshold worst first, and **Bulk analyse rebuffering channels** hands that set to the
+existing Bulk analysis tab as the file it already parses. Above-threshold channels the
+catalogue lists with no playback URL stay in the report and are counted out of the hand-off
+with the reason.
+
+**The session.** CASCADA sits behind the corporate identity provider and that provider
+requires MFA, so the analyzer cannot sign itself in. It carries an operator's session
+instead, pasted in Settings → CASCADA. A browser cannot hand its own session over: those
+cookies belong to `cascada.samsungcloud.tv`, so this application never receives them and
+cannot read them, and Django marks `sessionid` HttpOnly. Copying the Cookie header out of
+devtools is the route, and the panel takes the whole header. What is stored never comes back
+to the browser — the panel shows the last four characters, the source, and when the session
+was last proven to work. A host may instead pin its own identity with `CASCADA_SESSIONID` in
+the git-ignored `backend/.env`.
 
 ### Bulk input
 
