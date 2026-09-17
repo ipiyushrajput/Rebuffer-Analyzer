@@ -19,11 +19,13 @@ import {
   IconRealtime,
   IconReports,
   IconSettings,
+  IconTrend,
 } from '../ui/icons'
 
 export type TabId =
   | 'realtime'
   | 'catalogue'
+  | 'cascada'
   | 'channels'
   | 'aging'
   | 'bulk'
@@ -33,6 +35,7 @@ export type TabId =
 const NAV: { id: TabId; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
   { id: 'realtime', label: 'Realtime', Icon: IconRealtime },
   { id: 'catalogue', label: 'All channels', Icon: IconGlobe },
+  { id: 'cascada', label: 'CASCADA Data', Icon: IconTrend },
   { id: 'channels', label: 'Analysed channels', Icon: IconChannels },
   { id: 'aging', label: 'Aging', Icon: IconAging },
   { id: 'bulk', label: 'Bulk analysis', Icon: IconBulk },

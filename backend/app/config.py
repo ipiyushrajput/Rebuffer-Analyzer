@@ -112,6 +112,21 @@ class Thresholds(BaseModel):
     vpb_mode: VpbMode = VpbMode.NORMAL
     vpb_outage_threshold_s: float = 2.0
 
+    # CASCADA rebuffering data.
+    #
+    # CASCADA reports `rebuffering_ratio` in percent — a value of 0.159 is 0.159% — which is
+    # not the same quantity as `rebuffer_ratio_threshold` above, a fraction where 0.25 means
+    # 25%. The two are a hundredfold apart, so the field metric carries its own threshold and
+    # the comparison lives in one place, `app.cascada.series.is_above`.
+    cascada_rebuffering_threshold_pct: float = 0.25
+    # The current window. CASCADA answers with this window tagged `origin` and the week before
+    # it tagged `comparison`, which is what makes the week-over-week overlay possible.
+    cascada_window_days: int = 7
+    # A country scan is one call per channel, so the whole country is walked a few at a time.
+    cascada_scan_concurrency: int = 4
+    # How long a stored channel window is served before CASCADA is asked again.
+    cascada_cache_ttl_minutes: int = 45
+
     incident_open_s: float = 10.0
     incident_clear_s: float = 60.0
     nth_segment_sampling_other_rungs: int = 3
@@ -163,6 +178,18 @@ class Settings(BaseSettings):
     rba_sample_retention_days: int = 30
 
     rba_log_level: str = "INFO"
+
+    # CASCADA. The session cookies belong in `backend/.env`, never in git; `.env.example`
+    # carries the names with empty values. An operator can paste a session in the Settings
+    # tab instead, which is stored in the settings table rather than on disk.
+    cascada_base_url: str = "https://cascada.samsungcloud.tv"
+    cascada_sessionid: str = ""
+    cascada_csrftoken: str = ""
+    # `limit` is computed from the window the call asks for; this is the headroom added on
+    # top, so a window that grows by a few minutes between the request and the answer is
+    # still served whole.
+    cascada_row_limit_margin: int = 600
+    cascada_timeout_s: float = 60.0
 
     @property
     def cors_origins(self) -> list[str]:

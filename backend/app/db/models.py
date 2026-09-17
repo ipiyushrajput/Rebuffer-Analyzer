@@ -285,6 +285,46 @@ class Report(Base):
     )
 
 
+class CascadaSample(Base):
+    """One channel's CASCADA rebuffering window, kept so a scan is paid for once.
+
+    A country scan is one CASCADA call per channel and takes minutes; storing the result here
+    rather than in the process means a finished scan survives a restart, a reopened modal does
+    not re-hit CASCADA, and a second analyzer instance serves the same country report. A row
+    older than `cascada_cache_ttl_minutes` is refetched.
+    """
+
+    __tablename__ = _t("cascada_samples")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    service_id: Mapped[str] = mapped_column(String(64), index=True)
+    channel_name: Mapped[str] = mapped_column(String(255))
+    country: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
+    # The window the figures below describe, as whole epoch seconds, which is what keys a row.
+    window_from: Mapped[int] = mapped_column(BigInteger)
+    window_to: Mapped[int] = mapped_column(BigInteger)
+    fetched_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, index=True
+    )
+    # Percentages, as CASCADA reports them: 0.159 is 0.159% of viewing time.
+    average_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    minutes_above: Mapped[int] = mapped_column(Integer, default=0)
+    minutes_counted: Mapped[int] = mapped_column(Integer, default=0)
+    previous_week_average_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    above_threshold: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # True when fewer minutes came back than the window asked for, so a reader knows the
+    # average covers less than its label says.
+    truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Both series, so the modal and the per-channel report are served without another call.
+    series: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        Index("ix_cascada_window", "service_id", "window_from", "window_to", unique=True),
+    )
+
+
 class SettingRow(Base):
     __tablename__ = _t("settings")
 

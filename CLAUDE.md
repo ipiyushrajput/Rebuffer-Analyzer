@@ -75,9 +75,10 @@ backend/app/
   bulk/       csv/xlsx/json parsing with column alias mapping
   db/         SQLAlchemy models, repository, session factory
   tvplus/     the live channel catalogue: country table, dbconnect mapping, row parser
+  cascada/    the field rebuffering metric: auth, client, series, store, scan, exports
 frontend/src/
-  tabs/       Realtime, AllChannels (the TV Plus catalogue), Channels (analysed channels),
-              Aging, Bulk, Reports, Settings
+  tabs/       Realtime, AllChannels (the TV Plus catalogue), CascadaData (measured
+              rebuffering), Channels (analysed channels), Aging, Bulk, Reports, Settings
   components/ Player, charts/, FindingCard, ManifestViewer, SequenceLadder
 ```
 
@@ -131,6 +132,15 @@ frontend/src/
   is no router, so a channel sent from All channels into Realtime or Aging travels as state:
   `src/lib/prefill.ts` seeds the target tab's form once per send and every field stays
   editable. Nothing auto-starts.
+- **CASCADA is the field metric and is measured in percent.** `app/cascada/` reads a
+  per-minute `rebuffering_ratio` per channel. A response carries the requested window tagged
+  `origin` and the week before it tagged `comparison`; every stated figure comes from `origin`
+  alone, and `comparison` exists only for the previous-week overlay. The unit is `%`, so its
+  threshold is `cascada_rebuffering_threshold_pct` and never `rebuffer_ratio_threshold`, which
+  is a fraction. A channel qualifies as a rebuffering channel on its average, never on one
+  minute, and a null minute is a gap rather than a zero. The session is an operator's, pasted
+  in Settings and held server-side: a browser cannot hand its CASCADA cookies to another
+  origin, and the value is never returned to a page or written to a log.
 - The channel catalogue is fetched by the backend, never the browser: it sends no CORS
   headers, and the country/environment to `dbconnect` mapping belongs in one place,
   `app/tvplus/catalogue.py`. The tab reads the country list from `/api/catalogue/countries`

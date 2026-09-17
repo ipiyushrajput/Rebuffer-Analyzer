@@ -133,6 +133,108 @@ export interface CataloguePage {
   environment: string
 }
 
+// --- CASCADA: the field rebuffering metric -----------------------------------
+
+/** What the UI may know about the configured CASCADA session. Never the session itself. */
+export interface CascadaSessionState {
+  configured: boolean
+  /** 'environment' for a host-configured session, 'stored' for one pasted in Settings. */
+  source: string
+  /** The last four characters of the sessionid, enough to tell two sessions apart. */
+  masked: string
+  last_validated_at: string | null
+  valid: boolean | null
+  detail: string
+}
+
+/** One minute of measurement. `value` is null for a minute CASCADA reported nothing for. */
+export interface CascadaPoint {
+  at: string
+  value: number | null
+}
+
+/** Percentages of viewing time, computed from the current week's rows alone. */
+export interface CascadaStats {
+  average_pct: number | null
+  max_pct: number | null
+  max_at: string | null
+  minutes_above: number
+  minutes_counted: number
+  minutes_missing: number
+  percent_time_above: number | null
+  previous_week_average_pct: number | null
+  week_over_week_delta_pct: number | null
+  threshold_pct: number
+  above_threshold: boolean
+}
+
+export interface CascadaWindow {
+  start: string
+  end: string
+  minutes: number
+  days: number
+}
+
+/** One channel as the listing and the country report state it. */
+export interface CascadaChannelRow extends CascadaStats {
+  service_id: string
+  channel_name: string
+  country: string
+  /** True when CASCADA returned fewer minutes than the window asked for. */
+  truncated: boolean
+  fetched_at: string
+  cached: boolean
+}
+
+/** One channel with both series, as the Rebuffering Data modal reads it. */
+export interface CascadaChannel extends CascadaChannelRow {
+  window: CascadaWindow
+  origin: CascadaPoint[]
+  comparison: CascadaPoint[]
+}
+
+export interface CascadaFailure {
+  service_id: string
+  channel_name: string
+  reason: string
+}
+
+export interface CascadaScan {
+  scan_id: string
+  country: string
+  status: string
+  done: number
+  total: number
+  progress: number
+  window: CascadaWindow
+  threshold_pct: number
+  above: CascadaChannelRow[]
+  above_count: number
+  measured_count: number
+  below_count: number
+  failures: CascadaFailure[]
+  error: string | null
+  complete: boolean
+  started_at: string
+  finished_at: string | null
+}
+
+export interface CascadaChannelQuery {
+  service_id: string
+  channel_name: string
+  country: string
+}
+
+function cascadaChannelQuery(params: CascadaChannelQuery & { refresh?: boolean }): string {
+  const query = new URLSearchParams({
+    service_id: params.service_id,
+    channel_name: params.channel_name,
+    country: params.country,
+  })
+  if (params.refresh) query.set('refresh', 'true')
+  return query.toString()
+}
+
 export const endpoints = {
   health: () => api.get<Record<string, unknown>>('/health'),
 
@@ -180,6 +282,24 @@ export const endpoints = {
         `&env=${encodeURIComponent(params.env)}&page=${params.page}` +
         (params.today ? `&today=${encodeURIComponent(params.today)}` : ''),
     ),
+
+  cascadaSession: () => api.get<CascadaSessionState>('/cascada/session'),
+  saveCascadaSession: (body: { cookie_header?: string; sessionid?: string; csrftoken?: string }) =>
+    api.put<CascadaSessionState>('/cascada/session', body),
+  validateCascadaSession: () => api.post<CascadaSessionState>('/cascada/session/validate'),
+  forgetCascadaSession: () => api.del<CascadaSessionState>('/cascada/session'),
+
+  cascadaChannel: (params: CascadaChannelQuery & { refresh?: boolean }) =>
+    api.get<CascadaChannel>(`/cascada/channel?${cascadaChannelQuery(params)}`),
+  cascadaChannelReportUrl: (params: CascadaChannelQuery, fmt: 'csv' | 'xlsx') =>
+    api.url(`/cascada/channel/report.${fmt}?${cascadaChannelQuery(params)}`),
+
+  startCascadaScan: (body: { country: string; concurrency?: number }) =>
+    api.post<CascadaScan>('/cascada/scans', body),
+  readCascadaScan: (id: string) => api.get<CascadaScan>(`/cascada/scans/${id}`),
+  cancelCascadaScan: (id: string) => api.del<CascadaScan>(`/cascada/scans/${id}`),
+  cascadaScanReportUrl: (id: string, fmt: 'csv' | 'xlsx') =>
+    api.url(`/cascada/scans/${id}/report.${fmt}`),
 
   listChannels: () => api.get<{ channels: AnalysedChannel[]; count: number }>('/channels'),
   readChannel: (id: string) =>

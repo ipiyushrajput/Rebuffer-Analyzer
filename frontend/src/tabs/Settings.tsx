@@ -9,6 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { endpoints } from '../api/client'
+import { CascadaSession } from '../components/CascadaSession'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import {
   Card,
@@ -38,6 +39,7 @@ type GroupId =
   | 'segments'
   | 'ladder'
   | 'incidents'
+  | 'cascada'
   | 'rules'
 
 const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
@@ -118,6 +120,17 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
       'evidence_window_s',
       'segment_retry_attempts',
       'segment_retry_backoff_s',
+    ],
+  },
+  {
+    id: 'cascada',
+    title: 'CASCADA',
+    note: 'The field rebuffering metric: what counts as a rebuffering channel, the window measured, and how hard a country scan pushes.',
+    keys: [
+      'cascada_rebuffering_threshold_pct',
+      'cascada_window_days',
+      'cascada_scan_concurrency',
+      'cascada_cache_ttl_minutes',
     ],
   },
 ]
@@ -347,6 +360,10 @@ export function SettingsTab() {
             <RuleCatalogue />
           </div>
         </Card>
+
+        {/* The session is not a threshold: it is stored and validated on its own, outside
+            the save bar, because pasting one has to take effect immediately. */}
+        {tab === 'cascada' && <CascadaSession />}
 
         {error && <InlineAlert tone="error">{error}</InlineAlert>}
       </PageBody>

@@ -6,7 +6,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, endpoints } from '../api/client'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import {
@@ -64,7 +64,19 @@ function riskTone(score: number | null): string {
   return 'text-clean-600'
 }
 
-export function BulkTab() {
+/**
+ * A set of channels sent here from another tab.
+ *
+ * It arrives as the same `File` an operator would have chosen, so every step below — the
+ * validation, the row errors, the review and the run — behaves exactly as it always has.
+ * The token rises on every send, which is what lets the same set be sent twice.
+ */
+export interface BulkPrefill {
+  file: File
+  token: number
+}
+
+export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
   const [file, setFile] = useState<File | null>(null)
   const [validation, setValidation] = useState<{
     rows: ValidationRow[]
@@ -139,6 +151,12 @@ export function BulkTab() {
     },
     [validate],
   )
+
+  /* A set of channels sent from another tab is chosen for the operator; nothing auto-starts. */
+  useEffect(() => {
+    if (prefill) choose(prefill.file)
+    // Only the token advances a send; the object identity changes on every render.
+  }, [prefill?.token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const job = jobQuery.data as (typeof jobQuery.data & { items?: BulkItem[] }) | undefined
   const items = (job?.items ?? []) as BulkItem[]
