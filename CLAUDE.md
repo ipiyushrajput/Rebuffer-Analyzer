@@ -128,6 +128,15 @@ frontend/src/
   primitives in `src/components/ui/`. The rail and page header are in `src/components/layout/`.
   The same tokens are mirrored in `backend/app/reports/templates/` so a report looks like the
   screen it came from.
+- **A tab polls only what is in flight.** A list of finished work — analysed channels, reports,
+  a completed job — changes when a run finishes, and the tab that finishes it invalidates the
+  query. `isTerminal()` and `LIVE_POLL_MS` in `src/lib/constants.ts` are the one rule: a
+  `refetchInterval` returns `false` once every job it watches has stopped. Only `/api/health`
+  polls unconditionally, for the rail badge.
+- **A job outlives the tab that started it.** Bulk batches run on the backend and are written
+  to `jobs` and `bulk_items`, so `GET /api/bulk/jobs` reads the database as well as the
+  in-process registry and the tab reattaches to a batch still running after a reload. A job
+  listing that only reads memory is a bug.
 - Results panels are hidden with CSS, never unmounted, so video element refs survive. There
   is no router, so a channel sent from All channels into Realtime or Aging travels as state:
   `src/lib/prefill.ts` seeds the target tab's form once per send and every field stays

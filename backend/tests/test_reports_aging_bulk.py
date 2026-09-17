@@ -360,3 +360,78 @@ def test_a_cancel_that_arrives_the_instant_a_job_starts_still_stops_it(
         assert cancelled.status_code == 200
         assert cancelled.json()["status"] == "CANCELLED"
         assert cancelled.json()["elapsed_s"] < 60
+
+
+def test_a_batch_is_listed_from_the_database_so_a_reload_finds_it(
+    origin: FixtureServer,
+) -> None:
+    """
+    A batch runs on the analyzer, not in the tab that started it.
+
+    Reloading the page only lost the id being watched: the run carried on, its rows were
+    still being written, and its report was filed at the end. The listing reads the jobs
+    table as well as the in-process registry, so the tab can find the batch again and
+    reattach to it — which is what a refresh used to lose.
+    """
+    url = build_simple_channel(origin, variant_count=1, segment_count=3)
+    csv = f"channel_name,playback_url\nAlpha,{url}\nBeta,{url}\n"
+
+    with TestClient(create_app()) as client:
+        created = client.post(
+            "/api/bulk/jobs",
+            files={"file": ("channels.csv", csv, "text/csv")},
+            data={"mode": "snapshot", "concurrency": "2"},
+        )
+        job_id = created.json()["id"]
+
+        listed = client.get("/api/bulk/jobs")
+        assert listed.status_code == 200
+        batch = next(job for job in listed.json()["jobs"] if job["id"] == job_id)
+        # Enough to render the row an operator clicks to get back to the run.
+        assert batch["status"] in ("RUNNING", "PENDING", "COMPLETED")
+        assert batch["total"] == 2
+        assert batch["channel_name"]
+
+        finished = _wait_for(
+            client,
+            f"/api/bulk/jobs/{job_id}",
+            lambda b: b["status"] in ("COMPLETED", "FAILED", "CANCELLED"),
+            timeout=300,
+        )
+        assert finished["status"] == "COMPLETED"
+
+        # A finished batch stays in the list, so its report can be reopened later.
+        after = client.get("/api/bulk/jobs").json()["jobs"]
+        done = next(job for job in after if job["id"] == job_id)
+        assert done["status"] == "COMPLETED"
+        assert (done["completed"], done["total"]) == (2, 2)
+
+
+def test_the_batch_listing_survives_a_registry_that_has_forgotten_the_run(
+    origin: FixtureServer,
+) -> None:
+    """A restart empties the in-process registry; the database still holds the batch."""
+    from app.jobs.manager import job_manager
+
+    url = build_simple_channel(origin, variant_count=1, segment_count=3)
+    csv = f"channel_name,playback_url\nAlpha,{url}\n"
+
+    with TestClient(create_app()) as client:
+        job_id = client.post(
+            "/api/bulk/jobs",
+            files={"file": ("channels.csv", csv, "text/csv")},
+            data={"mode": "snapshot", "concurrency": "1"},
+        ).json()["id"]
+        _wait_for(
+            client,
+            f"/api/bulk/jobs/{job_id}",
+            lambda b: b["status"] in ("COMPLETED", "FAILED", "CANCELLED"),
+            timeout=300,
+        )
+
+        # What a restarted process would look like: nothing in memory for this batch.
+        for handle_id in [h.id for h in job_manager.list_jobs() if h.id == job_id]:
+            job_manager.jobs.pop(handle_id, None)
+
+        listed = client.get("/api/bulk/jobs").json()["jobs"]
+        assert any(job["id"] == job_id for job in listed)

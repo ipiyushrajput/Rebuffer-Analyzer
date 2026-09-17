@@ -11,11 +11,17 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Any
 
 FFPROBE = "ffprobe"
 FFMPEG = "ffmpeg"
+
+# On Windows every call would otherwise flash a console window, and the analyzer runs one per
+# sampled segment. The flag does not exist on other platforms, where zero is the default.
+_CREATION_FLAGS: int = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
 
 
 @dataclass(slots=True)
@@ -36,22 +42,39 @@ class FfprobeUnavailable(RuntimeError):
     """Raised when ffprobe is not installed. Callers turn this into a definite INFO finding."""
 
 
+def _run_blocking(
+    argv: list[str], *, timeout: float, stdin: bytes | None
+) -> tuple[int, bytes, bytes]:
+    completed = subprocess.run(
+        argv,
+        input=stdin,
+        stdin=None if stdin is not None else subprocess.DEVNULL,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+        creationflags=_CREATION_FLAGS,
+    )
+    return completed.returncode, completed.stdout, completed.stderr
+
+
 async def _run(
     argv: list[str], *, timeout: float, stdin: bytes | None = None
 ) -> tuple[int, bytes, bytes]:
-    process = await asyncio.create_subprocess_exec(
-        *argv,
-        stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    """Run one binary on a worker thread and return its exit code and streams.
+
+    Not `asyncio.create_subprocess_exec`: an asyncio subprocess needs an event loop that
+    implements subprocess transports, and on Windows `SelectorEventLoop` does not. uvicorn
+    picks exactly that loop when it is started with `--reload`, which is how the analyzer
+    runs in development, so every quality detector raised `NotImplementedError` there while
+    working in production. A thread runs the binary the same way on every platform and under
+    whichever loop the server chose.
+    """
     try:
-        out, err = await asyncio.wait_for(process.communicate(input=stdin), timeout=timeout)
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        raise
-    return process.returncode or 0, out, err
+        return await asyncio.to_thread(_run_blocking, argv, timeout=timeout, stdin=stdin)
+    except subprocess.TimeoutExpired as exc:
+        # The blocking call kills the process before raising; callers handle a timeout as a
+        # timeout, so it keeps that type across the change of mechanism.
+        raise TimeoutError(f"{argv[0]} did not finish within {timeout:.1f}s") from exc
 
 
 async def probe_url(

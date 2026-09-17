@@ -16,12 +16,13 @@ from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 
 from app.api.schemas import JobOptionsIn
 from app.bulk import parsers
 from app.db import session as db_session
 from app.db.models import BulkItem
+from app.db.models import Job as JobRow
 from app.jobs.manager import JobHandle, job_manager
 from app.reports import service
 
@@ -299,10 +300,97 @@ async def _build_rows(bulk_job_id: str, children: list[JobHandle]) -> list[dict[
     return rows
 
 
+async def _stored_batches(limit: int) -> list[dict[str, Any]]:
+    """Batches read back from the jobs table, newest first.
+
+    A batch outlives the tab that started it: the operator refreshes the page, or the backend
+    restarts, and the run carries on. The job manager only knows what this process started,
+    so the listing reads the database as well — otherwise a running batch disappears from the
+    screen while it is still working, which is what a refresh looked like.
+    """
+    async with db_session.session_scope() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(JobRow)
+                    .where(JobRow.type == "bulk", JobRow.parent_job_id.is_(None))
+                    .order_by(JobRow.created_at.desc())
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        ids = [row.id for row in rows]
+        # How far each batch got, counted from its own item rows rather than from a counter
+        # held in memory: the items are what the run actually wrote down.
+        counted: dict[str, tuple[int, int]] = {}
+        if ids:
+            for job_id, total, done in await db.execute(
+                select(
+                    BulkItem.bulk_job_id,
+                    func.count(BulkItem.id),
+                    func.sum(
+                        case(
+                            (BulkItem.status.in_(("COMPLETED", "FAILED", "CANCELLED")), 1),
+                            else_=0,
+                        )
+                    ),
+                )
+                .where(BulkItem.bulk_job_id.in_(ids))
+                .group_by(BulkItem.bulk_job_id)
+            ):
+                counted[str(job_id)] = (int(total or 0), int(done or 0))
+
+        return [
+            {
+                "id": row.id,
+                "type": row.type,
+                "status": row.status,
+                "channel_name": row.channel_name or "",
+                "urls": {},
+                "options": {},
+                "progress": row.progress,
+                "elapsed_s": 0.0,
+                "remaining_s": 0.0,
+                "created_at": row.created_at.isoformat(),
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "ends_at": row.ends_at.isoformat() if row.ends_at else None,
+                "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+                "counts": {},
+                "verdict": row.verdict,
+                "error": row.error,
+                "parent_job_id": None,
+                "total": counted.get(row.id, (0, 0))[0],
+                "completed": counted.get(row.id, (0, 0))[1],
+            }
+            for row in rows
+        ]
+
+
 @router.get("/jobs")
-async def list_jobs() -> dict[str, Any]:
-    jobs = [h.summary() for h in job_manager.list_jobs(job_type="bulk") if h.parent_job_id is None]
-    return {"jobs": jobs, "count": len(jobs)}
+async def list_jobs(limit: int = 25) -> dict[str, Any]:
+    """Every batch this deployment knows about, the live ones first-hand.
+
+    A batch still running in this process is reported from the job manager, which knows its
+    progress; one that finished, or that a restart left behind, is read from the database.
+    """
+    live = {
+        handle.id: handle.summary()
+        for handle in job_manager.list_jobs(job_type="bulk")
+        if handle.parent_job_id is None
+    }
+    try:
+        stored = await _stored_batches(limit)
+    except Exception as exc:
+        logger.warning("stored bulk jobs could not be listed: %s", db_session.describe_error(exc))
+        stored = []
+
+    jobs = [live.get(row["id"], row) for row in stored]
+    seen = {row["id"] for row in stored}
+    # A batch started moments ago may not have reached the database yet.
+    jobs = [summary for job_id, summary in live.items() if job_id not in seen] + jobs
+    return {"jobs": jobs[:limit], "count": len(jobs)}
 
 
 @router.get("/jobs/{job_id}")

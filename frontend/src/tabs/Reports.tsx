@@ -63,10 +63,10 @@ export function ReportsTab() {
     return text ? `?${text}` : ''
   }, [channel, owner, verdict, since])
 
+  /* A report appears when a run finishes, which invalidates this query; see Channels. */
   const reportsQuery = useQuery({
     queryKey: ['reports', query],
     queryFn: () => endpoints.listReports(query),
-    refetchInterval: 15000,
   })
 
   const remove = useMutation({

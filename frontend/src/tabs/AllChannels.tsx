@@ -17,9 +17,10 @@ import {
   CopyButton,
   EmptyState,
   InlineAlert,
+  Pagination,
   SegmentedControl,
 } from '../components/ui'
-import { IconAging, IconArrowLeft, IconArrowRight, IconPulse, IconSearch } from '../components/ui/icons'
+import { IconAging, IconPulse, IconSearch } from '../components/ui/icons'
 import type { ChannelPrefill } from '../lib/prefill'
 
 /** What the operator has chosen but not yet searched for. */
@@ -218,6 +219,18 @@ export function AllChannelsTab({ onAnalyse }: Props) {
             }
           />
 
+          {page && (
+            <Pagination
+              className="border-b border-surface-line px-5 py-2.5"
+              label={pageLabel}
+              hasPrevious={page.has_previous}
+              hasNext={page.has_next}
+              busy={load.isPending}
+              onPrevious={() => search && runSearch({ ...search, page: page.page - 1 })}
+              onNext={() => search && runSearch({ ...search, page: page.page + 1 })}
+            />
+          )}
+
           {load.isPending ? (
             <div className="px-5 py-10 text-center text-small text-ink-muted">
               Fetching the channel list from the catalogue…
@@ -254,9 +267,11 @@ export function AllChannelsTab({ onAnalyse }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((channel) => (
+                  {visible.map((channel, index) => (
                     <ChannelRow
-                      key={`${channel.service_id}-${channel.number}`}
+                      /* The backend drops rows the catalogue publishes twice; the index keeps
+                         the key unique even if an origin finds a new way to repeat one. */
+                      key={`${channel.service_id}-${channel.number}-${index}`}
                       channel={channel}
                       onAnalyse={onAnalyse}
                     />
@@ -267,29 +282,15 @@ export function AllChannelsTab({ onAnalyse }: Props) {
           )}
 
           {page && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-line px-5 py-3">
-              <span className="font-mono text-micro text-ink-muted">{pageLabel}</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="btn-ghost btn-sm"
-                  disabled={!page.has_previous || load.isPending}
-                  onClick={() => search && runSearch({ ...search, page: page.page - 1 })}
-                >
-                  <IconArrowLeft size={14} />
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost btn-sm"
-                  disabled={!page.has_next || load.isPending}
-                  onClick={() => search && runSearch({ ...search, page: page.page + 1 })}
-                >
-                  Next
-                  <IconArrowRight size={14} />
-                </button>
-              </div>
-            </div>
+            <Pagination
+              className="border-t border-surface-line px-5 py-3"
+              label={pageLabel}
+              hasPrevious={page.has_previous}
+              hasNext={page.has_next}
+              busy={load.isPending}
+              onPrevious={() => search && runSearch({ ...search, page: page.page - 1 })}
+              onNext={() => search && runSearch({ ...search, page: page.page + 1 })}
+            />
           )}
         </Card>
       </PageBody>

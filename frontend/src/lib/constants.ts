@@ -8,6 +8,22 @@
 /** Media sequence spread below this is ordinary poll skew across renditions. */
 export const MSN_GAP_TOLERANCE = 5
 
+/**
+ * The statuses a job never leaves.
+ *
+ * Polling exists to watch something change. A job in one of these states will not change
+ * again, so a tab showing only finished work asks the backend nothing until the operator
+ * returns to it or a run completes and invalidates the query.
+ */
+export const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'CANCELLED'] as const
+
+export function isTerminal(status: string | undefined | null): boolean {
+  return status != null && (TERMINAL_STATUSES as readonly string[]).includes(status)
+}
+
+/** How often a tab re-reads work that is actually in flight. */
+export const LIVE_POLL_MS = 4000
+
 export const REBUFFER_RATIO_THRESHOLD_DEFAULT = 0.25
 
 export const SEVERITIES = ['CRITICAL', 'ERROR', 'WARN', 'INFO', 'PASS'] as const

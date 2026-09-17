@@ -469,11 +469,16 @@ def test_the_country_report_lists_only_channels_above_the_threshold_worst_first(
         scanned="3 of 3 channel(s) measured, 0 failed, status COMPLETED",
     )
 
+    lines = text.splitlines()
+
     assert "Clean" not in text
-    assert text.index("Worst") < text.index("Second")
-    # The window and the threshold ride with the figures, because an average needs both.
-    assert "Window (UTC)" in text and ORIGIN_START.isoformat() in text
-    assert "0.2500 % of viewing time" in text
+    # Row one is the header, so a spreadsheet reads the file as the table it is.
+    assert lines[0] == ",".join(exports.COUNTRY_COLUMNS)
+    assert lines[1].startswith("Worst,")
+    assert lines[2].startswith("Second,")
+    # The window and the threshold still ride with the figures, below them.
+    assert ORIGIN_START.isoformat() in text
+    assert "threshold_pct,0.2500" in text
 
 
 def test_an_unfinished_scan_says_so_in_the_report_it_produces() -> None:
@@ -502,23 +507,25 @@ def test_the_country_report_states_that_the_figures_are_not_per_country() -> Non
     assert "channel_country=ALL" in text
 
 
-def test_the_channel_report_carries_the_summary_and_one_row_per_minute() -> None:
+def test_the_channel_report_opens_with_its_header_row_then_one_row_per_minute() -> None:
     row = entry(service_id="IN1", name="Worst", average=0.40, above=True, points=5)
-    text = exports.channel_csv(row)
+    lines = exports.channel_csv(row).splitlines()
 
-    assert "Average,0.4000 %" in text
-    assert "Minutes above threshold,5" in text
-    assert text.count("\n") > 5
-    assert "timestamp_utc,rebuffering_ratio_pct,above_threshold" in text
-    assert text.rstrip().endswith("yes")
+    assert lines[0] == "timestamp_utc,rebuffering_ratio_pct,above_threshold"
+    assert lines[1].endswith(",0.4000,yes")
+    assert len([line for line in lines[1:6] if line]) == 5
+    # The context follows the minutes rather than pushing the header down the sheet.
+    assert "average_pct,0.4000" in "\n".join(lines)
+    assert "minutes_above_threshold,5" in "\n".join(lines)
 
 
 def test_a_minute_with_no_measurement_leaves_an_empty_cell_not_a_zero() -> None:
     row = entry(service_id="IN1", name="Gappy", average=0.40, above=True, points=2)
     row.origin = [*row.origin, series.Point(at=ORIGIN_END, value=None)]
-    lines = exports.channel_csv(row).rstrip().splitlines()
+    lines = exports.channel_csv(row).splitlines()
 
-    assert lines[-1] == f"{ORIGIN_END.isoformat()},,"
+    # Three minutes follow the header; the last was never measured.
+    assert lines[3] == f"{ORIGIN_END.isoformat()},,"
 
 
 @pytest.mark.parametrize("fmt", ["csv", "xlsx"])
@@ -542,12 +549,17 @@ def test_the_country_workbook_parses_back_with_its_rows_in_order() -> None:
         partial=False,
         scanned="done",
     )
-    sheet = load_workbook(io.BytesIO(data)).active
-    assert sheet is not None
-    names = [str(cell.value) for row in sheet.iter_rows(values_only=False) for cell in row[:1]]
+    workbook = load_workbook(io.BytesIO(data))
+    sheet = workbook["rebuffering"]
+    header = [str(cell.value) for cell in next(sheet.iter_rows(max_row=1))]
+    names = [str(row[0].value) for row in sheet.iter_rows(min_row=2)]
 
-    assert names.index("Worst") < names.index("Second")
-    assert "channel_name" in names
+    # The columns run left to right on row one; the channels run down beneath them.
+    assert header == list(exports.COUNTRY_COLUMNS)
+    assert names == ["Worst", "Second"]
+    # The context sits on its own sheet rather than above the table.
+    assert exports.ABOUT_SHEET in workbook.sheetnames
+    assert sheet.freeze_panes == "A2"
 
 
 def test_the_channel_workbook_keeps_the_summary_and_the_minutes_on_separate_sheets() -> None:
@@ -556,5 +568,45 @@ def test_the_channel_workbook_keeps_the_summary_and_the_minutes_on_separate_shee
     data = exports.channel_xlsx(entry(service_id="IN1", name="Worst", average=0.4, above=True))
     workbook = load_workbook(io.BytesIO(data))
 
-    assert workbook.sheetnames == ["summary", "minutes"]
+    assert workbook.sheetnames == ["minutes", exports.ABOUT_SHEET]
     assert workbook["minutes"].max_row == 4  # one header plus three minutes
+
+
+def test_the_country_report_carries_the_playback_url_for_each_channel() -> None:
+    """
+    A report that names a rebuffering channel but not where to fetch it is half an answer.
+
+    The URL is the catalogue's, carried through the scan, so the report is enough on its own
+    to hand a channel to whoever has to analyse it.
+    """
+    url = "https://cdn.example/live/worst/index.m3u8?ads.service_id=IN1"
+    text = exports.country_csv(
+        [entry(service_id="IN1", name="Worst", average=2.4, above=True)],
+        country="IN",
+        window=fixture_window(),
+        threshold_pct=T.cascada_rebuffering_threshold_pct,
+        partial=False,
+        scanned="done",
+        urls={"IN1": url},
+    )
+    header, first = text.splitlines()[:2]
+
+    assert "playback_url" in header.split(",")
+    assert url in first
+
+
+def test_a_channel_the_catalogue_gives_no_url_for_leaves_the_cell_empty() -> None:
+    """It is still rebuffering, so it belongs in the report; there is just nothing to fetch."""
+    text = exports.country_csv(
+        [entry(service_id="IN2", name="No URL", average=2.4, above=True)],
+        country="IN",
+        window=fixture_window(),
+        threshold_pct=T.cascada_rebuffering_threshold_pct,
+        partial=False,
+        scanned="done",
+        urls={},
+    )
+    columns = text.splitlines()[1].split(",")
+
+    assert columns[0] == "No URL"
+    assert columns[exports.COUNTRY_COLUMNS.index("playback_url")] == ""

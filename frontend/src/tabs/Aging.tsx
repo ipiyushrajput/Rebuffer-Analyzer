@@ -28,7 +28,13 @@ import {
   cx,
 } from '../components/ui'
 import { IconDownload, IconFile, IconPulse, IconStop } from '../components/ui/icons'
-import { AGING_PRESETS, REBUFFER_RATIO_THRESHOLD_DEFAULT, type Severity } from '../lib/constants'
+import {
+  AGING_PRESETS,
+  LIVE_POLL_MS,
+  REBUFFER_RATIO_THRESHOLD_DEFAULT,
+  isTerminal,
+  type Severity,
+} from '../lib/constants'
 import { duration, localDateTime, utcTitle } from '../lib/format'
 import { usePrefill, type ChannelPrefill } from '../lib/prefill'
 import type { FindingData, VerdictData } from '../ws/messages'
@@ -67,7 +73,13 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
   const jobsQuery = useQuery({
     queryKey: ['aging-jobs'],
     queryFn: endpoints.listAging,
-    refetchInterval: 4000,
+    // A list of finished jobs does not change on its own; only a running one does.
+    refetchInterval: (query) =>
+      ((query.state.data as { jobs?: JobSummary[] } | undefined)?.jobs ?? []).some(
+        (job) => !isTerminal(job.status),
+      )
+        ? LIVE_POLL_MS
+        : false,
   })
 
   const create = useMutation({
@@ -366,7 +378,8 @@ function JobDetail({
   const { data, isLoading, error } = useQuery({
     queryKey: ['aging-result', jobId],
     queryFn: () => api.get<Record<string, unknown>>(`/aging/jobs/${jobId}/result`),
-    refetchInterval: 8000,
+    // A finished job's result is final, so it is read once and left alone.
+    refetchInterval: isTerminal(status) ? false : 8000,
   })
 
   if (isLoading) {

@@ -253,6 +253,9 @@ async def download_country_report(scan_id: str, fmt: str) -> Response:
         "threshold_pct": scan.threshold_pct,
         "partial": partial,
         "scanned": scanned,
+        # The catalogue's playback URL for each channel, so the report is enough on its own to
+        # hand a channel to whoever has to analyse it.
+        "urls": scan.urls,
     }
     if fmt == "csv":
         return _attachment(
