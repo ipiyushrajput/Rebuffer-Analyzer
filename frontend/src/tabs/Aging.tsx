@@ -9,6 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, endpoints, type JobSummary } from '../api/client'
+import { AgingAnalytics } from '../components/AgingAnalytics'
 import { FindingsList } from '../components/FindingCard'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
@@ -160,6 +161,7 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
             jobId={openJob.id}
             status={openJob.status}
             threshold={thresholds.rebuffer_ratio_threshold ?? REBUFFER_RATIO_THRESHOLD_DEFAULT}
+            thresholds={thresholds}
             onOpenFinding={setOpenFinding}
           />
         </PageBody>
@@ -368,11 +370,13 @@ function JobDetail({
   jobId,
   status,
   threshold,
+  thresholds,
   onOpenFinding,
 }: {
   jobId: string
   status: string
   threshold: number
+  thresholds: Record<string, number>
   onOpenFinding: (finding: FindingData) => void
 }) {
   const { data, isLoading, error } = useQuery({
@@ -466,6 +470,13 @@ function JobDetail({
           />
         </div>
       </Card>
+
+      {/*
+        The charts Realtime draws live, drawn here from the samples this run stored. An aging
+        run has no socket anyone was watching, so until now its measurement was readable only
+        as findings and counts.
+      */}
+      <AgingAnalytics jobId={jobId} thresholds={thresholds} />
 
       {Object.keys(vpb).length > 0 && (
         <Card>

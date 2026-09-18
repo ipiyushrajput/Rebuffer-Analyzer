@@ -164,6 +164,15 @@ export const IconPulse = (p: IconProps) => (
   </Svg>
 )
 
+/** Work that runs on a clock rather than when somebody presses a button. */
+export const IconSchedule = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M3 10h18M8 3v4M16 3v4" />
+    <path d="M12 13v3l2 1" />
+  </Svg>
+)
+
 /** A measured trend over time: the field rebuffering metric. */
 export const IconTrend = (p: IconProps) => (
   <Svg {...p}>

@@ -1,5 +1,7 @@
 /** REST client. Paths are relative so the app works behind nginx and behind the Vite proxy. */
 
+import type { PlaylistSnapshotData, SegmentResultData } from '../ws/messages'
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
 
 export class ApiError extends Error {
@@ -301,6 +303,44 @@ export const endpoints = {
   cascadaScanReportUrl: (id: string, fmt: 'csv' | 'xlsx') =>
     api.url(`/cascada/scans/${id}/report.${fmt}`),
 
+  batchSettings: () =>
+    api.get<{
+      settings: BatchSettings
+      defaults: BatchSettings
+      effective: Record<string, unknown>
+    }>('/batch/settings'),
+  saveBatchSettings: (body: BatchSettings) =>
+    api.put<{ settings: BatchSettings; defaults: BatchSettings }>('/batch/settings', body),
+  batchSchedules: () =>
+    api.get<{ schedules: BatchSchedule[]; min_days_between_runs: number }>('/batch/schedules'),
+  saveBatchSchedule: (body: Partial<BatchSchedule> & { country: string }) =>
+    api.put<BatchSchedule>('/batch/schedules', body),
+  deleteBatchSchedule: (country: string) =>
+    api.del<{ deleted: boolean }>(`/batch/schedules/${encodeURIComponent(country)}`),
+
+  batchEstimate: (country: string) =>
+    api.get<BatchEstimate>(`/batch/estimate?country=${encodeURIComponent(country)}`),
+  startBatch: (country: string) => api.post<Batch>('/batch/batches', { country }),
+  listBatches: () => api.get<{ batches: Batch[]; count: number }>('/batch/batches'),
+  readBatch: (id: string) => api.get<Batch>(`/batch/batches/${id}`),
+  cancelBatch: (id: string) => api.del<Batch>(`/batch/batches/${id}`),
+  rerunBatch: (id: string) => api.post<Batch>(`/batch/batches/${id}/rerun`),
+  batchLog: (id: string) => api.get<{ lines: BatchLogLine[] }>(`/batch/batches/${id}/log`),
+  batchLogUrl: (id: string) => api.url(`/batch/batches/${id}/log?download=true`),
+  batchReportUrl: (id: string, fmt: 'csv' | 'xlsx') =>
+    api.url(`/batch/batches/${id}/report.${fmt}`),
+  batchColumns: () =>
+    api.get<{ columns: string[]; window_days: number; window_label: string }>('/batch/columns'),
+
+  agingSamples: (id: string, params: { from?: string; to?: string; maxPoints?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.from) query.set('from', params.from)
+    if (params.to) query.set('to', params.to)
+    if (params.maxPoints) query.set('max_points', String(params.maxPoints))
+    const suffix = query.toString()
+    return api.get<JobSamples>(`/aging/jobs/${id}/samples${suffix ? `?${suffix}` : ''}`)
+  },
+
   listChannels: () => api.get<{ channels: AnalysedChannel[]; count: number }>('/channels'),
   readChannel: (id: string) =>
     api.get<AnalysedChannel & Record<string, unknown>>(`/channels/${id}`),
@@ -313,4 +353,111 @@ export const endpoints = {
   settings: () => api.get<Record<string, unknown>>('/settings'),
   saveSettings: (body: unknown) => api.put<Record<string, unknown>>('/settings', body),
   rules: () => api.get<{ count: number; rules: Record<string, unknown>[] }>('/settings/rules'),
+}
+
+// --- Automated batches ------------------------------------------------------
+
+/** What a batch was configured with. A running batch keeps the values it started with. */
+export interface BatchSettings {
+  analysis_duration_minutes: number
+  analysis_concurrency: number
+  max_runtime_minutes: number
+  aging_enabled: boolean
+  aging_duration_days: number
+  aging_max_concurrent: number
+  correlation_tolerance_s: number
+  spike_min_minutes: number
+  retention_per_country: number
+}
+
+export interface BatchItem {
+  service_id: string
+  channel_name: string
+  country: string
+  playback_url: string
+  average_pct: number | null
+  max_pct: number | null
+  minutes_above: number
+  status: string
+  job_id: string | null
+  aging_job_id: string | null
+  error: string | null
+  summary: string | null
+  correlation: Record<string, unknown>
+}
+
+export interface Batch {
+  id: string
+  country: string
+  /** 'manual' when an operator started it, 'scheduled' when the weekly firing did. */
+  kind: string
+  status: string
+  phase: string
+  running: boolean
+  channels_listed: number
+  channels_scanned: number
+  channels_above: number
+  channels_analysed: number
+  channels_failed: number
+  /** The measurement window the averages cover, which the report labels its column from. */
+  window_from: string | null
+  window_to: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  error: string | null
+  settings: Record<string, unknown>
+  items?: BatchItem[]
+}
+
+export interface BatchSchedule {
+  country: string
+  enabled: boolean
+  /** Monday is 0, matching the backend and `Date.getUTCDay()` shifted. */
+  weekday: number
+  hour_utc: number
+  minute_utc: number
+  overrides: Record<string, unknown>
+  last_fired_at: string | null
+  last_success_at: string | null
+  last_reason: string | null
+}
+
+export interface BatchEstimate {
+  country: string
+  channels_listed: number
+  analysis_duration_minutes: number
+  analysis_concurrency: number
+  max_runtime_minutes: number
+  channels_within_runtime: number
+  worst_case_runtime_minutes: number
+  window_days: number
+}
+
+export interface BatchLogLine {
+  at: string
+  level: string
+  message: string
+}
+
+/** One job's stored samples, already shaped for the Realtime chart components. */
+export interface JobSamples {
+  job_id: string
+  range: {
+    from: string | null
+    to: string | null
+    first_sample: string | null
+    last_sample: string | null
+  }
+  counts: Record<string, number>
+  max_points: number
+  downsampled: boolean
+  snapshots: PlaylistSnapshotData[]
+  segments: SegmentResultData[]
+  /** Declared BANDWIDTH per rung, in bit/s, or null for a rung that declares none. */
+  declared: Record<string, number | null>
+  player: Record<string, unknown>[]
+  vpb: Record<string, { at: string; level_s: number; state: string }[]>
+  /** Set when the run recorded no player samples, which an aging run never does. */
+  player_note: string
 }

@@ -13,6 +13,7 @@ import { Sidebar, useRailCollapsed, type TabId } from './components/layout/Sideb
 import { AgingTab } from './tabs/Aging'
 import { AllChannelsTab } from './tabs/AllChannels'
 import { BulkTab, type BulkPrefill } from './tabs/Bulk'
+import { AutomatedBatchTab } from './tabs/AutomatedBatch'
 import { CascadaDataTab } from './tabs/CascadaData'
 import { ChannelsTab } from './tabs/Channels'
 import { RealtimeTab } from './tabs/Realtime'
@@ -119,6 +120,9 @@ export default function App() {
         </div>
         <div className={tab === 'cascada' ? '' : 'panel-hidden'}>
           <CascadaDataTab onAnalyse={sendToAnalysis} onBulk={sendToBulk} />
+        </div>
+        <div className={tab === 'batch' ? '' : 'panel-hidden'}>
+          <AutomatedBatchTab />
         </div>
         <div className={tab === 'aging' ? '' : 'panel-hidden'}>
           <AgingTab thresholds={thresholds} prefill={prefill.aging} />

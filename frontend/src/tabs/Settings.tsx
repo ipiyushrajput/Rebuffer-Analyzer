@@ -9,6 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { endpoints } from '../api/client'
+import { BatchSettingsPanel } from '../components/BatchSettingsPanel'
 import { CascadaSession } from '../components/CascadaSession'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import {
@@ -40,6 +41,7 @@ type GroupId =
   | 'ladder'
   | 'incidents'
   | 'cascada'
+  | 'batch'
   | 'rules'
 
 const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
@@ -138,6 +140,7 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
 const TABS: { id: GroupId; label: string }[] = [
   { id: 'profile', label: 'Fetch profile' },
   ...GROUPS.map((group) => ({ id: group.id, label: group.title })),
+  { id: 'batch', label: 'Automated batches' },
   { id: 'rules', label: 'Rule catalogue' },
 ]
 
@@ -355,6 +358,13 @@ export function SettingsTab() {
             </div>
           )}
 
+          {/* --- automated batches ---------------------------------------------
+              Batch settings and the weekly firing save through their own endpoints, so the
+              panel carries its own save rather than the bar below. */}
+          <div className={tab === 'batch' ? 'p-4 pt-2' : 'panel-hidden'}>
+            <BatchSettingsPanel />
+          </div>
+
           {/* --- rule catalogue ------------------------------------------------ */}
           <div className={tab === 'rules' ? '' : 'panel-hidden'}>
             <RuleCatalogue />
@@ -368,8 +378,15 @@ export function SettingsTab() {
         {error && <InlineAlert tone="error">{error}</InlineAlert>}
       </PageBody>
 
-      {/* --- the save bar ---------------------------------------------------- */}
-      <div className="sticky bottom-0 z-20 border-t border-rail-border bg-rail px-6 py-3">
+      {/* --- the save bar ----------------------------------------------------
+          Hidden on the batch tab: that panel saves through its own endpoints and carries its
+          own button, and a second Save on the same screen saves something else. */}
+      <div
+        className={cx(
+          'sticky bottom-0 z-20 border-t border-rail-border bg-rail px-6 py-3',
+          tab === 'batch' && 'hidden',
+        )}
+      >
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"

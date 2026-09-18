@@ -1,11 +1,14 @@
 """FastAPI application.
 
-Startup checks the database and the external binaries, loads stored thresholds, and resumes
-any aging or bulk job that was running when the process last stopped.
+Startup checks the database and the external binaries, loads stored thresholds, resumes any
+aging or bulk job that was running when the process last stopped, picks up any automated
+batch left mid-run, and starts the weekly batch scheduler.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -58,11 +61,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await job_manager.start()
     await job_manager.resume_persisted_jobs()
 
+    # Automated batches. The sweep runs first so a batch this process was running when it
+    # stopped is picked up rather than left in a running state with nothing running it; the
+    # scheduler then fires whatever the weekly schedule is due for.
+    from app.batch import runner as batch_runner
+    from app.batch import scheduler as batch_scheduler
+
+    try:
+        await batch_runner.sweep_unfinished()
+    except Exception as exc:
+        logger.warning("unfinished batches were not swept: %s", db_session.describe_error(exc))
+    # Awaited here rather than inside the loop: the default schedule is in place before the
+    # server takes its first request, so it cannot race one that writes the same row.
+    await batch_scheduler.ensure_default()
+    scheduler_task = asyncio.create_task(batch_scheduler.loop(), name="rba:batch-scheduler")
+
     try:
         yield
     finally:
         from app.api import proxy as proxy_api
 
+        scheduler_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await scheduler_task
         await job_manager.shutdown()
         await proxy_api.aclose()
         await db_session.dispose()
@@ -91,7 +112,7 @@ def create_app() -> FastAPI:
         expose_headers=["Content-Disposition"],
     )
 
-    from app.api import aging, bulk, cascada, catalogue, channels, proxy, realtime, reports
+    from app.api import aging, batch, bulk, cascada, catalogue, channels, proxy, realtime, reports
     from app.api import settings as settings_api
     from app.ws import routes as ws_routes
 
@@ -103,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(channels.router, prefix="/api")
     app.include_router(catalogue.router, prefix="/api")
     app.include_router(cascada.router, prefix="/api")
+    app.include_router(batch.router, prefix="/api")
     app.include_router(reports.router, prefix="/api")
     app.include_router(proxy.router, prefix="/api")
     app.include_router(ws_routes.router)
