@@ -63,8 +63,8 @@ python -m app.cli rules --markdown            # rule catalogue
 
 ```
 backend/app/
-  api/        REST routers (realtime, catalogue, channels, aging, bulk, reports, proxy,
-              settings, health)
+  api/        REST routers (realtime, catalogue, channels, aging, bulk, batch, reports,
+              proxy, settings, health)
   ws/         WebSocket hub + typed message schemas
   jobs/       job manager, persistence, resume-on-restart
   net/        fetcher (manual redirects + timing split), dns, tls_inspect
@@ -76,9 +76,12 @@ backend/app/
   db/         SQLAlchemy models, repository, session factory
   tvplus/     the live channel catalogue: country table, dbconnect mapping, row parser
   cascada/    the field rebuffering metric: auth, client, series, store, scan, exports
+  batch/      the automated pipeline: settings, store, runner, scheduler, aging,
+              correlate, summary, reporting, exports
 frontend/src/
   tabs/       Realtime, AllChannels (the TV Plus catalogue), CascadaData (measured
-              rebuffering), Channels (analysed channels), Aging, Bulk, Reports, Settings
+              rebuffering), AutomatedBatch (Start + Playground), Channels (analysed
+              channels), Aging, Bulk, Reports, Settings
   components/ Player, charts/, FindingCard, ManifestViewer, SequenceLadder
 ```
 
@@ -150,6 +153,17 @@ frontend/src/
   minute, and a null minute is a gap rather than a zero. The session is an operator's, pasted
   in Settings and held server-side: a browser cannot hand its CASCADA cookies to another
   origin, and the value is never returned to a page or written to a log.
+- **A batch calls the engines, it does not reimplement them.** `app/batch/` composes what
+  already exists: `app.cascada.service` for the country listing, the scan and the averaging,
+  `app.analysis` through `job_manager.submit()` for every analysis and aging run. A second
+  scan loop or a second selection rule in `app/batch/` is a bug. A batch freezes its settings
+  in `batches.settings_snapshot` at the moment it starts — including the CASCADA threshold and
+  window, which live with the analysis thresholds and are copied in rather than duplicated —
+  so a Settings edit never disturbs a running batch and the report states what it used. The
+  weekly firing is a `batch_schedules` row read by a loop, never an in-process timer: a
+  restart on a Sunday evening must not miss Monday. A skipped firing records its reason, since
+  a schedule that skips silently is indistinguishable from one that is broken. Aging follows a
+  scheduled batch only; a manual batch starts none.
 - The channel catalogue is fetched by the backend, never the browser: it sends no CORS
   headers, and the country/environment to `dbconnect` mapping belongs in one place,
   `app/tvplus/catalogue.py`. The tab reads the country list from `/api/catalogue/countries`

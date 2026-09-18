@@ -285,6 +285,119 @@ class Report(Base):
     )
 
 
+class Batch(Base):
+    """One automated run over a country: scan, select, analyse, report.
+
+    A batch is backend work, not a screen. The browser that started it can close, reload or
+    move on, and a restart mid-run resumes from the first incomplete phase, because every
+    phase writes its progress here and its channels to `batch_items`.
+    """
+
+    __tablename__ = _t("batches")
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    country: Mapped[str] = mapped_column(String(8), index=True)
+    # `manual` when an operator pressed Start Batch, `scheduled` when the weekly firing did.
+    # Only a scheduled batch starts continuous aging.
+    kind: Mapped[str] = mapped_column(String(16), default="manual", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="QUEUED", index=True)
+    phase: Mapped[str] = mapped_column(String(24), default="QUEUED")
+
+    channels_listed: Mapped[int] = mapped_column(Integer, default=0)
+    channels_scanned: Mapped[int] = mapped_column(Integer, default=0)
+    channels_above: Mapped[int] = mapped_column(Integer, default=0)
+    channels_analysed: Mapped[int] = mapped_column(Integer, default=0)
+    channels_failed: Mapped[int] = mapped_column(Integer, default=0)
+
+    # The CASCADA window the averages cover, as whole epoch seconds. The report labels its
+    # column from this rather than from whatever the setting says today.
+    window_from: Mapped[int] = mapped_column(BigInteger, default=0)
+    window_to: Mapped[int] = mapped_column(BigInteger, default=0)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, index=True
+    )
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # The settings as they were when this batch started. A Settings edit mid-run must not
+    # change what a running batch does, and the report states the values it actually used.
+    settings_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    items: Mapped[list[BatchItem]] = relationship(back_populates="batch", cascade="all, delete")
+
+
+class BatchItem(Base):
+    """One channel inside a batch: what it measured, what was run, and what came back."""
+
+    __tablename__ = _t("batch_items")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(ForeignKey(f"{_t('batches')}.id"), index=True)
+    service_id: Mapped[str] = mapped_column(String(64), index=True)
+    channel_name: Mapped[str] = mapped_column(String(255))
+    country: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    playback_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # The CASCADA average that selected this channel, as a percentage of viewing time.
+    average_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    minutes_above: Mapped[int] = mapped_column(Integer, default=0)
+
+    status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
+    # The analysis this channel produced, so the report links into the per-channel view.
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # The aging run started for this channel after a scheduled batch, when there was one.
+    aging_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Spike windows matched against aging events, computed when the next report is generated.
+    correlation: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    batch: Mapped[Batch] = relationship(back_populates="items")
+
+
+class BatchLog(Base):
+    """Every step a batch took, so a run can be read back after the fact."""
+
+    __tablename__ = _t("batch_logs")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(String(36), index=True)
+    at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    level: Mapped[str] = mapped_column(String(8), default="INFO")
+    message: Mapped[str] = mapped_column(Text)
+
+
+class BatchSchedule(Base):
+    """When a country's batch runs by itself.
+
+    The schedule is a row rather than an in-process timer, so it survives a restart and can be
+    edited in Settings. `last_fired_at` records every firing including a skip; `last_success_at`
+    is what the seven-day gap is measured from.
+    """
+
+    __tablename__ = _t("batch_schedules")
+
+    country: Mapped[str] = mapped_column(String(8), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Monday is 0, matching `datetime.weekday()`.
+    weekday: Mapped[int] = mapped_column(Integer, default=0)
+    hour_utc: Mapped[int] = mapped_column(Integer, default=2)
+    minute_utc: Mapped[int] = mapped_column(Integer, default=0)
+    # Overrides of the global batch settings for this country; empty means use the global ones.
+    overrides: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    last_fired_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_success_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class CascadaSample(Base):
     """One channel's CASCADA rebuffering window, kept so a scan is paid for once.
 

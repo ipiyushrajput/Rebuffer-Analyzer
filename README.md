@@ -21,10 +21,11 @@ analysis code.
 |---|---|
 | **Realtime** | Paste a playback URL, analyse live. Player, sixteen live charts, live findings feed, report at any moment. Stopping files the run and clears the tab for the next one. |
 | **Analysed channels** | Every finished analysis, with its verdict, findings, incidents and reports. Read back from the database, so a channel analysed before the last restart is still here; delete one and its measurements and report files go with it. |
-| **Aging** | Put channels under analysis for 15 min to 24 h. Jobs run server-side and survive the browser closing and a backend restart. |
+| **Automated Batch** | One click, or one weekly firing, runs the whole pipeline on the backend: list a country, scan it against CASCADA, select the channels above threshold, analyse each one, and file the report. Playground lists every batch — manual and scheduled — with live progress, the log, the reports and re-run. |
+| **Aging** | Put channels under analysis for 15 min to 24 h. Jobs run server-side and survive the browser closing and a backend restart. The stored samples draw the same charts Realtime draws live, over the last day, two days, seven days or the whole run. |
 | **Bulk** | Upload CSV / XLSX / JSON of many channels. Snapshot or aging mode, with concurrency control. Consolidated ranked report plus per-channel reports. |
 | **Reports** | Every report generated, searchable by channel, date, verdict and owner. |
-| **Settings** | Thresholds, User-Agent profile, concurrency limits, retention, and the full rule catalogue. |
+| **Settings** | Thresholds, User-Agent profile, concurrency limits, retention, the batch configuration and its weekly firings, and the full rule catalogue. |
 
 Realtime and Aging accept optional **Origin**, **CDN** and **SSAI (MediaTailor)** URLs
 alongside the playback URL. When they are present the same checks run on each layer and a
@@ -218,7 +219,8 @@ from `.env` into the repository.
 
 **Schema**: `channels`, `jobs`, `bulk_items`, `findings`, `incidents`, `samples_playlist`,
 `samples_segment`, `samples_player`, `virtual_buffer`, `playlist_snapshots`, `reports`,
-`settings`, each sample table indexed on `(job_id, variant, ts)`. A retention job purges raw
+`settings`, `cascada_samples`, `batches`, `batch_items`, `batch_logs`, `batch_schedules`,
+each sample table indexed on `(job_id, variant, ts)`. A retention job purges raw
 samples past the configured window (30 days by default) while keeping findings, incidents
 and reports; snapshots pinned around an incident survive the purge.
 
@@ -254,6 +256,7 @@ POST   /api/realtime/sessions/{id}/report?format=html|pdf
 
 POST   /api/aging/jobs      GET /api/aging/jobs      GET|DELETE /api/aging/jobs/{id}
 GET    /api/aging/jobs/{id}/result           GET /api/aging/jobs/{id}/report.{html|pdf}
+GET    /api/aging/jobs/{id}/samples?from=&to=&max_points=   stored samples for the charts
 
 POST   /api/bulk/jobs       GET /api/bulk/jobs/{id}  POST /api/bulk/validate
 GET    /api/bulk/jobs/{id}/report.{html|pdf}         GET /api/bulk/jobs/{id}/reports.zip
@@ -267,6 +270,12 @@ GET    /api/cascada/channel?service_id=&channel_name=&country=&refresh=
 GET    /api/cascada/channel/report.{csv|xlsx}
 POST   /api/cascada/scans   ·  GET|DELETE /api/cascada/scans/{id}
 GET    /api/cascada/scans/{id}/report.{csv|xlsx}
+
+GET|PUT /api/batch/settings   ·  GET|PUT /api/batch/schedules  ·  DELETE /api/batch/schedules/{country}
+GET    /api/batch/estimate?country=          channels and runtime, before a batch is started
+POST   /api/batch/batches   ·  GET /api/batch/batches  ·  GET|DELETE /api/batch/batches/{id}
+POST   /api/batch/batches/{id}/rerun         GET /api/batch/batches/{id}/log?download=
+GET    /api/batch/batches/{id}/report.{csv|xlsx}      GET /api/batch/columns
 
 GET    /api/reports  ·  GET|DELETE /api/reports/{id}  ·  GET /api/reports/{id}/download
 GET    /api/jobs/{id}/evidence.zip   ·  GET /api/jobs/{id}/snapshots?variant=&at=
@@ -356,6 +365,64 @@ devtools is the route, and the panel takes the whole header. What is stored neve
 to the browser — the panel shows the last four characters, the source, and when the session
 was last proven to work. A host may instead pin its own identity with `CASCADA_SESSIONID` in
 the git-ignored `backend/.env`.
+
+### Automated Batch
+
+Everything above the analysis engine used to be manual: open CASCADA Data, pick a country,
+run a scan, read the list, hand the channels to Bulk or Aging, and stay for the result. A
+batch runs that whole sequence on the backend, so nothing depends on a browser being open.
+
+**The pipeline.** List the country from the same catalogue All channels reads → scan every
+listed channel against CASCADA → select the channels whose **average** is above threshold →
+analyse each selected channel for the configured duration, four at a time → render the
+report. Each stage is a row: `batches` carries the counters and the settings snapshot,
+`batch_items` carries one row per selected channel, and `batch_logs` carries every step. So
+progress survives a reload, a different browser and a restarted process, and a batch left
+running by a restart is re-entered at its first incomplete phase rather than left hanging.
+
+**The settings are frozen at the start.** A batch snapshots the configuration it begins with,
+including the CASCADA threshold and window, so an edit in Settings never disturbs a running
+batch and the report states the values its figures were judged against.
+
+**The weekly firing.** A `batch_schedules` row per country — weekday, time of day in UTC, and
+`last_success_at` — read by a loop that wakes each minute. GB fires Monday 02:00 UTC by
+default. A firing is skipped, with the reason written to the row and the log, when a batch for
+that country is still running or fewer than seven days have passed since its last success. The
+schedule is a row rather than a timer so a deployment that restarts on a Sunday evening does
+not silently miss Monday.
+
+**Aging follows a scheduled batch only.** Its above-threshold channels then age for the
+following week, five at a time, worst average first; the rest are recorded as skipped with the
+reason. When the next scheduled batch for that country starts, the previous week's aging runs
+are cancelled before the new ones begin, so they cannot pile up. A manual batch starts no
+aging run.
+
+**The correlation.** The next week's report says what the aging run captured **at the times
+the rebuffering ratio was actually high**: consecutive minutes above threshold make a spike
+window, aging events are matched into it within a tolerance, and a window that caught nothing
+says so rather than being left out. Both sides are normalised to UTC before they are compared.
+
+**The runtime cap** is `max_runtime_minutes ÷ analysis_duration_minutes × analysis_concurrency`
+— 480 channels at the defaults (four in parallel, two minutes each, four hours). No TV Plus
+country reaches that: the largest lists around 255 channels, which is 128 minutes even if
+every one of them is above threshold.
+
+**The report** is written as a table, the same way the CASCADA reports are: `Channel Name`,
+`Service ID`, `Country`, `Avg Rebuffering Ratio (7 days)` labelled from the window actually
+used, `Week [start date - end date]`, `Analysis Summary`. A workbook carries the
+above-threshold channels, the channels that failed with the reason, the spike-to-aging
+correlation, and an `about` sheet with the window, the threshold and the settings the batch
+ran with. Reports live in `reports.content` like every other report, so a second analyzer
+instance serves one it did not render.
+
+**Playground** lists every batch, manual and scheduled, with its country, window, progress,
+status and the actions: download XLSX or CSV, open the per-channel detail, read or download
+the log, cancel after the channel in flight, and re-run with today's settings. It polls only
+while a batch is running.
+
+The batch configuration and the weekly firings are edited in **Settings → Automated batches**.
+They save through their own endpoints rather than the threshold save bar, because a schedule
+is a row a running loop reads every minute and a half-edited one would fire.
 
 ### Bulk input
 

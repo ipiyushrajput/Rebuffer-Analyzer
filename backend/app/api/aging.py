@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import select
 
+from app.api import job_samples
 from app.api.job_views import row_summary as _row_summary
 from app.api.job_views import stored_result
 from app.api.schemas import AGING_PRESETS_MINUTES, AgingJobIn
@@ -113,6 +114,39 @@ async def read_result(job_id: str) -> dict[str, Any]:
         if row is None:
             raise HTTPException(status_code=404, detail="Job not found")
         return await stored_result(session, row)
+
+
+@router.get("/jobs/{job_id}/samples")
+async def read_samples(
+    job_id: str,
+    start: str | None = Query(default=None, alias="from"),
+    end: str | None = Query(default=None, alias="to"),
+    max_points: int = Query(default=job_samples.DEFAULT_MAX_POINTS, ge=50, le=20000),
+) -> dict[str, Any]:
+    """The stored samples for one job, shaped for the charts and thinned for drawing.
+
+    An aging run has no socket anyone is watching, so its charts are drawn from what was
+    written down. The raw rows stay in the database; what comes back here is what renders.
+    """
+
+    def moment(raw: str | None) -> dt.datetime | None:
+        if not raw:
+            return None
+        try:
+            parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"{raw!r} is not an ISO 8601 timestamp"
+            ) from exc
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.UTC)
+
+    async with db_session.session_scope() as session:
+        row = await session.get(JobRow, job_id)
+        if row is None and job_manager.get(job_id) is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return await job_samples.read_samples(
+            session, job_id, start=moment(start), end=moment(end), max_points=max_points
+        )
 
 
 @router.post("/jobs/{job_id}/report")
