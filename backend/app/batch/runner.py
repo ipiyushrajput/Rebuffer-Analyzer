@@ -23,8 +23,9 @@ from app.batch import store
 from app.batch.settings import BatchSettings
 from app.cascada import client as cascada_client
 from app.cascada import service as cascada
-from app.cascada.auth import CascadaAuthError, resolve_auth
-from app.cascada.series import Window, is_above
+from app.cascada.auth import CascadaAuthError
+from app.cascada.series import Window
+from app.cascada.service import CascadaScanError
 from app.config import get_thresholds
 from app.jobs.manager import job_manager
 from app.tvplus import catalogue as cat
@@ -147,7 +148,8 @@ async def _run(batch_id: str, resume: bool = False) -> None:
     except asyncio.CancelledError:
         await _finish(batch_id, store.CANCELLED, "The batch task was cancelled.")
         raise
-    except CascadaAuthError as exc:
+    except (CascadaAuthError, CascadaScanError) as exc:
+        # Both carry a sentence the operator can act on, so the class name would be noise.
         await _finish(batch_id, store.FAILED, str(exc))
     except Exception as exc:
         logger.exception("batch %s failed", batch_id)
@@ -170,93 +172,106 @@ async def _finish(batch_id: str, status: str, reason: str) -> None:
     )
 
 
+# How often the batch copies the running scan's progress onto its own row. A scan of a large
+# country is hundreds of calls; a counter that only moves when the whole scan finishes is
+# indistinguishable from a scan that has hung.
+SCAN_POLL_S = 2.0
+
+
 async def _scan(batch_id: str, country: str, settings: BatchSettings) -> None:
     """Measure every channel in the country and keep the ones above the threshold.
 
-    The scan, the averaging and the threshold are the CASCADA module's — called, not
-    reimplemented — so a batch and the CASCADA Data tab can never disagree about which
-    channels are rebuffering.
+    This drives `cascada.start_scan` — the same scan the CASCADA Data tab runs — rather than
+    walking the channels itself. That is not only the convention: the module's scan reads the
+    country's stored windows in one query, shares one HTTP client across every channel, and
+    counts each channel as it lands. A second loop here had none of those, so a large country
+    opened hundreds of clients, re-read the cache a row at a time, and reported nothing at all
+    until the last channel returned.
     """
     thresholds = get_thresholds()
-    auth = await resolve_auth()
-    if not auth.describe().configured:
+    scan = await cascada.start_scan(country)
+
+    await store.update(
+        batch_id,
+        channels_listed=scan.total,
+        window_from=int(scan.window.start.timestamp()),
+        window_to=int(scan.window.end.timestamp()),
+    )
+    await store.log(
+        batch_id,
+        f"The catalogue lists {scan.total} channel(s) for {country}. Scanning them against "
+        f"CASCADA over {cascada_client.describe_window(scan.window)}, "
+        f"{thresholds.cascada_scan_concurrency} at a time.",
+    )
+
+    # The scan runs as its own task. This loop is what makes its progress the batch's, so the
+    # row a reloaded tab reads moves while the scan is still working.
+    reported = -1
+    try:
+        while scan.finished_at is None:
+            if is_cancelled(batch_id):
+                await cascada.cancel_scan(scan.id)
+                break
+            if scan.done != reported:
+                reported = scan.done
+                await store.update(
+                    batch_id, channels_scanned=scan.done, channels_failed=len(scan.failures)
+                )
+            await asyncio.sleep(SCAN_POLL_S)
+    except asyncio.CancelledError:
+        await cascada.cancel_scan(scan.id)
+        raise
+
+    await store.update(batch_id, channels_scanned=scan.done, channels_failed=len(scan.failures))
+
+    if scan.status == "AUTH_FAILED":
         raise CascadaAuthError(
-            "No CASCADA session is configured, so the scan cannot run. Paste a session in "
-            "the Settings tab, then start the batch again."
+            scan.error
+            or "CASCADA rejected the session during the scan. Paste a fresh one in Settings."
+        )
+    if scan.status == "FAILED":
+        raise CascadaScanError(scan.error or "The CASCADA scan failed.")
+    if scan.status == "CANCELLED":
+        # What it measured before it stopped is real, and the batch keeps it. Saying so is
+        # what stops a partial selection from reading as the whole country.
+        await store.log(
+            batch_id,
+            f"The scan was cancelled after {scan.done} of {scan.total} channel(s). The "
+            "selection below covers only what it measured.",
+            "WARN",
         )
 
-    channels = await cascada.country_channels(country)
-    window = cascada_client.window_for(thresholds)
-    await store.update(
-        batch_id,
-        channels_listed=len(channels),
-        window_from=int(window.start.timestamp()),
-        window_to=int(window.end.timestamp()),
-    )
-    await store.log(
-        batch_id,
-        f"The catalogue lists {len(channels)} channel(s) for {country}. Scanning them against "
-        f"CASCADA over {cascada_client.describe_window(window)}.",
-    )
+    for failure in scan.failures:
+        await store.log(
+            batch_id,
+            f"{failure.service_id} {failure.channel_name}: CASCADA did not answer "
+            f"({failure.reason}).",
+            "WARN",
+        )
 
-    semaphore = asyncio.Semaphore(max(1, thresholds.cascada_scan_concurrency))
-    measured: list[dict[str, Any]] = []
-    scanned = 0
-    failures = 0
+    # `scan.above` selects on the average and is already sorted worst first — the same rule
+    # and the same order the CASCADA Data tab and its country report use.
+    measured: list[dict[str, Any]] = [
+        {
+            "service_id": entry.service_id,
+            "channel_name": entry.channel_name,
+            "country": entry.country or country,
+            "playback_url": scan.urls.get(entry.service_id, ""),
+            "average_pct": entry.stats.average_pct,
+            "max_pct": entry.stats.max_pct,
+            "minutes_above": entry.stats.minutes_above,
+            "status": "PENDING" if scan.urls.get(entry.service_id) else "NO_URL",
+        }
+        for entry in scan.above
+    ]
 
-    async def measure(channel: cat.Channel) -> None:
-        nonlocal scanned, failures
-        async with semaphore:
-            if is_cancelled(batch_id):
-                return
-            try:
-                entry = await cascada.channel_window(
-                    service_id=channel.service_id,
-                    channel_name=channel.name,
-                    country=channel.country or country,
-                    thresholds=thresholds,
-                    window=window,
-                )
-            except CascadaAuthError:
-                raise
-            except Exception as exc:
-                failures += 1
-                await store.log(
-                    batch_id,
-                    f"{channel.service_id} {channel.name}: CASCADA did not answer ({exc}).",
-                    "WARN",
-                )
-                return
-            finally:
-                scanned += 1
-
-            # The average alone selects a channel. One bad minute is not a bad week.
-            if is_above(entry.stats.average_pct, thresholds):
-                measured.append(
-                    {
-                        "service_id": entry.service_id,
-                        "channel_name": entry.channel_name,
-                        "country": entry.country or country,
-                        "playback_url": channel.playback_url,
-                        "average_pct": entry.stats.average_pct,
-                        "max_pct": entry.stats.max_pct,
-                        "minutes_above": entry.stats.minutes_above,
-                        "status": "PENDING" if channel.playback_url else "NO_URL",
-                    }
-                )
-
-    await asyncio.gather(*(measure(channel) for channel in channels))
-
-    measured.sort(key=lambda item: item["average_pct"] or 0.0, reverse=True)
     await store.add_items(batch_id, measured)
-    await store.update(
-        batch_id, channels_scanned=scanned, channels_above=len(measured), channels_failed=failures
-    )
+    await store.update(batch_id, channels_above=len(measured))
     await store.log(
         batch_id,
-        f"{scanned} channel(s) scanned, {len(measured)} above "
+        f"{scan.done} channel(s) scanned, {len(measured)} above "
         f"{thresholds.cascada_rebuffering_threshold_pct} %"
-        + (f", {failures} could not be measured." if failures else "."),
+        + (f", {len(scan.failures)} could not be measured." if scan.failures else "."),
     )
 
     without_url = [item for item in measured if not item["playback_url"]]

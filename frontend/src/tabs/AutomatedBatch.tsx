@@ -201,6 +201,10 @@ export function AutomatedBatchTab() {
     queryKey: ['batch-log', logFor],
     queryFn: () => endpoints.batchLog(logFor as string),
     enabled: logFor !== null,
+    // An open log on a running batch is what an operator watches to see the scan working, so
+    // it follows the same rule as the rest: it polls while that batch runs and then stops.
+    refetchInterval: () =>
+      rows.some((batch) => batch.id === logFor && batch.running) ? LIVE_POLL_MS : false,
   })
 
   const pageLabel = page

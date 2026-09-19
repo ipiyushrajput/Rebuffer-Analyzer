@@ -380,6 +380,12 @@ report. Each stage is a row: `batches` carries the counters and the settings sna
 progress survives a reload, a different browser and a restarted process, and a batch left
 running by a restart is re-entered at its first incomplete phase rather than left hanging.
 
+The scan stage is literally the scan the CASCADA Data tab runs — `cascada.start_scan`, driven
+by the batch, not a second copy of the loop. That is what gives it the country's stored windows
+in one query, one HTTP client shared across every channel, and a counter that rises as each
+channel lands. Playground reads that counter, so a country of 268 channels shows
+`Scanning 84 / 268` while it works rather than standing at zero until the last channel returns.
+
 **The settings are frozen at the start.** A batch snapshots the configuration it begins with,
 including the CASCADA threshold and window, so an edit in Settings never disturbs a running
 batch and the report states the values its figures were judged against.
