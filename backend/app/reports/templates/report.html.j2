@@ -396,6 +396,28 @@
 </table>
 </div>
 
+{% if severity_overrides %}
+<h3>Severities reassigned on this deployment</h3>
+<div class="card">
+<p class="small muted">
+  This analyzer files the rules below under a severity other than the one the catalogue
+  declares. Every finding above carries the reassigned severity.
+</p>
+<table>
+  <thead><tr><th>Rule</th><th>Declared</th><th>Filed as</th></tr></thead>
+  <tbody>
+  {% for row in severity_overrides %}
+    <tr>
+      <td><code>{{ row.id }}</code> {{ row.title }}</td>
+      <td class="mono">{{ row.declared }}</td>
+      <td class="mono">{{ row.effective }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
 <h3>Rebuffer Risk Score formula</h3>
 <div class="card"><p class="mono small">{{ verdict.risk_formula }}</p></div>
 

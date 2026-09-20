@@ -1254,3 +1254,90 @@ def test_captions_present_on_some_rungs_and_absent_on_others_fire() -> None:
         layer=LAYER,
     )
     assert "SUB-006" in ids(findings)
+
+
+def test_a_gap_measured_across_a_skipped_segment_does_not_fire() -> None:
+    """
+    The false positive this exists to prevent.
+
+    A rung sampled every Nth segment never produces an adjacent pair, and a rung sampled in
+    full misses one whenever a segment rolls out of the live window between polls. The
+    skipped segment carries the timestamps that join the two either side of it, so measuring
+    across it reports that segment's own duration as a gap on a stream that is contiguous.
+
+    The numbers are the ones from the field report: segments 882800 and 882802 on a 6.04 s
+    rung, 882801 never sampled, reported as a 6040 ms gap.
+    """
+    first = _analysed(SegmentSpec(duration=6.04, pts_offset_s=0.0), msn=882800)
+    # 882801 occupies 6.04 s to 12.08 s and was never fetched. 882802 follows it exactly.
+    third = _analysed(SegmentSpec(duration=6.04, pts_offset_s=12.08), msn=882802)
+
+    findings = segment_rules.check_segment_pair(
+        segment_rules.RungHistory(variant="v1080p@6046k", last=first),
+        third,
+        layer=LAYER,
+        thresholds=T,
+        discontinuity_before=False,
+    )
+
+    found = ids(findings)
+    assert "SEG-008" not in found, "a skipped segment is not a timestamp gap"
+    assert "INFO-005" in found, "the boundary that could not be checked is stated"
+
+    skip = next(f for f in findings if f.rule.id == "INFO-005")
+    assert skip.evidence[0]["segments_skipped"] == 1
+    assert "882800 and 882802" in skip.detail
+
+
+def test_an_nth_sampled_rung_reports_coverage_rather_than_a_gap_at_every_boundary() -> None:
+    """Every boundary on a rung sampled every third segment is a skip, not a defect."""
+    first = _analysed(SegmentSpec(duration=6.0, pts_offset_s=0.0), msn=300)
+    fourth = _analysed(SegmentSpec(duration=6.0, pts_offset_s=18.0), msn=303)
+
+    findings = segment_rules.check_segment_pair(
+        segment_rules.RungHistory(variant="360p", last=first),
+        fourth,
+        layer=LAYER,
+        thresholds=T,
+        discontinuity_before=False,
+    )
+
+    assert "SEG-008" not in ids(findings)
+    assert next(f for f in findings if f.rule.id == "INFO-005").evidence[0]["segments_skipped"] == 2
+
+
+def test_a_real_gap_between_consecutive_segments_still_fires() -> None:
+    """Gating on adjacency must not blind the rule to the defect it exists for."""
+    first = _analysed(SegmentSpec(duration=6.0, pts_offset_s=0.0), msn=10)
+    second = _analysed(SegmentSpec(duration=6.0, pts_offset_s=9.0), msn=11)
+
+    findings = segment_rules.check_segment_pair(
+        segment_rules.RungHistory(variant="720p", last=first),
+        second,
+        layer=LAYER,
+        thresholds=T,
+        discontinuity_before=False,
+    )
+
+    found = ids(findings)
+    assert "SEG-008" in found
+    assert "INFO-005" not in found
+    gap = next(f for f in findings if f.rule.id == "SEG-008")
+    assert gap.evidence[0]["segments_skipped"] == 0
+
+
+def test_a_timestamp_reset_across_a_skipped_segment_does_not_fire() -> None:
+    """The reset and overlap rules make the same contiguity claim, so they are gated too."""
+    first = _analysed(SegmentSpec(duration=6.0, pts_offset_s=100.0), msn=50)
+    third = _analysed(SegmentSpec(duration=6.0, pts_offset_s=0.0), msn=52)
+
+    findings = segment_rules.check_segment_pair(
+        segment_rules.RungHistory(variant="720p", last=first),
+        third,
+        layer=LAYER,
+        thresholds=T,
+        discontinuity_before=False,
+    )
+
+    assert "SEG-010" not in ids(findings)
+    assert "INFO-005" in ids(findings)

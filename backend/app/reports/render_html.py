@@ -78,6 +78,27 @@ def _human_duration(seconds: float) -> str:
     return f"{minutes / 60:.1f} hours"
 
 
+def _severity_overrides() -> list[dict[str, str]]:
+    """Every rule this deployment files under a severity other than the declared one."""
+    from app.analysis.rules import catalogue  # noqa: F401 — declares the rules.
+    from app.analysis.rules.base import registry, severity_overrides
+
+    rows = []
+    for rule_id, severity in sorted(severity_overrides().items()):
+        if rule_id not in registry:
+            continue
+        rule = registry.get(rule_id)
+        rows.append(
+            {
+                "id": rule.id,
+                "title": rule.title,
+                "declared": rule.severity.value,
+                "effective": severity.value,
+            }
+        )
+    return rows
+
+
 def _verdict_tone(status: str) -> str:
     if status.startswith("REBUFFERING —"):
         return "critical"
@@ -264,6 +285,10 @@ def render_report(
         "ref_frames_differ": len(ref_frames) > 1,
         "redirect_chains": result.redirect_chains,
         "thresholds": result.thresholds.model_dump(mode="json"),
+        # A reader of an escalation has to be able to see that a severity was reassigned on
+        # this deployment, the same way the thresholds a finding was measured against are
+        # stated. An unreassigned analyzer renders nothing here.
+        "severity_overrides": _severity_overrides(),
         "escalations": [block.as_dict() for block in escalations],
         "vpb_summary": [
             {

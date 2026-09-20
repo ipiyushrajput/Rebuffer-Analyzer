@@ -69,6 +69,28 @@ class RebufferImpact(str, Enum):
         return {"direct": 1.0, "indirect": 0.5, "none": 0.1}[self.value]
 
 
+# Severities an operator has reassigned, by rule id. A team that has accepted a defect, or
+# that reads one more seriously than the catalogue declares, changes what the rule reports
+# without editing the catalogue: the declaration stays the product's opinion, this is the
+# deployment's. It is loaded from the database at startup and edited in Settings.
+_severity_overrides: dict[str, Severity] = {}
+
+
+def set_severity_overrides(overrides: dict[str, Severity]) -> dict[str, Severity]:
+    """Replace the whole override map. Returns what is now in force."""
+    _severity_overrides.clear()
+    _severity_overrides.update(overrides)
+    return dict(_severity_overrides)
+
+
+def severity_overrides() -> dict[str, Severity]:
+    return dict(_severity_overrides)
+
+
+def effective_severity(rule_id: str, declared: Severity) -> Severity:
+    return _severity_overrides.get(rule_id, declared)
+
+
 @dataclass(frozen=True, slots=True)
 class Rule:
     """One declared check."""
@@ -96,12 +118,16 @@ class Rule:
         at: dt.datetime | None = None,
     ) -> Finding:
         now = at or dt.datetime.now(dt.UTC)
+        # An operator's override is about the rule, so it outranks both the declaration and a
+        # per-finding severity a detector computed: "treat this one as a warning" has to mean
+        # every finding the rule raises, or it does not mean anything.
+        chosen = _severity_overrides.get(self.id) or severity or self.severity
         return Finding(
             rule=self,
             detail=detail,
             variant=variant,
             stream_layer=stream_layer,
-            severity=severity or self.severity,
+            severity=chosen,
             owner=owner or self.owner,
             first_seen=now,
             last_seen=now,

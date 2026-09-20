@@ -197,7 +197,7 @@ HTTP_REDIRECT_DEPTH = _r(
 HTTP_QUERY_DROPPED = _r(
     "HTTP-002",
     "http",
-    C,
+    W,
     Owner.CDN,
     "Redirect drops query parameters carried by the playback URL",
     "The redirect target omits parameters the origin requires, so the request that follows "
@@ -2249,6 +2249,23 @@ SKIP_NO_COMPARISON_URL = _r(
     "the response headers that prove it.",
     "Supply the origin, CDN and SSAI URLs to pin each defect to the first layer it appears on.",
     NONE,
+)
+SKIP_NONCONSECUTIVE = _r(
+    "INFO-005",
+    "coverage",
+    I,
+    Owner.SAMSUNG_PLAYER,
+    "Timestamp continuity was not checked across a boundary between non-consecutive segments",
+    "The two segments sampled either side of this boundary are not consecutive, so there is no "
+    "boundary between them to measure: a rung sampled every Nth segment never produces an "
+    "adjacent pair, and a rung sampled in full misses one whenever a segment rolls out of the "
+    "live window between two polls. The skipped segments carry the timestamps that join the "
+    "two, and measuring across them reports their own duration as a gap.",
+    "Sample this rung in full, or shorten the poll interval, so consecutive segments are "
+    "measured and the boundary can be checked.",
+    NONE,
+    "",
+    ("nth_segment_sampling_other_rungs",),
 )
 NO_DEFECT = _r(
     "INFO-900",

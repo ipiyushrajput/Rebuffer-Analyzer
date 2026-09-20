@@ -422,33 +422,48 @@ export function SettingsTab() {
   )
 }
 
+/**
+ * The rule catalogue, and the one thing about a rule a deployment may change.
+ *
+ * A team that has accepted a defect, or reads one more seriously than the product does,
+ * reassigns its severity here. The catalogue's own declaration is never edited: it stays the
+ * product's opinion and is shown beside the reassignment, so a report and this table can
+ * never disagree without saying why. The change applies to jobs started afterwards.
+ */
 function RuleCatalogue() {
+  const queryClient = useQueryClient()
   const { data } = useQuery({ queryKey: ['rules'], queryFn: endpoints.rules })
   const [filter, setFilter] = useState('')
-  const rules = (data?.rules ?? []) as {
-    id: string
-    severity: string
-    owner_label: string
-    title: string
-    root_cause: string
-    fix: string
-    layer: string
-    thresholds: string[]
-  }[]
+  const [onlyChanged, setOnlyChanged] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const visible = rules.filter((rule) =>
-    filter
+  const reassign = useMutation({
+    mutationFn: ({ id, severity }: { id: string; severity: string | null }) =>
+      endpoints.setRuleSeverity(id, severity),
+    onSuccess: (next) => {
+      setError(null)
+      queryClient.setQueryData(['rules'], next)
+    },
+    onError: (err: Error) => setError(err.message),
+  })
+
+  const rules = data?.rules ?? []
+  const severities = data?.severities ?? []
+
+  const visible = rules.filter((rule) => {
+    if (onlyChanged && !rule.overridden) return false
+    return filter
       ? `${rule.id} ${rule.title} ${rule.layer} ${rule.owner_label}`
           .toLowerCase()
           .includes(filter.toLowerCase())
-      : true,
-  )
+      : true
+  })
 
   return (
     <div>
       <CardHeader
         title="Rule catalogue"
-        subtitle={`${data?.count ?? 0} rules, each with the threshold it reads and the party that owns the fix.`}
+        subtitle={`${data?.count ?? 0} rules, each with the threshold it reads and the party that owns the fix. Changing a severity here changes what every job started afterwards reports.`}
         actions={
           <label className="relative">
             <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint">
@@ -463,10 +478,47 @@ function RuleCatalogue() {
           </label>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-3 px-5 pb-3">
+        <label className="flex items-center gap-2 text-small text-ink-soft">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-brand-600"
+            checked={onlyChanged}
+            onChange={(e) => setOnlyChanged(e.target.checked)}
+          />
+          Only reassigned rules
+        </label>
+        <span className="chip-neutral">{data?.overridden_count ?? 0} reassigned</span>
+        {(data?.overridden_count ?? 0) > 0 && (
+          <button
+            type="button"
+            className="btn-quiet"
+            disabled={reassign.isPending}
+            onClick={() => {
+              for (const rule of rules.filter((item) => item.overridden)) {
+                reassign.mutate({ id: rule.id, severity: null })
+              }
+            }}
+          >
+            Restore every declared severity
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="px-5 pb-3">
+          <InlineAlert tone="error">{error}</InlineAlert>
+        </div>
+      )}
       {visible.length === 0 ? (
         <EmptyState
           title="No rule matches this filter"
-          detail="Clear the filter to see the whole catalogue."
+          detail={
+            onlyChanged
+              ? 'No rule has been reassigned. Every rule reports the severity the catalogue declares.'
+              : 'Clear the filter to see the whole catalogue.'
+          }
         />
       ) : (
         <div className="max-h-[560px] overflow-auto">
@@ -485,7 +537,35 @@ function RuleCatalogue() {
                 <tr key={rule.id}>
                   <td className="font-mono text-micro text-ink">{rule.id}</td>
                   <td>
-                    <SeverityChip severity={rule.severity as Severity} />
+                    <div className="flex flex-col gap-1">
+                      <SeverityChip severity={rule.severity as Severity} />
+                      <select
+                        className="input max-w-[130px] py-1 text-micro"
+                        aria-label={`Severity for ${rule.id}`}
+                        value={rule.severity}
+                        disabled={reassign.isPending}
+                        onChange={(e) =>
+                          reassign.mutate({ id: rule.id, severity: e.target.value })
+                        }
+                      >
+                        {severities.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      {rule.overridden && (
+                        <button
+                          type="button"
+                          className="text-left font-mono text-[10px] text-violet-500 hover:underline"
+                          title={`Restore the declared severity, ${rule.declared_severity}`}
+                          disabled={reassign.isPending}
+                          onClick={() => reassign.mutate({ id: rule.id, severity: null })}
+                        >
+                          declared {rule.declared_severity} · restore
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="text-micro text-ink-soft">{rule.owner_label}</td>
                   <td className="max-w-[560px]">
