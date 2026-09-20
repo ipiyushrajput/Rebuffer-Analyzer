@@ -7,11 +7,11 @@ and a backend restart. Cancelling it still produces a report from the data colle
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
-from sqlalchemy import select
 
 from app.api import job_samples
 from app.api.job_views import row_summary as _row_summary
@@ -19,9 +19,11 @@ from app.api.job_views import stored_result
 from app.api.schemas import AGING_PRESETS_MINUTES, AgingJobIn
 from app.db import session as db_session
 from app.db.models import Job as JobRow
+from app.db.paging import newest_rows
 from app.jobs.manager import job_manager
 from app.reports import service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/aging", tags=["aging"])
 
 
@@ -55,19 +57,16 @@ async def list_jobs(include_finished: bool = Query(default=True)) -> dict[str, A
     live = {h.id: h.summary() for h in job_manager.list_jobs(job_type="aging")}
 
     # Jobs from an earlier process run are read back from the database.
+    stored_error: str | None = None
     try:
         async with db_session.session_scope() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(JobRow)
-                        .where(JobRow.type == "aging")
-                        .order_by(JobRow.created_at.desc())
-                        .limit(200)
-                    )
-                )
-                .scalars()
-                .all()
+            # Sorted on the primary key alone; see `app/db/paging.py`.
+            rows = await newest_rows(
+                session,
+                JobRow,
+                where=(JobRow.type == "aging",),
+                order_by=(JobRow.created_at.desc(),),
+                limit=200,
             )
             for row in rows:
                 if row.id in live:
@@ -75,11 +74,14 @@ async def list_jobs(include_finished: bool = Query(default=True)) -> dict[str, A
                 if not include_finished and row.status in ("COMPLETED", "CANCELLED", "FAILED"):
                     continue
                 live[row.id] = _row_summary(row)
-    except Exception:
-        pass
+    except Exception as exc:
+        # The in-process jobs are still worth returning, but a listing that quietly drops
+        # every job from before the last restart is indistinguishable from having none.
+        stored_error = db_session.describe_error(exc)
+        logger.exception("stored aging jobs could not be listed")
 
     jobs = sorted(live.values(), key=lambda item: item["created_at"], reverse=True)
-    return {"jobs": jobs, "count": len(jobs)}
+    return {"jobs": jobs, "count": len(jobs), "stored_error": stored_error}
 
 
 @router.get("/jobs/{job_id}")

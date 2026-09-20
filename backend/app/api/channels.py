@@ -30,6 +30,7 @@ from app.db.models import (
     SegmentSample,
     VirtualBufferSample,
 )
+from app.db.paging import newest_rows
 from app.jobs.manager import job_manager
 
 router = APIRouter(prefix="/channels", tags=["channels"])
@@ -50,22 +51,19 @@ SAMPLE_TABLES = (
 async def list_channels(limit: int = Query(default=200, ge=1, le=1000)) -> dict[str, Any]:
     """Every finished analysis, newest first, with the reports generated from it."""
     async with db_session.session_scope() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(JobRow)
-                    # Bulk children belong to their batch, not to this list.
-                    .where(
-                        JobRow.type.in_(("realtime", "aging")),
-                        JobRow.status.in_(TERMINAL),
-                        JobRow.parent_job_id.is_(None),
-                    )
-                    .order_by(JobRow.created_at.desc())
-                    .limit(limit)
-                )
-            )
-            .scalars()
-            .all()
+        # Sorted on the primary key alone: a `jobs` row carries two JSON columns and five
+        # TEXT ones, and MySQL packs every selected column into the sort buffer.
+        rows = await newest_rows(
+            session,
+            JobRow,
+            where=(
+                # Bulk children belong to their batch, not to this list.
+                JobRow.type.in_(("realtime", "aging")),
+                JobRow.status.in_(TERMINAL),
+                JobRow.parent_job_id.is_(None),
+            ),
+            order_by=(JobRow.created_at.desc(),),
+            limit=limit,
         )
         job_ids = [row.id for row in rows]
 

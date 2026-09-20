@@ -230,9 +230,17 @@ from `.env` into the repository.
 **Schema**: `channels`, `jobs`, `bulk_items`, `findings`, `incidents`, `samples_playlist`,
 `samples_segment`, `samples_player`, `virtual_buffer`, `playlist_snapshots`, `reports`,
 `settings`, `cascada_samples`, `batches`, `batch_items`, `batch_logs`, `batch_schedules`,
-each sample table indexed on `(job_id, variant, ts)`. A retention job purges raw
-samples past the configured window (30 days by default) while keeping findings, incidents
-and reports; snapshots pinned around an incident survive the purge.
+each sample table indexed on `(job_id, variant, ts)` and on `(job_id, ts)`.
+
+Every column a listing orders by is indexed, and no listing sorts the rows themselves. MySQL's
+filesort packs each selected column into `sort_buffer_size`, so ordering `jobs` — two JSON
+columns and five TEXT ones per row — by `created_at` fails with error 1038, "Out of sort
+memory", once a deployment has some history. `app/db/paging.py` sorts a projection of the
+primary key and fetches the rows by key, which costs one extra round trip and nothing else.
+
+A retention job purges raw samples past the configured window (30 days by default) while
+keeping findings, incidents and reports; snapshots pinned around an incident survive the
+purge.
 
 **Reports** are stored as bytes in `reports.content` (`LONGBLOB` on MySQL) and streamed from
 there. `RBA_REPORT_STORAGE` decides where they go:
