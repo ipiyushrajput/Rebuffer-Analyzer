@@ -52,9 +52,19 @@ Every finding states the measurement, the root cause, the responsible party and 
   lowest, middle and highest video rung and every audio rendition are sampled in full; other
   rungs every Nth segment. The master is re-polled every 20 s and the ladder swept every
   5 min.
-- **181 rules** across DNS, TLS, HTTP, CDN, master playlist, media playlist, sequence
+- **183 rules** across DNS, TLS, HTTP, CDN, master playlist, media playlist, sequence
   numbers, segments, video bitstream, audio, A/V sync, subtitles, SSAI and player telemetry.
-  See [`docs/RULES.md`](docs/RULES.md).
+  See [`docs/RULES.md`](docs/RULES.md). Each rule's severity is declared there and can be
+  reassigned per deployment in Settings → Rule catalogue; the declaration is never edited, so
+  a report always states both what the rule reports and what the catalogue declares.
+- **A boundary is only judged when it was observed.** The timestamp continuity rules compare
+  where one segment ends against where the **next** begins, so they run only on a pair whose
+  media sequence numbers are adjacent. A rung sampled every Nth segment never produces an
+  adjacent pair, and a rung sampled in full misses one whenever a segment rolls out of the
+  live window between polls; measured across such a skip, the missing segment's own duration
+  reads as a gap of exactly that length. `INFO-005` states each boundary that could not be
+  checked and how many segments were skipped, so a polling gap is reported as itself rather
+  than as a defect in the stream.
 - **Virtual Player Buffer.** Plus Player's own buffering configuration modelled against the
   delivery timings actually measured, so Aging and Bulk produce a rebuffering ratio with no
   player attached, and Realtime shows the model next to the real hls.js buffer. The profile
@@ -281,6 +291,7 @@ GET    /api/reports  ·  GET|DELETE /api/reports/{id}  ·  GET /api/reports/{id}
 GET    /api/jobs/{id}/evidence.zip   ·  GET /api/jobs/{id}/snapshots?variant=&at=
 GET    /api/proxy?u=<urlencoded>
 GET|PUT /api/settings   ·  GET /api/settings/rules   ·  GET /api/health
+PUT    /api/settings/rules/{rule_id}         reassign one rule's severity; null restores it
 ```
 
 Interactive documentation is served at `/api/docs`.

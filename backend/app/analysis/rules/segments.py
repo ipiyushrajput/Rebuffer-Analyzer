@@ -29,6 +29,9 @@ class RungHistory:
     skews: list[tuple[int, float]] = field(default_factory=list)
     keyframe_msns: set[int] = field(default_factory=set)
     sps_by_msn: dict[int, dict[str, Any]] = field(default_factory=dict)
+    # Boundaries where the two segments sampled either side were not consecutive, so the
+    # timestamp continuity checks had nothing contiguous to measure.
+    skipped_boundaries: int = 0
 
 
 def check_segment(
@@ -315,13 +318,33 @@ def check_segment_pair(
         history.last = current
         return findings
 
+    # How many segments the stream published between the two that were sampled. Zero means
+    # this boundary was observed; anything else means it was not.
+    skipped = current.msn - previous.msn - 1 if current.msn >= 0 and previous.msn >= 0 else 0
+    adjacent = skipped == 0
+
     evidence: dict[str, Any] = {
         "variant": variant,
         "previous_msn": previous.msn,
         "current_msn": current.msn,
         "previous_uri": previous.uri,
         "current_uri": current.uri,
+        "segments_skipped": skipped,
     }
+
+    if not adjacent:
+        history.skipped_boundaries += 1
+        findings.append(
+            R.SKIP_NONCONSECUTIVE.raise_finding(
+                f"Segments {previous.msn} and {current.msn} on {variant} are not consecutive, "
+                f"so the timestamp continuity checks did not run at this boundary: "
+                f"{skipped} segment(s) were published between them and not sampled.",
+                evidence=evidence,
+                stream_layer=layer,
+                variant=variant,
+                at=moment,
+            )
+        )
 
     findings += _check_pts_continuity(
         previous,
@@ -330,6 +353,7 @@ def check_segment_pair(
         layer=layer,
         thresholds=thresholds,
         discontinuity_before=discontinuity_before,
+        adjacent=adjacent,
         at=moment,
         evidence=evidence,
     )
@@ -423,10 +447,23 @@ def _check_pts_continuity(
     layer: StreamLayer,
     thresholds: Thresholds,
     discontinuity_before: bool,
+    adjacent: bool,
     at: dt.datetime,
     evidence: dict[str, Any],
 ) -> list[Finding]:
+    """Timestamp contiguity across one segment boundary.
+
+    Every rule here asserts something about where one segment ends and the **next** begins, so
+    all of them need the two segments to be consecutive. They are not always: a rung sampled
+    every Nth segment never sees an adjacent pair, and a full rung misses one whenever a
+    segment rolls out of the live window between polls. Measured across such a skip, the
+    missing segment's own duration reads as a gap of exactly that length and the rule fires on
+    a stream that is perfectly contiguous. So the boundary is checked only when it was
+    observed; when it was not, `SKIP_NONCONSECUTIVE` says so and these rules stay silent.
+    """
     findings: list[Finding] = []
+    if not adjacent:
+        return findings
     end = previous.video_last_pts if previous.has_video else previous.audio_last_pts
     start = current.video_first_pts if current.has_video else current.audio_first_pts
     if end is None or start is None:

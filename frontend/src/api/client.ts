@@ -352,7 +352,35 @@ export const endpoints = {
 
   settings: () => api.get<Record<string, unknown>>('/settings'),
   saveSettings: (body: unknown) => api.put<Record<string, unknown>>('/settings', body),
-  rules: () => api.get<{ count: number; rules: Record<string, unknown>[] }>('/settings/rules'),
+  rules: () => api.get<RuleCatalogue>('/settings/rules'),
+  /** Reassign one rule's severity. `null` restores the one the catalogue declares. */
+  setRuleSeverity: (ruleId: string, severity: string | null) =>
+    api.put<RuleCatalogue>(`/settings/rules/${encodeURIComponent(ruleId)}`, { severity }),
+}
+
+/** One declared check, with what it reports today beside what the catalogue declares. */
+export interface CatalogueRule {
+  id: string
+  layer: string
+  /** What the rule reports today: the override when there is one, else the declaration. */
+  severity: string
+  declared_severity: string
+  overridden: boolean
+  owner: string
+  owner_label: string
+  title: string
+  root_cause: string
+  fix: string
+  rebuffer_impact: string
+  reference: string
+  thresholds: string[]
+}
+
+export interface RuleCatalogue {
+  count: number
+  severities: string[]
+  overridden_count: number
+  rules: CatalogueRule[]
 }
 
 // --- Automated batches ------------------------------------------------------

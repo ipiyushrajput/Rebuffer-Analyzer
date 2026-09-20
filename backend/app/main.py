@@ -50,6 +50,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.api import settings as settings_api
 
     await settings_api.load_thresholds_from_db()
+    # Severities an operator reassigned are in force before the first job starts, so a run
+    # never files findings under a classification the deployment has already changed.
+    await settings_api.load_rule_severities_from_db()
 
     from app.jobs.manager import job_manager
     from app.ws.hub import hub

@@ -11,7 +11,8 @@ import datetime as dt
 import logging
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from app.config import Thresholds, get_settings, get_thresholds, set_thresholds
 from app.db import session as db_session
@@ -22,6 +23,7 @@ router = APIRouter(tags=["settings"])
 
 THRESHOLDS_KEY = "thresholds"
 PREFERENCES_KEY = "preferences"
+RULE_SEVERITY_KEY = "rule_severity"
 
 DEFAULT_PREFERENCES: dict[str, Any] = {
     "ua_profile": "tizen5",
@@ -43,6 +45,38 @@ async def load_thresholds_from_db() -> Thresholds:
     except Exception as exc:
         logger.warning("stored thresholds could not be loaded: %s", db_session.describe_error(exc))
     return get_thresholds()
+
+
+async def load_rule_severities_from_db() -> dict[str, str]:
+    """Put the stored severity overrides back in force. An unreadable store changes nothing.
+
+    A rule whose id is no longer declared, or a severity that is no longer a severity, is
+    dropped rather than carried: the catalogue is the authority on what exists, and a stale
+    row must not silently reclassify a rule that took its identifier later.
+    """
+    from app.analysis.rules import catalogue  # noqa: F401 — declares the rules.
+    from app.analysis.rules.base import Severity, registry, set_severity_overrides
+
+    stored: dict[str, Any] = {}
+    try:
+        async with db_session.session_scope() as session:
+            row = await session.get(SettingRow, RULE_SEVERITY_KEY)
+            if row is not None:
+                stored = dict(row.value)
+    except Exception as exc:
+        logger.warning(
+            "stored rule severities could not be loaded: %s", db_session.describe_error(exc)
+        )
+        return {}
+
+    valid: dict[str, Severity] = {}
+    for rule_id, value in stored.items():
+        if rule_id in registry and value in Severity.__members__:
+            valid[rule_id] = Severity[str(value)]
+        else:
+            logger.warning("stored severity override for %s was dropped: %s", rule_id, value)
+    set_severity_overrides(valid)
+    return {rule_id: severity.value for rule_id, severity in valid.items()}
 
 
 async def _load_preferences() -> dict[str, Any]:
@@ -110,17 +144,28 @@ async def _store(key: str, value: dict[str, Any]) -> None:
 
 @router.get("/settings/rules")
 async def rule_catalogue() -> dict[str, Any]:
-    """The full rule catalogue, so the UI can explain any finding it renders."""
-    from app.analysis.rules import catalogue  # noqa: F401 — declares the rules.
-    from app.analysis.rules.base import registry
+    """The full rule catalogue, so the UI can explain any finding it renders.
 
+    `severity` is what the rule reports today; `declared_severity` is what the catalogue
+    declares. They differ exactly when an operator has reassigned it, and both are stated so
+    a reader can see that a rule was reassigned rather than wondering why the catalogue and a
+    report disagree.
+    """
+    from app.analysis.rules import catalogue  # noqa: F401 — declares the rules.
+    from app.analysis.rules.base import Severity, registry, severity_overrides
+
+    overrides = severity_overrides()
     return {
         "count": len(registry),
+        "severities": [s.value for s in Severity],
+        "overridden_count": len(overrides),
         "rules": [
             {
                 "id": rule.id,
                 "layer": rule.layer,
-                "severity": rule.severity.value,
+                "severity": overrides.get(rule.id, rule.severity).value,
+                "declared_severity": rule.severity.value,
+                "overridden": rule.id in overrides,
                 "owner": rule.owner.value,
                 "owner_label": rule.owner.label,
                 "title": rule.title,
@@ -133,6 +178,52 @@ async def rule_catalogue() -> dict[str, Any]:
             for rule in registry.all()
         ],
     }
+
+
+class RuleSeverityIn(BaseModel):
+    """One reassignment. A null severity restores what the catalogue declares."""
+
+    severity: str | None = None
+
+
+@router.put("/settings/rules/{rule_id}")
+async def write_rule_severity(rule_id: str, body: RuleSeverityIn) -> dict[str, Any]:
+    """Reassign one rule's severity, or restore its declared one.
+
+    The change applies to jobs started afterwards, like every other setting: a running job
+    keeps what it started with, so a report always states the severities its findings were
+    filed under.
+    """
+    from app.analysis.rules import catalogue  # noqa: F401 — declares the rules.
+    from app.analysis.rules.base import Severity, registry, set_severity_overrides
+    from app.analysis.rules.base import severity_overrides as current_overrides
+
+    if rule_id not in registry:
+        raise HTTPException(status_code=404, detail=f"{rule_id} is not a declared rule.")
+
+    overrides = current_overrides()
+    if body.severity is None:
+        overrides.pop(rule_id, None)
+    else:
+        if body.severity not in Severity.__members__:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{body.severity} is not a severity. Use one of: "
+                + ", ".join(s.value for s in Severity)
+                + ".",
+            )
+        declared = registry.get(rule_id).severity
+        chosen = Severity[body.severity]
+        # Storing the declared severity is the same as storing nothing, and keeping the row
+        # would mark the rule as reassigned when it is not.
+        if chosen is declared:
+            overrides.pop(rule_id, None)
+        else:
+            overrides[rule_id] = chosen
+
+    set_severity_overrides(overrides)
+    await _store(RULE_SEVERITY_KEY, {key: value.value for key, value in overrides.items()})
+    return await rule_catalogue()
 
 
 @router.get("/settings/db-status")

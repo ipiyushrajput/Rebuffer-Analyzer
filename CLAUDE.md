@@ -91,6 +91,24 @@ frontend/src/
 - Every rule is declared in `app/analysis/rules/` and registered in the registry at import
   time. A rule carries `id`, `layer`, `severity`, `owner`, `title`, `root_cause`, `fix`,
   `rebuffer_impact`. Text is written in present-tense definite statements.
+- **The declared severity is the product's; the override is the deployment's.** A team
+  reassigns a rule in Settings → Rule catalogue rather than by editing `catalogue.py`.
+  Overrides live under the `rule_severity` settings key, are applied once in
+  `Rule.raise_finding` so every detector picks them up, and outrank a severity a detector
+  computed for itself. `docs/RULES.md` and the CLI always print the declaration, the API
+  prints both, and a report lists every reassignment in force in its appendix beside the
+  thresholds — a reader of an escalation has to be able to see that a severity was changed.
+  A stored override for a rule the catalogue no longer declares is dropped on load, never
+  carried onto whichever rule takes that id next.
+- **A pair rule runs only on a pair that was observed.** `check_segment_pair` compares the
+  last *sampled* segment with the current one, and those are not always adjacent: a rung
+  sampled every Nth segment never produces an adjacent pair, and a full rung misses one
+  whenever a segment rolls out of the live window between polls. Every rule that asserts
+  where one segment ends against where the **next** begins — the PTS gap, overlap, reset and
+  rollover-split checks — is gated on `current.msn == previous.msn + 1`, because across a
+  skip the missing segment's own duration reads as a gap of exactly that length. The skipped
+  boundary is reported as `INFO-005` with the count, never dropped. A config-change check is
+  not gated: a change observed across a skip is still a change.
 - Thresholds are never inlined. They live in `app/config.py` (`Thresholds`), are editable
   in the Settings tab, and are persisted in the DB.
 - **The Virtual Player Buffer models Plus Player, not a generic player.** `app/analysis/vpb.py`
