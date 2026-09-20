@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 
 from app.db import session as db_session
 from app.db.models import Batch, BatchItem, BatchLog
+from app.db.paging import newest_rows
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +169,16 @@ async def read(batch_id: str, with_items: bool = False) -> dict[str, Any] | None
 async def listing(country: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """Every batch, newest first. Playground's list."""
     async with db_session.session_scope() as session:
-        query = select(Batch).order_by(Batch.created_at.desc()).limit(limit)
-        if country:
-            query = query.where(Batch.country == country.upper())
-        rows = list((await session.execute(query)).scalars().all())
+        # Sorted on the primary key alone; see `app/db/paging.py`. A batch row carries its
+        # settings snapshot, so ordering the rows themselves grows with the history.
+        where: tuple[Any, ...] = (Batch.country == country.upper(),) if country else ()
+        rows = await newest_rows(
+            session,
+            Batch,
+            where=where,
+            order_by=(Batch.created_at.desc(),),
+            limit=limit,
+        )
         return [batch_payload(row) for row in rows]
 
 
@@ -188,6 +195,7 @@ async def running_for(country: str) -> dict[str, Any] | None:
                     select(Batch)
                     .where(Batch.country == country.upper(), Batch.status.in_(RUNNING_STATES))
                     .order_by(Batch.created_at.desc())
+                    .limit(1)
                 )
             )
             .scalars()
@@ -306,6 +314,7 @@ async def previous_batch(country: str, before: str) -> dict[str, Any] | None:
                         Batch.created_at < current.created_at,
                     )
                     .order_by(Batch.created_at.desc())
+                    .limit(1)
                 )
             )
             .scalars()

@@ -79,7 +79,11 @@ class Job(Base):
     started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ends_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Indexed: every listing of jobs is newest-first, and without it the server sorts the
+    # whole matching set — JSON columns and all — to return the first page.
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, index=True
+    )
     verdict: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -171,6 +175,9 @@ class PlaylistSample(Base):
 
     __table_args__ = (
         Index(f"ix_{_t('samples_playlist')}_job_variant_ts", "job_id", "variant", "ts"),
+        # Every rung at once, in time order: the charts and the exports read a job
+        # whole. Without this the server sorts the whole run — URIs, JSON and all.
+        Index(f"ix_{_t('samples_playlist')}_job_ts", "job_id", "ts"),
     )
 
 
@@ -205,6 +212,9 @@ class SegmentSample(Base):
 
     __table_args__ = (
         Index(f"ix_{_t('samples_segment')}_job_variant_ts", "job_id", "variant", "ts"),
+        # Every rung at once, in time order: the charts and the exports read a job
+        # whole. Without this the server sorts the whole run — URIs, JSON and all.
+        Index(f"ix_{_t('samples_segment')}_job_ts", "job_id", "ts"),
     )
 
 
@@ -239,6 +249,9 @@ class VirtualBufferSample(Base):
 
     __table_args__ = (
         Index(f"ix_{_t('virtual_buffer')}_job_variant_ts", "job_id", "variant", "ts"),
+        # Every rung at once, in time order: the charts and the exports read a job
+        # whole. Without this the server sorts the whole run — URIs, JSON and all.
+        Index(f"ix_{_t('virtual_buffer')}_job_ts", "job_id", "ts"),
     )
 
 
@@ -259,6 +272,9 @@ class PlaylistSnapshot(Base):
 
     __table_args__ = (
         Index(f"ix_{_t('playlist_snapshots')}_job_variant_ts", "job_id", "variant", "ts"),
+        # Every rung at once, in time order: the charts and the exports read a job
+        # whole. Without this the server sorts the whole run — URIs, JSON and all.
+        Index(f"ix_{_t('playlist_snapshots')}_job_ts", "job_id", "ts"),
     )
 
 

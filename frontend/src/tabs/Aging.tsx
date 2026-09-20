@@ -182,6 +182,15 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
       />
 
       <PageBody>
+        {/* Jobs still running in this process are listed whatever the database says, so a
+            read that failed would otherwise look like a deployment with no history. */}
+        {jobsQuery.data?.stored_error && (
+          <InlineAlert tone="error">
+            Jobs from before this process started could not be read, so only the runs this
+            process is holding are listed. {jobsQuery.data.stored_error}
+          </InlineAlert>
+        )}
+
         <Card>
           <div className="px-5 pb-4 pt-4">
             <UrlForm value={form} onChange={setForm} disabled={create.isPending} />

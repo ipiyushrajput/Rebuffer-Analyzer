@@ -23,6 +23,7 @@ from app.bulk import parsers
 from app.db import session as db_session
 from app.db.models import BulkItem
 from app.db.models import Job as JobRow
+from app.db.paging import newest_rows
 from app.jobs.manager import JobHandle, job_manager
 from app.reports import service
 
@@ -309,17 +310,13 @@ async def _stored_batches(limit: int) -> list[dict[str, Any]]:
     screen while it is still working, which is what a refresh looked like.
     """
     async with db_session.session_scope() as db:
-        rows = (
-            (
-                await db.execute(
-                    select(JobRow)
-                    .where(JobRow.type == "bulk", JobRow.parent_job_id.is_(None))
-                    .order_by(JobRow.created_at.desc())
-                    .limit(limit)
-                )
-            )
-            .scalars()
-            .all()
+        # Sorted on the primary key alone; see `app/db/paging.py`.
+        rows = await newest_rows(
+            db,
+            JobRow,
+            where=(JobRow.type == "bulk", JobRow.parent_job_id.is_(None)),
+            order_by=(JobRow.created_at.desc(),),
+            limit=limit,
         )
         ids = [row.id for row in rows]
         # How far each batch got, counted from its own item rows rather than from a counter

@@ -125,6 +125,14 @@ frontend/src/
   `database` by default; `both` mirrors a copy to `RBA_REPORTS_DIR`. Bulk archives and
   evidence bundles are built in memory and streamed. A schema change needs an Alembic
   revision in `backend/alembic/versions/`.
+- **A listing sorts keys, never rows.** MySQL's filesort packs every selected column into
+  `sort_buffer_size`, and a `jobs` row carries two JSON columns and five TEXT ones, so
+  `select(Model).order_by(...)` over a table with history fails with error 1038, "Out of sort
+  memory" — for everyone, at once. `app/db/paging.py::newest_rows` sorts a projection of the
+  primary key and then fetches those rows by key, and every newest-first listing goes through
+  it. A column a listing orders by carries an index: `jobs.created_at`, `batches.created_at`,
+  and `(job_id, ts)` on the sample tables, which `(job_id, variant, ts)` cannot serve because
+  it orders by rung first.
 - Every rule needs a positive and a negative test driven by the fault-injecting fixture
   server in `tests/fixtures/`.
 - **The analyzer never fails silently.** A handler that raises is logged with its traceback

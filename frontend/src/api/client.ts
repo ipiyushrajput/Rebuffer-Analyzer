@@ -259,7 +259,9 @@ export const endpoints = {
     }>(`/realtime/sessions/${id}/snapshots?variant=${encodeURIComponent(variant)}${at ? `&at=${encodeURIComponent(at)}` : ''}`),
 
   createAging: (body: unknown) => api.post<JobSummary>('/aging/jobs', body),
-  listAging: () => api.get<{ jobs: JobSummary[] }>('/aging/jobs'),
+  /** `stored_error` is set when the jobs from before this process started could not be read. */
+  listAging: () =>
+    api.get<{ jobs: JobSummary[]; stored_error?: string | null }>('/aging/jobs'),
   readAging: (id: string) => api.get<JobSummary>(`/aging/jobs/${id}`),
   cancelAging: (id: string) => api.del<JobSummary>(`/aging/jobs/${id}`),
 
