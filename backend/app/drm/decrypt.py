@@ -1,38 +1,35 @@
 """Turning an encrypted segment back into one the bitstream rules can read.
 
-A CENC-protected fMP4 segment carries clear headers and encrypted sample payloads. The timing
+A CENC-protected CMAF segment carries clear headers and encrypted sample payloads. The timing
 checks read `tfdt` and `trun` and work on it untouched; the bitstream checks — decode errors,
 SPS consistency, ADTS configuration, keyframe detection — read the payload and cannot.
 
-Decryption needs two things the segment alone does not have: the content key, which
-`app/drm/cpix.py` obtains, and the `moov` box from the initialisation segment, which carries
-the track and protection headers. A media segment on its own has neither, which is why the
-initialisation segment is prepended before the decrypt runs — the same thing a player does.
+Decryption needs two things the media segment alone does not have: the content key, which
+`app/drm/cpix.py` obtains from KeyOS, and the `tenc` box from the initialisation segment,
+which declares the key identifier, the initialisation-vector size and the scheme.
 
-**The tool is ffmpeg**, which the analyzer already depends on and already reports the absence
-of. `-decryption_key` decrypts CENC in place and `-c copy` writes the result without
-re-encoding, so what the rules then read is the packager's own bitstream, not a transcode of
-it. A host without ffmpeg loses DRM analysis the same way it loses the decode-error detector,
-and says so rather than reporting a protected channel as clean.
+**The decrypt is done in this process**, by `app/drm/cenc.py`, rather than by shelling out to
+ffmpeg or mp4decrypt. The analyzer already holds the segment in memory and hands it straight
+to the parsers; a subprocess per segment would put a temporary file and a process launch
+inside the measurement loop of a run that fetches a segment every few seconds on every
+rendition, for days. It also removes a second thing for a host to have installed: a deployment
+with ffmpeg missing loses the decode-error detector, and would otherwise lose every DRM
+channel with it.
+
+What comes back is the packager's own bitstream — only the encrypted byte ranges are
+rewritten, and every box, sample header and NAL length prefix is copied through — so the
+parsers downstream read exactly what a player would decode.
 """
 
 from __future__ import annotations
 
 import logging
-import shutil
 import time
 from dataclasses import dataclass
 
-from app.media.ffprobe import FFMPEG, FfprobeUnavailable, _run
+from app.drm.cenc import CBCS, CencError, TrackEncryption, decrypt_fragment
 
 logger = logging.getLogger(__name__)
-
-# A segment that decrypts to far less than it started as did not decrypt: a wrong key turns
-# the payload into noise the demuxer discards, and the output shrinks. The threshold is
-# deliberately loose — the encrypted form carries protection boxes the clear one drops.
-MIN_SIZE_RATIO = 0.70
-
-DECRYPT_TIMEOUT_S = 45.0
 
 
 class DecryptError(Exception):
@@ -55,77 +52,79 @@ class DecryptResult:
 
 
 def available() -> bool:
-    """Whether this host can decrypt at all."""
-    return bool(shutil.which(FFMPEG))
+    """Whether this host can decrypt at all.
+
+    The cipher is a library rather than a binary, so this is true wherever the backend's own
+    dependencies installed. It stays a function because the caller reports the answer, and a
+    broken install has to read as "no decryption" rather than as a clean channel.
+    """
+    try:
+        import Crypto.Cipher.AES  # noqa: F401
+    except Exception:
+        return False
+    return True
 
 
-async def decrypt_segment(
+def decrypt_segment(
     data: bytes,
     *,
     key_hex: str,
-    init_segment: bytes = b"",
-    timeout: float = DECRYPT_TIMEOUT_S,
+    track: TrackEncryption | None = None,
 ) -> DecryptResult:
-    """One encrypted fMP4 segment, decrypted with its content key.
-
-    The initialisation segment is prepended so the decrypt has the `moov` box it needs; a
-    media segment carries only `moof` and `mdat` and is not a readable file on its own.
+    """One encrypted CMAF fragment, decrypted with its content key.
 
     Failure is reported, never raised into the analysis loop: a segment that will not decrypt
     is one the bitstream rules skip, and the run carries on measuring everything else.
     """
     if not key_hex:
         return DecryptResult(reason="No content key was obtained for this rendition.")
-    if not available():
-        raise FfprobeUnavailable("ffmpeg is not installed on the analyzer host")
     if not data:
         return DecryptResult(reason="The segment body is empty.")
-
-    payload = init_segment + data
-    argv = [
-        FFMPEG,
-        "-v",
-        "error",
-        "-hide_banner",
-        "-decryption_key",
-        key_hex,
-        "-i",
-        "pipe:0",
-        "-c",
-        "copy",
-        # Fragmented output, so a segment that arrived as a fragment leaves as one and the
-        # demuxer downstream sees the shape it expects.
-        "-movflags",
-        "frag_keyframe+empty_moov+default_base_moof",
-        "-f",
-        "mp4",
-        "pipe:1",
-    ]
-
-    started = time.perf_counter()
-    code, out, err = await _run(argv, timeout=timeout, stdin=payload)
-    elapsed = (time.perf_counter() - started) * 1000
-
-    if code != 0:
-        detail = err.decode("utf-8", errors="replace").strip().splitlines()
-        return DecryptResult(
-            reason=f"ffmpeg could not decrypt the segment: {detail[-1] if detail else 'no output'}",
-            duration_ms=elapsed,
-        )
-    if not out:
-        return DecryptResult(reason="The decrypt produced no output.", duration_ms=elapsed)
-
-    ratio = len(out) / max(len(payload), 1)
-    if ratio < MIN_SIZE_RATIO:
-        # The usual cause is the wrong key: the payload decrypts to noise, the demuxer drops
-        # what it cannot read, and the output is a fraction of the input. Reporting that is
-        # better than handing the rules a segment that will read as corruption.
+    if not available():
         return DecryptResult(
             reason=(
-                f"The decrypted segment is {ratio * 100:.0f}% of the size of the encrypted one, "
-                f"below the {MIN_SIZE_RATIO * 100:.0f}% a sound decrypt produces."
+                "The AES implementation this analyzer decrypts with is not installed on this "
+                "host, so protected segments are not being read."
+            )
+        )
+    if track is not None and track.scheme == CBCS:
+        return DecryptResult(
+            reason=(
+                f"The track is encrypted with the cbcs scheme "
+                f"({track.crypt_byte_block}:{track.skip_byte_block} pattern), which this "
+                "analyzer does not decrypt. Only cenc (AES-CTR) is decrypted."
+            )
+        )
+
+    try:
+        key = bytes.fromhex(key_hex)
+    except ValueError:
+        return DecryptResult(reason="The content key obtained for this rendition is not hex.")
+
+    started = time.perf_counter()
+    try:
+        plain = decrypt_fragment(data, key=key, iv_size=track.iv_size if track else 8)
+    except CencError as exc:
+        return DecryptResult(reason=str(exc), duration_ms=(time.perf_counter() - started) * 1000)
+    except Exception as exc:
+        logger.exception("a protected segment of %s bytes did not decrypt", len(data))
+        return DecryptResult(
+            reason=f"The segment did not decrypt: {type(exc).__name__}.",
+            duration_ms=(time.perf_counter() - started) * 1000,
+        )
+    elapsed = (time.perf_counter() - started) * 1000
+
+    if len(plain) != len(data):
+        # CENC decryption is length-preserving by construction. A different length means the
+        # box walk and the sample map disagreed, and the result is not the packager's
+        # bitstream.
+        return DecryptResult(
+            reason=(
+                f"The decrypted segment is {len(plain)} bytes where the encrypted one was "
+                f"{len(data)}; CENC decryption does not change a segment's length."
             ),
             duration_ms=elapsed,
         )
-
-    return DecryptResult(data=out, ok=True, duration_ms=elapsed)
+    # A fragment that comes back byte for byte identical carried no `senc`, so there was
+    # nothing in it to decrypt and its bytes are already the ones a decoder reads.
+    return DecryptResult(data=plain, ok=True, duration_ms=elapsed)

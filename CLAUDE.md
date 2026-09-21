@@ -64,11 +64,13 @@ python -m app.cli rules --markdown            # rule catalogue
 ```
 backend/app/
   api/        REST routers (realtime, catalogue, channels, aging, bulk, batch, reports,
-              proxy, settings, health)
+              proxy, drm, settings, health)
   ws/         WebSocket hub + typed message schemas
   jobs/       job manager, persistence, resume-on-restart
   net/        fetcher (manual redirects + timing split), dns, tls_inspect
   hls/        m3u8 master/media models, URI resolution, SCTE-35
+  drm/        detect (system + KID), cpix (KeyOS key exchange), cenc (in-process CENC
+              decryption), decrypt, context (per-run state), settings
   media/      ts, fmp4, h264_sps, hevc_sps, adts, ffprobe
   analysis/   collectors/, rules/, vpb.py, correlate.py, attribution.py, verdict.py
   reports/    Jinja2 templates + HTML/PDF renderers + escalation blocks
@@ -190,6 +192,27 @@ frontend/src/
   restart on a Sunday evening must not miss Monday. A skipped firing records its reason, since
   a schedule that skips silently is indistinguishable from one that is broken. Aging follows a
   scheduled batch only; a manual batch starts none.
+- **A protected channel is analysed like a clear one, and nothing about DRM is per channel.**
+  The playback URL goes into Realtime, Aging, Bulk or a batch exactly as a clear one does;
+  the backend detects the protection, obtains the key and decrypts. The key identifier comes
+  from the track's own `tenc` box first, because a ladder encrypts video and audio under
+  different keys — the playlist's `KEYID`, the `pssh` box (including the one inlined in an
+  `EXT-X-SESSION-KEY` data URI) and the master's declaration are the fallbacks. One
+  `DrmContext` per run, shared by every layer and rung, so `KeyStore` asks KeyOS once per key
+  identifier however many segments want it. The decrypt is `app/drm/cenc.py`, in process:
+  CENC is length-preserving and only the encrypted subsample ranges are rewritten, so what
+  reaches `media.analyse()` is the packager's own bitstream and every existing rule runs
+  unchanged. Only `cenc` (AES-CTR) is decrypted; `cbcs` is a different cipher and is named,
+  never attempted. A rendition whose payload was not read says which of the reasons applied,
+  through `INFO-001` and the report's protection table — a protected channel must never read
+  as one that passed every bitstream check.
+- **DRM credentials are a location, never key material.** `cpix_client_cert`,
+  `cpix_client_key` and `cpix_server_cert` are a path on the analyzer host or an HTTPS URL,
+  configured once in Settings → DRM or in `backend/.env`; `.env.example` carries the names
+  with empty values. Nothing logs a key, a private key or a decrypted content key, and the
+  settings endpoint reports each credential as set or not set, never its value. The licence
+  server is reached only by `POST /api/drm/license`: a browser has no route to it and it
+  sends no CORS headers, so the page is configured with this application's own relay path.
 - The channel catalogue is fetched by the backend, never the browser: it sends no CORS
   headers, and the country/environment to `dbconnect` mapping belongs in one place,
   `app/tvplus/catalogue.py`. The tab reads the country list from `/api/catalogue/countries`

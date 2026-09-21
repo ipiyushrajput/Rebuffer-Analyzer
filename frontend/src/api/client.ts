@@ -80,10 +80,41 @@ export interface JobSummary {
   parent_job_id: string | null
 }
 
+/**
+ * What the player needs for one channel, worked out by the backend.
+ *
+ * `license_path` is this application's own relay, never the licence server: the browser has
+ * no route to that server and it sends no CORS headers. A clear channel comes back with empty
+ * strings and the player is configured exactly as it was before DRM existed.
+ */
+export interface PlayerDrm {
+  protected: boolean
+  system: string
+  system_label: string
+  key_system: string
+  license_path: string
+  configured: boolean
+}
+
 export interface RealtimeSession extends JobSummary {
   ws_url: string
   player_url: string
+  player_drm: PlayerDrm
   player_metrics_note: string
+}
+
+/** The deployment's DRM configuration. Credentials are reported as set or not set, never read back. */
+export interface DrmSettings {
+  enabled: boolean
+  license_url: string
+  cpix_content_id: string
+  keys_configured: boolean
+  playback_configured: boolean
+  configured: boolean
+  endpoint: string
+  client_cert_set: boolean
+  client_key_set: boolean
+  server_cert_set: boolean
 }
 
 /** One report file stored against an analysed channel. */
@@ -241,6 +272,13 @@ export const endpoints = {
   health: () => api.get<Record<string, unknown>>('/health'),
 
   createRealtime: (body: unknown) => api.post<RealtimeSession>('/realtime/sessions', body),
+
+  drmSettings: () => api.get<{ drm: DrmSettings; endpoint_default: string }>('/drm/settings'),
+  saveDrmSettings: (body: unknown) => api.put<{ drm: DrmSettings }>('/drm/settings', body),
+  drmProbe: (url: string) =>
+    api.get<Record<string, unknown> & { player: PlayerDrm }>(
+      `/drm/probe?url=${encodeURIComponent(url)}`,
+    ),
   stopRealtime: (id: string) => api.del<JobSummary>(`/realtime/sessions/${id}`),
   realtimeResult: (id: string) => api.get<Record<string, unknown>>(`/realtime/sessions/${id}/result`),
   realtimeManifests: (id: string) =>

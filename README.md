@@ -65,6 +65,18 @@ Every finding states the measurement, the root cause, the responsible party and 
   reads as a gap of exactly that length. `INFO-005` states each boundary that could not be
   checked and how many segments were skipped, so a polling gap is reported as itself rather
   than as a defect in the stream.
+- **A protected channel is analysed like a clear one.** A Widevine playback URL goes into
+  Realtime, Aging, Bulk or an automated batch exactly as a clear one does, and nothing about
+  DRM is asked per channel. The backend reads what the ladder declares, takes the key
+  identifier from each track's own `tenc` box, obtains the content key from the KeyOS key
+  server over CPIX, and decrypts the CENC sample payloads in process before the bitstream
+  rules read them — so the decode-error, SPS-consistency, ADTS and keyframe checks run on the
+  packager's own bitstream. The player gets its licence through `POST /api/drm/license`,
+  which relays the challenge from this host, because a browser has no route to the licence
+  server and it sends no CORS headers. A rendition whose key could not be obtained is
+  reported as one through `INFO-001` and in the report's protection table, with the reason —
+  never analysed as though the bitstream checks had passed. The deployment is configured once
+  in **Settings → DRM**; see [DRM](#drm).
 - **Virtual Player Buffer.** Plus Player's own buffering configuration modelled against the
   delivery timings actually measured, so Aging and Bulk produce a rebuffering ratio with no
   player attached, and Realtime shows the model next to the real hls.js buffer. The profile
@@ -448,6 +460,30 @@ while a batch is running.
 The batch configuration and the weekly firings are edited in **Settings → Automated batches**.
 They save through their own endpoints rather than the threshold save bar, because a schedule
 is a row a running loop reads every minute and a half-edited one would fire.
+
+### DRM
+
+Protected channels need no per-channel input. What a deployment configures, once, is in
+**Settings → DRM**:
+
+| Setting | What it is |
+|---|---|
+| Widevine licence URL | The licence server the player acquires its licence from. The browser never reaches it; `POST /api/drm/license` relays the challenge from this host. |
+| CPIX endpoint | The key server content keys are requested from. Empty uses the KeyOS v4 endpoint. |
+| Client certificate | A path on the analyzer host, or an HTTPS URL. The CPIX request is signed with it and the keys come back encrypted to it. |
+| Client private key | A path on the analyzer host, or an HTTPS URL. |
+| Key server certificate | The key server's own certificate. A response signed with a different key is reported. |
+| Content identifier | What a CPIX document names the content as. One value for the deployment. |
+
+The same values can be set in `backend/.env` (`DRM_LICENSE_URL`, `CPIX_*`) to pin them to the
+host. **The three CPIX values are a location, never key material**: no certificate, private
+key or content key belongs in `.env.example`, in git, or in a log. Keep the private key
+behind authentication — whoever can read it can read every content key the deployment
+obtains. What the settings endpoint returns is whether each one is set, never what it is.
+
+`cenc` (AES-CTR, `SAMPLE-AES-CTR`) is decrypted. `cbcs` is a different cipher and is named
+rather than attempted: a rendition using it is reported as unread with its scheme stated.
+A ladder that leaves one rendition in the clear is analysed without a key for that rung.
 
 ### Bulk input
 

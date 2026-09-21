@@ -112,7 +112,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
     setBusy(true)
     try {
       const session = await endpoints.createRealtime(toPayload(form))
-      store.start(session.id, session.channel_name, session.player_url)
+      store.start(session.id, session.channel_name, session.player_url, session.player_drm)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -447,7 +447,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
 
           <div className="grid gap-4 2xl:grid-cols-[minmax(360px,420px)_1fr]">
             <div className="space-y-4">
-              <Player src={store.playerUrl} onEvent={sendPlayerEvent} />
+              <Player src={store.playerUrl} onEvent={sendPlayerEvent} drm={store.playerDrm} />
 
               <Card>
                 <CardHeader

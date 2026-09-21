@@ -6,6 +6,7 @@
  */
 
 import { create } from 'zustand'
+import type { PlayerDrm } from '../api/client'
 import type {
   EventData,
   FindingData,
@@ -53,6 +54,8 @@ export interface SessionState {
   status: string
   channelName: string
   playerUrl: string | null
+  /** What the player needs for this channel, from the start response. Null for a clear one. */
+  playerDrm: PlayerDrm | null
   startedAt: number | null
   elapsed: number
   progress: number
@@ -71,7 +74,7 @@ export interface SessionState {
 
   connected: boolean
 
-  start: (id: string, channelName: string, playerUrl: string) => void
+  start: (id: string, channelName: string, playerUrl: string, playerDrm?: PlayerDrm | null) => void
   ingest: (message: ServerMessage) => void
   setConnected: (value: boolean) => void
   pushPlayerSample: (sample: PlayerSample) => void
@@ -85,6 +88,7 @@ const initial = {
   status: 'IDLE',
   channelName: '',
   playerUrl: null,
+  playerDrm: null,
   startedAt: null,
   elapsed: 0,
   progress: 0,
@@ -111,8 +115,16 @@ function trim<T>(items: T[], limit = SERIES_LIMIT): T[] {
 export const useSessionStore = create<SessionState>((set, get) => ({
   ...initial,
 
-  start: (id, channelName, playerUrl) =>
-    set({ ...initial, sessionId: id, channelName, playerUrl, status: 'RESOLVING', startedAt: Date.now() }),
+  start: (id, channelName, playerUrl, playerDrm = null) =>
+    set({
+      ...initial,
+      sessionId: id,
+      channelName,
+      playerUrl,
+      playerDrm,
+      status: 'RESOLVING',
+      startedAt: Date.now(),
+    }),
 
   setConnected: (value) => set({ connected: value }),
 

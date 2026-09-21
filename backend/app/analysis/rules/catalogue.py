@@ -2212,9 +2212,11 @@ SKIP_ENCRYPTED = _r(
     I,
     Owner.CONTENT_PROVIDER,
     "Bitstream checks did not run on encrypted segments",
-    "The segments are encrypted and no matching key was supplied, so the video, audio and A/V "
-    "rules had no readable payload to measure.",
-    "Supply clear KID and KEY pairs in the job options to include the bitstream checks.",
+    "The segments are encrypted and no key that decrypts them was obtained, so the video, "
+    "audio and A/V rules had no readable payload to measure. The finding states which of the "
+    "reasons applied.",
+    "Configure the CPIX credentials in Settings → DRM so the analyzer obtains the content key "
+    "itself, or supply clear KID and KEY pairs in the job options.",
     NONE,
 )
 SKIP_FFPROBE = _r(

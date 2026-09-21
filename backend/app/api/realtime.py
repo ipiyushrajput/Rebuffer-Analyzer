@@ -7,12 +7,16 @@ far, without stopping the session.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.api.drm import PROBE_TIMEOUT_S, player_config, read_protection
 from app.api.proxy import proxied
 from app.api.schemas import RealtimeSessionIn
+from app.drm import settings as drm_settings
+from app.drm.detect import DrmInfo
 from app.jobs.manager import job_manager
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
@@ -38,8 +42,27 @@ async def create_session(payload: RealtimeSessionIn) -> dict[str, Any]:
         # The player loads through the proxy: a browser cannot disable TLS verification and
         # CDN responses often carry no CORS headers.
         "player_url": proxied(payload.playback_url) + f"&session={handle.id}",
+        # What the player needs to play this particular channel, worked out here rather than
+        # asked of the analyst: a protected channel and a clear one are started the same way,
+        # and the page configures itself from this.
+        "player_drm": player_config(
+            await _protection(payload.playback_url), await drm_settings.load()
+        ),
         "player_metrics_note": "Player metrics are measured from the analyzer host.",
     }
+
+
+async def _protection(url: str) -> DrmInfo:
+    """What the playback URL is protected with, bounded so a session start cannot wait on it.
+
+    The answer only configures the player. A URL that does not answer inside the budget comes
+    back as unknown, the player is left as it is for a clear channel, and the page can ask
+    `GET /api/drm/probe` for a full answer without holding up the run.
+    """
+    try:
+        return await asyncio.wait_for(read_protection(url), timeout=PROBE_TIMEOUT_S * 2)
+    except TimeoutError:
+        return DrmInfo(reason="The playback URL did not answer inside the probe budget.")
 
 
 @router.get("/sessions")

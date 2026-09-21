@@ -25,6 +25,7 @@ from app.db.models import Finding as FindingRow
 from app.db.models import Incident as IncidentRow
 from app.db.models import Job as JobRow
 from app.db.models import PlaylistSample, PlaylistSnapshot, SegmentSample, VirtualBufferSample
+from app.drm import settings as drm_settings
 from app.jobs.samples import SampleRecorder
 
 logger = logging.getLogger(__name__)
@@ -246,6 +247,11 @@ class JobManager:
                 channel_name=handle.channel_name,
                 options=handle.options,
                 thresholds=get_thresholds(),
+                # Captured at start, like the thresholds: a Settings edit changes the next
+                # job, never the one in flight, and the report states what it used. Every
+                # job type goes through here, so realtime, aging, bulk and batch all get the
+                # same DRM configuration without any of them asking for it.
+                drm=await drm_settings.load(),
                 on_event=on_event,
             )
             handle.session = session
@@ -298,6 +304,10 @@ class JobManager:
         handle = self.jobs.get(job_id)
         if handle is None:
             return None
+        # Recorded first, and unconditionally. A cancel that arrives while the job is still
+        # being built reaches a handle with no session yet, and stopping only the session
+        # would do nothing at all: `_run` reads this flag the moment the session exists.
+        handle.stop_requested = True
         if handle.session is not None:
             handle.session.stop()
         if handle.task is not None and not handle.task.done():

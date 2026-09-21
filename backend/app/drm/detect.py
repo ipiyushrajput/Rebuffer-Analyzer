@@ -16,6 +16,7 @@ the attribute first because it costs nothing.
 
 from __future__ import annotations
 
+import base64
 import struct
 from dataclasses import dataclass, field
 from enum import Enum
@@ -139,7 +140,7 @@ def describe_keys(keys: list[dict[str, str]]) -> DrmInfo:
         formats.append(key_format.strip('"') or "identity")
         found.append(key_system(key_format))
         if not kid:
-            kid = normalise_kid(attrs.get("KEYID", ""))
+            kid = normalise_kid(attrs.get("KEYID", "")) or _kid_from_uri(attrs.get("URI", ""))
 
     if not found:
         return DrmInfo()
@@ -153,6 +154,25 @@ def describe_keys(keys: list[dict[str, str]]) -> DrmInfo:
         key_formats=tuple(dict.fromkeys(formats)),
         methods=tuple(dict.fromkeys(methods)),
     )
+
+
+def _kid_from_uri(uri: str) -> str:
+    """The key identifier inside a key tag's `data:` URI.
+
+    A Widevine `EXT-X-SESSION-KEY` carries its `pssh` box inline, base64 in a data URI, rather
+    than pointing at a licence server. Reading it means the identifier is known from the master
+    playlist alone — before an initialisation segment has been fetched, and on a rendition
+    whose init segment carries no `pssh` of its own.
+    """
+    value = (uri or "").strip().strip('"')
+    head, separator, payload = value.partition(",")
+    if not separator or not head.lower().startswith("data:") or "base64" not in head.lower():
+        return ""
+    try:
+        raw = base64.b64decode(payload)
+    except Exception:
+        return ""
+    return extract_kid(raw)
 
 
 def normalise_kid(raw: str) -> str:

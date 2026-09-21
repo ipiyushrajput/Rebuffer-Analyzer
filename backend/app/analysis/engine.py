@@ -38,6 +38,9 @@ from app.analysis.rules.base import Finding, FindingCollector, Severity, StreamL
 from app.analysis.verdict import Verdict
 from app.analysis.verdict import build as build_verdict
 from app.config import Thresholds, get_settings, get_thresholds
+from app.drm.context import DrmContext
+from app.drm.detect import DrmInfo, describe_keys
+from app.drm.settings import DrmSettings
 from app.hls import scte35
 from app.hls.playlist import MasterPlaylist, MediaPlaylist, is_master, parse_master, parse_media
 from app.hls.uri import host_of
@@ -185,6 +188,10 @@ class AnalysisResult:
     redirect_chains: list[dict[str, Any]] = field(default_factory=list)
     event_log: list[dict[str, Any]] = field(default_factory=list)
     owner_summary: dict[str, int] = field(default_factory=dict)
+    # What the run's protection amounted to, per rendition. Empty for a clear channel. Never
+    # key material: what the system was, which identifier, whether a key was obtained, and
+    # how many segments were decrypted.
+    drm: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -202,6 +209,7 @@ class AnalysisResult:
             "redirect_chains": self.redirect_chains,
             "event_log": self.event_log[-500:],
             "owner_summary": self.owner_summary,
+            "drm": self.drm,
         }
 
 
@@ -219,6 +227,7 @@ class AnalysisSession:
         channel_name: str | None = None,
         options: SessionOptions | None = None,
         thresholds: Thresholds | None = None,
+        drm: DrmSettings | None = None,
         on_event: EventHandler | None = None,
     ) -> None:
         self.session_id = session_id
@@ -233,6 +242,12 @@ class AnalysisSession:
         # Thresholds are captured at start so a report always names the values its findings
         # were measured against, even if Settings changes mid-job.
         self.thresholds = thresholds or get_thresholds()
+        # Captured at start for the same reason the thresholds are: a report states the
+        # configuration its findings were produced under.
+        self.drm_settings = drm or DrmSettings()
+        # Built the moment a playlist declares protection, and shared by every layer and
+        # every rendition so one key request serves the whole run.
+        self.drm: DrmContext | None = None
         self.on_event = on_event
 
         self.collector = FindingCollector()
@@ -437,17 +452,25 @@ class AnalysisSession:
             context.targets["media"] = PollTarget(variant="media", url=context.url, kind="video")
             context.target_duration_by_variant["media"] = media.target_duration or 6.0
             context.bandwidth_by_variant["media"] = None
+            context.encrypted = media.is_encrypted
             context.samplers["media"] = SegmentSampler(
                 RungSampling(variant="media", full=True),
                 self._fetcher,
                 encrypted=media.is_encrypted,
+                drm=self._ensure_drm(describe_keys(media.keys), context)
+                if media.is_encrypted
+                else None,
             )
-            context.encrypted = media.is_encrypted
             return
 
         master = parse_master(text, result.final_url)
         context.master = master
         context.encrypted = master.is_encrypted
+        drm = (
+            self._ensure_drm(describe_keys(master.session_keys), context)
+            if master.is_encrypted
+            else None
+        )
         await self._record(
             master_rules.check_master(master, layer=layer, thresholds=self.thresholds)
         )
@@ -508,6 +531,7 @@ class AnalysisSession:
                 ),
                 self._fetcher,
                 encrypted=context.encrypted,
+                drm=drm,
             )
 
         for rendition in master.renditions:
@@ -525,7 +549,30 @@ class AnalysisSession:
                 RungSampling(variant=rendition.variant_id, full=kind == "audio", nth=nth),
                 self._fetcher,
                 encrypted=context.encrypted,
+                drm=drm,
             )
+
+    def _ensure_drm(self, declared: DrmInfo, context: LayerContext) -> DrmContext | None:
+        """The run's DRM context, built the first time a playlist declares protection.
+
+        One context per run, not per layer: the playback, CDN, origin and SSAI URLs carry the
+        same content under the same keys, so a key requested for one serves all four and the
+        key server is asked once.
+        """
+        if not self.drm_settings.enabled:
+            return None
+        if self.drm is None:
+            self.drm = DrmContext(
+                declared=declared,
+                credentials=self.drm_settings.credentials,
+                content_id=self.drm_settings.cpix_content_id,
+                fetcher=self._fetcher,
+            )
+        elif not self.drm.declared.kid and declared.kid:
+            # A later playlist named the key identifier the first one left out.
+            self.drm.declared.kid = declared.kid
+        context.encrypted = True
+        return self.drm
 
     def _select_variants(self, master: MasterPlaylist) -> list[Any]:
         if not self.options.renditions:
@@ -756,6 +803,15 @@ class AnalysisSession:
             )
             return
 
+        # A ladder can declare its protection in the media playlists rather than on the
+        # master, so a rendition that turns out to be protected is marked here — before its
+        # initialisation segment is fetched, which is where the key is obtained.
+        if playlist.is_encrypted and not sampler.encrypted:
+            sampler.encrypted = True
+            context.encrypted = True
+            self._ensure_drm(describe_keys(playlist.keys), context)
+            sampler.drm = self.drm
+
         if playlist.map_uri:
             init_result = await sampler.ensure_init(playlist.map_uri)
             if init_result is not None and not init_result.ok:
@@ -940,7 +996,11 @@ class AnalysisSession:
                 )
             )
 
-        if self.options.enabled("video_quality") and ffprobe.binaries().available:
+        if (
+            self.options.enabled("video_quality")
+            and ffprobe.binaries().available
+            and not sample.analysis.encrypted
+        ):
             await self._run_quality_detectors(sample, variant=variant, layer=layer)
 
         await self._emit("segment_result", {"layer": layer.value, "data": sample.as_dict()})
@@ -948,8 +1008,12 @@ class AnalysisSession:
     async def _run_quality_detectors(
         self, sample: SampledSegment, *, variant: str, layer: StreamLayer
     ) -> None:
+        # The decrypted payload where the segment was protected, and the segment itself
+        # otherwise. Handing a decoder an encrypted payload produces decode errors that are
+        # the protection, not the channel.
+        body = sample.decodable_body
         try:
-            errors = await ffprobe.decode_errors(sample.result.body)
+            errors = await ffprobe.decode_errors(body)
         except (TimeoutError, ffprobe.FfprobeUnavailable):
             return
         if errors:
@@ -964,7 +1028,7 @@ class AnalysisSession:
                 )
             )
         try:
-            detections = await ffprobe.detect_black_and_freeze(sample.result.body)
+            detections = await ffprobe.detect_black_and_freeze(body)
         except (TimeoutError, ffprobe.FfprobeUnavailable):
             return
         if detections["black"]:
@@ -1227,6 +1291,7 @@ class AnalysisSession:
             redirect_chains=self.redirect_chains,
             event_log=self.event_log,
             owner_summary=attribution.owner_summary(findings),
+            drm=self.drm.summary() if self.drm is not None else {},
         )
 
     def _player_ratio_finding(self) -> Finding | None:

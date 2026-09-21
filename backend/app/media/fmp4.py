@@ -179,9 +179,18 @@ def _parse_stsd(payload: bytes, track: Fmp4Track) -> None:
     if len(payload) < 8:
         return
     for entry in iter_boxes(payload, start=8):
-        track.codec = entry.name
         body = entry.payload
-        if entry.type in (b"avc1", b"avc3", b"hvc1", b"hev1", b"dvh1", b"dvhe") and len(body) >= 78:
+        entry_type = entry.type
+        if entry_type in (b"encv", b"enca"):
+            # A protected track's sample entry is renamed `encv`/`enca` and the format it
+            # stands in for is declared by the `frma` box inside its `sinf`. Everything else —
+            # the visual or audio header, `avcC`, `hvcC`, `esds` — is where it always was, so
+            # reading the original format is all it takes to parse a protected init segment
+            # exactly as a clear one. Without this a DRM channel reports no codec, no
+            # resolution and no SPS, and the configuration rules have nothing to compare.
+            entry_type = _original_format(body) or entry_type
+        track.codec = entry_type.decode("latin-1", errors="replace")
+        if entry_type in (b"avc1", b"avc3", b"hvc1", b"hev1", b"dvh1", b"dvhe") and len(body) >= 78:
             track.width = struct.unpack_from(">H", body, 24)[0]
             track.height = struct.unpack_from(">H", body, 26)[0]
             for config in iter_boxes(body, start=78):
@@ -193,10 +202,23 @@ def _parse_stsd(payload: bytes, track: Fmp4Track) -> None:
                     raw = _sps_from_hvcc(config.payload)
                     parsed_hevc = hevc_sps.parse_sps(raw) if raw else None
                     track.sps = parsed_hevc.as_dict() if parsed_hevc else None
-        elif entry.type in (b"mp4a", b"ac-3", b"ec-3", b"ac-4") and len(body) >= 28:
+        elif entry_type in (b"mp4a", b"ac-3", b"ec-3", b"ac-4") and len(body) >= 28:
             track.channels = struct.unpack_from(">H", body, 16)[0]
             track.sample_rate = struct.unpack_from(">I", body, 24)[0] >> 16
         break
+
+
+def _original_format(entry_body: bytes) -> bytes:
+    """The four-character format a protected sample entry stands in for.
+
+    `sinf/frma` names it. Locating the box by name is what every demuxer does here, because
+    the offset of `sinf` inside the sample entry depends on which other boxes the packager
+    wrote before it.
+    """
+    marker = entry_body.find(b"frma")
+    if marker < 0 or marker + 8 > len(entry_body):
+        return b""
+    return entry_body[marker + 4 : marker + 8]
 
 
 def _sps_from_avcc(payload: bytes) -> bytes | None:

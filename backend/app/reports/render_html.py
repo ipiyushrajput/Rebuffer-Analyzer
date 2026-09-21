@@ -289,6 +289,11 @@ def render_report(
         # this deployment, the same way the thresholds a finding was measured against are
         # stated. An unreassigned analyzer renders nothing here.
         "severity_overrides": _severity_overrides(),
+        # What the channel's protection amounted to, per rendition: which system, which key
+        # identifier, whether a key was obtained and how many segments were decrypted. A
+        # reader has to be able to tell a rendition that passed every bitstream check from
+        # one whose payload was never read. Empty for a clear channel, which renders nothing.
+        "drm": result.drm,
         "escalations": [block.as_dict() for block in escalations],
         "vpb_summary": [
             {

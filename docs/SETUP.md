@@ -291,6 +291,37 @@ defaults and only need setting when you want to change them.
 
 ---
 
+## Protected channels
+
+Nothing here is needed to analyse clear channels, and nothing here is asked of an analyst per
+channel. It is configured once, by whoever sets the deployment up, and after that a Widevine
+playback URL is pasted into Realtime, Aging, Bulk or an automated batch exactly like a clear
+one.
+
+Set it either in the **Settings → DRM** panel, which stores it in the settings table, or in
+`backend/.env` to pin it to this host:
+
+```
+RBA_DRM_ENABLED=true
+DRM_LICENSE_URL=            # the Widevine licence server the player acquires a licence from
+CPIX_ENDPOINT=              # empty uses the KeyOS v4 endpoint
+CPIX_CLIENT_CERT=           # a path on this host, or an HTTPS URL
+CPIX_CLIENT_KEY=            # a path on this host, or an HTTPS URL
+CPIX_SERVER_CERT=           # the key server's own certificate
+CPIX_CONTENT_ID=rba
+```
+
+**The three CPIX values are a location, never key material.** No certificate, private key or
+content key belongs in `backend/.env.example`, in git, or in a log. Keep the private key
+behind authentication: whoever can read it can read every content key this deployment
+obtains. The settings endpoint reports each one as set or not set, never its value.
+
+The host needs a route to the CPIX endpoint and to the licence server. Without one, a
+protected channel is still polled and measured for transport, timing and playlist defects,
+and its report states per rendition that the payload was not read and why.
+
+---
+
 ## With Docker
 
 The same on both platforms, and the shortest path if Docker Desktop is already installed:
