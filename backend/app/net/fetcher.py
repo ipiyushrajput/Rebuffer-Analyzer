@@ -285,10 +285,17 @@ class Fetcher:
         *,
         method: str = "GET",
         headers: dict[str, str] | None = None,
+        content: bytes | None = None,
         max_redirects: int = MAX_REDIRECTS,
         timeout_s: float | None = None,
     ) -> FetchResult:
-        """Fetch ``url``, following redirects manually and recording every hop."""
+        """Fetch ``url``, following redirects manually and recording every hop.
+
+        ``content`` carries a request body, which the CPIX key exchange needs. It goes
+        through here rather than through a client of its own so a key request is made with
+        the same TLS behaviour, the same manual redirect handling and the same timing record
+        as every other call the analyzer makes.
+        """
         requested = strip_component_suffix(url)
         current = requested
         merged = self.default_headers
@@ -306,6 +313,7 @@ class Fetcher:
                 method,
                 current,
                 headers=merged,
+                content=content,
                 extensions={
                     "trace": trace,
                     "timeout": {

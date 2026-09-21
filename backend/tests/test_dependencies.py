@@ -50,3 +50,14 @@ def test_the_async_mysql_driver_is_declared_alongside_it() -> None:
 def test_every_storage_dependency_is_declared(name: str) -> None:
     """A missing one of these fails at startup on a deployment and nowhere earlier."""
     assert requirement(name)
+
+
+@pytest.mark.parametrize("name", ["lxml", "signxml", "pycryptodome"])
+def test_every_cpix_dependency_is_declared(name: str) -> None:
+    """
+    The key exchange is the whole of DRM analysis, and it fails at import without these.
+
+    A host that installs from `pyproject.toml` and then cannot read a protected channel would
+    have no way to tell that a missing declaration, rather than the stream, was the cause.
+    """
+    assert requirement(name), f"{name} is declared"

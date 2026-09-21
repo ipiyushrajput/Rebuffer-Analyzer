@@ -28,6 +28,12 @@ dependencies = [
     "playwright>=1.49",
     "urllib3>=2.0",
     "aiosqlite>=0.20",
+    # The CPIX key exchange with the KeyOS server: an XML document signed with the analyzer's
+    # client certificate, whose content keys come back wrapped to it. `lxml` builds it,
+    # `signxml` signs and verifies it, `pycryptodome` unwraps the keys.
+    "lxml>=5.3",
+    "signxml>=4.0",
+    "pycryptodome>=3.21",
 ]
 
 [project.optional-dependencies]
