@@ -90,6 +90,7 @@ def _snapshot_result(handle: Any) -> Any:
         redirect_chains=session.redirect_chains,
         event_log=session.event_log,
         owner_summary=attribution.owner_summary(findings),
+        drm=session.drm.summary() if session.drm is not None else {},
     )
 
 

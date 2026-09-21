@@ -284,9 +284,9 @@ Every rule states the defect, the responsible owner, a single definite root-caus
 
 #### `INFO-001` — Bitstream checks did not run on encrypted segments
 
-**Root cause.** The segments are encrypted and no matching key was supplied, so the video, audio and A/V rules had no readable payload to measure.
+**Root cause.** The segments are encrypted and no key that decrypts them was obtained, so the video, audio and A/V rules had no readable payload to measure. The finding states which of the reasons applied.
 
-**Fix.** Supply clear KID and KEY pairs in the job options to include the bitstream checks.
+**Fix.** Configure the CPIX credentials in Settings → DRM so the analyzer obtains the content key itself, or supply clear KID and KEY pairs in the job options.
 
 #### `INFO-002` — ffprobe checks did not run
 

@@ -143,6 +143,38 @@ def _make_handler(fixture: FixtureServer) -> type[BaseHTTPRequestHandler]:
             body = route.body(query) if callable(route.body) else route.body
             self._respond(route.status, body, route.content_type, extra=route.headers)
 
+        def do_POST(self) -> None:
+            """A POST is served like a GET, with the request body recorded.
+
+            The CPIX key exchange and the Widevine licence relay both POST, and what a test
+            needs to assert is that the right bytes went out and the answer came back whole.
+            """
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length) if length else b""
+            parts = urlsplit(self.path)
+            fixture.request_log.append(
+                {
+                    "path": parts.path,
+                    "query": parts.query,
+                    "headers": dict(self.headers),
+                    "body": body,
+                    "method": "POST",
+                    "ts": time.time(),
+                }
+            )
+            route = fixture.get(parts.path)
+            if route is None:
+                self._respond(404, b"not found", "text/plain")
+                return
+            if route.delay_s:
+                time.sleep(route.delay_s)
+            payload = (
+                route.body(parse_qs(parts.query, keep_blank_values=True))
+                if callable(route.body)
+                else route.body
+            )
+            self._respond(route.status, payload, route.content_type, extra=route.headers)
+
         def _respond(
             self, status: int, body: bytes, content_type: str, extra: dict[str, str] | None = None
         ) -> None:

@@ -384,6 +384,39 @@
 {% endfor %}
 {% endif %}
 
+{% if drm and drm.protected %}
+<h3>Content protection</h3>
+<div class="card">
+<p class="small muted">
+  This channel is encrypted. The transport, playlist and timing checks read the segment
+  headers, which are in the clear; the video, audio and A/V checks read the payload, which is
+  not. A rendition below whose key was obtained was decrypted before those checks ran; one
+  whose key was not is reported as unread, with the reason.
+</p>
+<table>
+  <thead>
+    <tr><th>Rendition</th><th>System</th><th>Key identifier</th><th>Scheme</th>
+      <th>Payload read</th><th>Segments decrypted</th></tr>
+  </thead>
+  <tbody>
+  {% for rendition in drm.renditions %}
+    <tr>
+      <td class="small">{{ rendition.variant }}</td>
+      <td class="small">{{ rendition.system_label }}</td>
+      <td class="mono">{{ rendition.kid or '—' }}</td>
+      <td class="mono">{{ rendition.scheme or '—' }}</td>
+      <td class="small">{{ 'yes' if rendition.analysable else 'no — ' ~ rendition.reason }}</td>
+      <td class="mono">{{ rendition.segments_decrypted }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if drm.key_server_error %}
+<p class="small">The key server: {{ drm.key_server_error }}</p>
+{% endif %}
+</div>
+{% endif %}
+
 <h3>Thresholds used</h3>
 <div class="card">
 <table>

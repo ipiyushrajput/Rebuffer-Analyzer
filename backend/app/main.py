@@ -115,7 +115,18 @@ def create_app() -> FastAPI:
         expose_headers=["Content-Disposition"],
     )
 
-    from app.api import aging, batch, bulk, cascada, catalogue, channels, proxy, realtime, reports
+    from app.api import (
+        aging,
+        batch,
+        bulk,
+        cascada,
+        catalogue,
+        channels,
+        drm,
+        proxy,
+        realtime,
+        reports,
+    )
     from app.api import settings as settings_api
     from app.ws import routes as ws_routes
 
@@ -130,6 +141,7 @@ def create_app() -> FastAPI:
     app.include_router(batch.router, prefix="/api")
     app.include_router(reports.router, prefix="/api")
     app.include_router(proxy.router, prefix="/api")
+    app.include_router(drm.router, prefix="/api")
     app.include_router(ws_routes.router)
 
     return app

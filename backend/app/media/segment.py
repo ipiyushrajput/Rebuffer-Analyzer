@@ -80,6 +80,10 @@ class SegmentAnalysis:
     id3_timestamp: int | None = None
     scte35: list[dict[str, Any]] = field(default_factory=list)
     encrypted: bool = False
+    # Why a protected payload was not decrypted, where it was not. Stated by INFO-001 so a
+    # reader knows whether the key server refused, the scheme is one this analyzer does not
+    # decrypt, or nothing was configured.
+    drm_reason: str = ""
     parse_error: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -136,6 +140,7 @@ class SegmentAnalysis:
             "continuity_errors": self.continuity_errors,
             "id3_timestamp": self.id3_timestamp,
             "encrypted": self.encrypted,
+            "drm_reason": self.drm_reason,
             "parse_error": self.parse_error,
         }
 

@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { endpoints } from '../api/client'
 import { BatchSettingsPanel } from '../components/BatchSettingsPanel'
 import { CascadaSession } from '../components/CascadaSession'
+import { DrmSettingsPanel } from '../components/DrmSettingsPanel'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import {
   Card,
@@ -42,6 +43,7 @@ type GroupId =
   | 'incidents'
   | 'cascada'
   | 'batch'
+  | 'drm'
   | 'rules'
 
 const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
@@ -141,6 +143,7 @@ const TABS: { id: GroupId; label: string }[] = [
   { id: 'profile', label: 'Fetch profile' },
   ...GROUPS.map((group) => ({ id: group.id, label: group.title })),
   { id: 'batch', label: 'Automated batches' },
+  { id: 'drm', label: 'DRM' },
   { id: 'rules', label: 'Rule catalogue' },
 ]
 
@@ -365,6 +368,13 @@ export function SettingsTab() {
             <BatchSettingsPanel />
           </div>
 
+          {/* --- DRM -----------------------------------------------------------
+              Configured once per deployment, through its own endpoints, so the panel carries
+              its own save rather than the bar below. */}
+          <div className={tab === 'drm' ? 'p-4 pt-2' : 'panel-hidden'}>
+            <DrmSettingsPanel />
+          </div>
+
           {/* --- rule catalogue ------------------------------------------------ */}
           <div className={tab === 'rules' ? '' : 'panel-hidden'}>
             <RuleCatalogue />
@@ -379,12 +389,12 @@ export function SettingsTab() {
       </PageBody>
 
       {/* --- the save bar ----------------------------------------------------
-          Hidden on the batch tab: that panel saves through its own endpoints and carries its
-          own button, and a second Save on the same screen saves something else. */}
+          Hidden on the batch and DRM tabs: those panels save through their own endpoints and
+          carry their own button, and a second Save on the same screen saves something else. */}
       <div
         className={cx(
           'sticky bottom-0 z-20 border-t border-rail-border bg-rail px-6 py-3',
-          tab === 'batch' && 'hidden',
+          (tab === 'batch' || tab === 'drm') && 'hidden',
         )}
       >
         <div className="flex flex-wrap items-center gap-3">

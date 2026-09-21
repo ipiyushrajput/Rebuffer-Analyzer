@@ -8,6 +8,12 @@
  *
  * The overlay labels its numbers "measured from the analyzer host": they reflect this
  * machine's network path, not a TV's.
+ *
+ * A Widevine channel plays here too, and nothing about it is asked of the analyst. The
+ * backend says what the channel needs when the session starts, and this configures hls.js
+ * from that: EME on, and the licence acquired through `/api/drm/license`, which relays the
+ * challenge to the licence server the deployment is configured with. The browser never sees
+ * that server's address, and a licence server that sends no CORS headers still plays.
  */
 
 import Hls, { type ErrorData, Events, type FragLoadedData, type LevelSwitchedData } from 'hls.js'
@@ -15,11 +21,14 @@ import { useEffect, useRef, useState } from 'react'
 import { PLAYER_METRICS_NOTE } from '../lib/constants'
 import { kbps } from '../lib/format'
 import { useSessionStore } from '../store/session'
+import type { PlayerDrm } from '../api/client'
 import type { PlayerEventOut } from '../ws/messages'
 
 interface Props {
   src: string | null
   onEvent: (event: PlayerEventOut) => void
+  /** What the backend says this channel needs. Absent or unprotected means a clear channel. */
+  drm?: PlayerDrm | null
 }
 
 interface Overlay {
@@ -30,7 +39,7 @@ interface Overlay {
   stalls: number
 }
 
-export function Player({ src, onEvent }: Props) {
+export function Player({ src, onEvent, drm }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const hlsRef = useRef<Hls | null>(null)
   const stallStartRef = useRef<number | null>(null)
@@ -81,11 +90,26 @@ export function Player({ src, onEvent }: Props) {
       video.load()
     }
 
+    /*
+     * EME is switched on only for a channel that needs it. Turning it on for every stream
+     * makes a clear channel wait on a key session that never arrives, so a clear channel is
+     * configured exactly as it was before DRM existed.
+     */
+    const protectedStream = Boolean(drm?.key_system && drm?.license_path)
+
     if (Hls.isSupported()) {
       const hls = new Hls({
         lowLatencyMode: false,
         enableWorker: true,
         backBufferLength: 30,
+        emeEnabled: protectedStream,
+        ...(protectedStream
+          ? {
+              drmSystems: {
+                [drm!.key_system]: { licenseUrl: drm!.license_path },
+              },
+            }
+          : {}),
       })
       hlsRef.current = hls
       hls.attachMedia(video)
@@ -133,8 +157,14 @@ export function Player({ src, onEvent }: Props) {
           variant: currentVariant,
         })
       })
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    } else if (video.canPlayType('application/vnd.apple.mpegurl') && !protectedStream) {
       video.src = src
+    } else if (protectedStream) {
+      setError(
+        `This browser plays HLS natively rather than through hls.js, and a ${drm!.system_label} ` +
+          'stream needs hls.js to acquire its licence. The analysis is unaffected: it decrypts ' +
+          'the segments on the backend.',
+      )
     } else {
       setError('This browser cannot play HLS natively and hls.js reports no support.')
     }
@@ -193,7 +223,7 @@ export function Player({ src, onEvent }: Props) {
       video.removeEventListener('playing', onPlaying)
       cleanup()
     }
-  }, [src, onEvent, pushPlayerSample, openStall, closeStall])
+  }, [src, onEvent, pushPlayerSample, openStall, closeStall, drm])
 
   return (
     <div className="card overflow-hidden">
@@ -215,6 +245,13 @@ export function Player({ src, onEvent }: Props) {
       {error && (
         <p className="border-t border-pink-200 bg-pink-50 px-4 py-2.5 text-small text-pink-600">
           The player stopped: {error}
+        </p>
+      )}
+      {src && drm?.protected && !drm.configured && (
+        <p className="border-t border-violet-200 bg-violet-50 px-4 py-2.5 text-small text-violet-700">
+          This channel is protected with {drm.system_label} and no licence URL is configured, so
+          the picture will not start. Set it in Settings &rarr; DRM. The analysis runs either
+          way: the segments are decrypted on the backend.
         </p>
       )}
       {!src && (

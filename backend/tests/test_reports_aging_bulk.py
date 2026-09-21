@@ -362,6 +362,35 @@ def test_a_cancel_that_arrives_the_instant_a_job_starts_still_stops_it(
         assert cancelled.json()["elapsed_s"] < 60
 
 
+@pytest.mark.asyncio()
+async def test_a_cancel_is_recorded_on_the_handle_even_with_no_session_to_stop() -> None:
+    """The flag, not the session, is what makes an early cancel stick.
+
+    Building a session is not instantaneous — it reads the stored settings first — so a cancel
+    can arrive while `handle.session` is still None. Stopping only the session would leave a
+    job that was cancelled running until its own duration ran out, and the tab showing it as
+    still going.
+    """
+    from app.analysis.engine import SessionOptions
+    from app.jobs.manager import JobHandle, job_manager
+
+    handle = JobHandle(
+        id="cancel-before-session",
+        type="aging",
+        channel_name="Racy HD",
+        urls={"playback_url": "https://example.invalid/master.m3u8"},
+        options=SessionOptions(),
+    )
+    job_manager.jobs[handle.id] = handle
+    try:
+        returned = await job_manager.cancel(handle.id)
+    finally:
+        job_manager.jobs.pop(handle.id, None)
+
+    assert returned is handle
+    assert handle.stop_requested is True, "so `_run` stops the session the moment it exists"
+
+
 def test_a_batch_is_listed_from_the_database_so_a_reload_finds_it(
     origin: FixtureServer,
 ) -> None:

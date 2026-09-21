@@ -191,6 +191,21 @@ class Settings(BaseSettings):
     cascada_row_limit_margin: int = 600
     cascada_timeout_s: float = 60.0
 
+    # DRM. The CPIX credentials are a filesystem path or an HTTPS URL, never key material:
+    # `.env.example` carries the names with empty values, and an operator sets them either
+    # there or in Settings → DRM, which stores them in the settings table. Nothing about DRM
+    # is per-channel — a protected playback URL is pasted into Realtime, Aging, Bulk or a
+    # batch exactly like a clear one.
+    rba_drm_enabled: bool = True
+    cpix_endpoint: str = ""
+    cpix_client_cert: str = ""
+    cpix_client_key: str = ""
+    cpix_server_cert: str = ""
+    cpix_content_id: str = "rba"
+    # The Widevine licence server the player acquires a licence from, relayed by
+    # `POST /api/drm/license` so a browser never has to reach it directly.
+    drm_license_url: str = ""
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.rba_cors_origins.split(",") if o.strip()]

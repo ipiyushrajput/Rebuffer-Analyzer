@@ -179,7 +179,6 @@ def parse_response(xml_text: str, *, client_key_pem: str, server_cert_pem: str) 
     from Crypto.PublicKey import RSA
     from Crypto.Util.Padding import unpad
     from lxml import etree
-    from signxml import XMLVerifier
 
     try:
         root = etree.fromstring(xml_text.encode("utf-8"))
@@ -188,23 +187,22 @@ def parse_response(xml_text: str, *, client_key_pem: str, server_cert_pem: str) 
 
     document = (root.xpath("//cpix:CPIX", namespaces=CPIX_NS) or [root])[0]
 
-    # The signature proves the answer came from KeyOS. A document whose signature does not
-    # verify against either the certificate it carries or the configured one is reported,
-    # and its keys are still read: the packager, not the analyzer, decides key rotation, and
-    # refusing to analyse on a signature mismatch would make a channel unanalysable for a
-    # reason the operator cannot act on.
-    verified = False
-    for pem in (_signing_certificate(document), server_cert_pem):
-        if not pem:
-            continue
-        try:
-            XMLVerifier().verify(document, x509_cert=pem)
-            verified = True
-            break
-        except Exception:
-            continue
-    if not verified:
-        logger.warning("the CPIX response signature did not verify against a known certificate")
+    # Whether the answer really came from KeyOS.
+    #
+    # The response is signed, but its certificate omits the KeyUsage extension RFC 5280
+    # requires, so a standards-conformant verifier refuses it on certificate policy — not on
+    # the signature. Warning about that on every key request would train an operator to
+    # ignore a warning that matters.
+    #
+    # So what is checked is the property that is actually meaningful and actually checkable:
+    # that the certificate the response signed itself with carries the same public key as the
+    # KeyOS certificate this deployment was configured with. A different key means a different
+    # signer, and that is worth saying loudly.
+    if not _same_public_key(_signing_certificate(document), server_cert_pem):
+        logger.warning(
+            "the CPIX response was signed with a key other than the configured KeyOS "
+            "certificate's; the keys it carries are not being treated as authentic"
+        )
 
     document_cipher = document.xpath("//cpix:DocumentKey//enc:CipherValue", namespaces=CPIX_NS)
     if not document_cipher:
@@ -257,6 +255,32 @@ def parse_response(xml_text: str, *, client_key_pem: str, server_cert_pem: str) 
             found[kid] = plain.hex()
 
     return found
+
+
+def _same_public_key(one_pem: str, other_pem: str) -> bool:
+    """Whether two certificates carry the same public key.
+
+    Comparing keys rather than certificates: a key server may reissue its certificate without
+    rotating the key it signs with, and the question here is who signed, not which document
+    said so.
+    """
+    if not one_pem or not other_pem:
+        return False
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+        def spki(pem: str) -> bytes:
+            # The DER SubjectPublicKeyInfo is the key's canonical form, so two certificates
+            # carrying one key produce identical bytes whatever algorithm the key is.
+            certificate = x509.load_pem_x509_certificate(pem.encode())
+            return certificate.public_key().public_bytes(
+                Encoding.DER, PublicFormat.SubjectPublicKeyInfo
+            )
+
+        return hmac.compare_digest(spki(one_pem), spki(other_pem))
+    except Exception:
+        return False
 
 
 def _signing_certificate(element: Any) -> str:

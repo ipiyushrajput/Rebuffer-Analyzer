@@ -68,10 +68,12 @@ def check_segment(
         )
 
     if analysis.encrypted:
+        reason = analysis.drm_reason or "No key that decrypts it was obtained."
         raise_for(
             R.SKIP_ENCRYPTED,
-            f"Segment {analysis.msn} on {variant} is encrypted and no supplied key decrypts it, "
-            "so the video, audio and A/V checks did not run on it.",
+            f"Segment {analysis.msn} on {variant} is encrypted and was not decrypted, so the "
+            f"video, audio and A/V checks did not run on it. {reason}",
+            {"drm_reason": reason},
         )
         return findings
 

@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.drm.context import DrmContext
 from app.media.fmp4 import Fmp4Analysis, parse_init
 from app.media.segment import SegmentAnalysis, analyse
 from app.net.fetcher import Fetcher, FetchResult
@@ -33,10 +34,22 @@ class SampledSegment:
     analysis: SegmentAnalysis
     declared_duration: float | None
     discontinuity_before: bool = False
+    # A protected segment after decryption, with its initialisation segment in front of it, so
+    # a decoder reads a whole file rather than a fragment. Empty for a clear segment, which is
+    # already what the decoder reads.
+    decoded_body: bytes = b""
+    # Why a protected segment was not decrypted. Empty when it was, or when it was never
+    # encrypted in the first place.
+    drm_reason: str = ""
 
     @property
     def available(self) -> bool:
         return self.result.ok and self.result.bytes_received > 0
+
+    @property
+    def decodable_body(self) -> bytes:
+        """The bytes a decoder reads: the decrypted payload when the segment was protected."""
+        return self.decoded_body or self.result.body
 
     @property
     def download_ms(self) -> float:
@@ -66,6 +79,17 @@ class SampledSegment:
         }
 
 
+@dataclass(slots=True)
+class DecryptedBody:
+    """What came out of the decrypt step, and what the parsers are to make of it."""
+
+    body: bytes
+    encrypted: bool
+    # Whether a decrypt actually ran, as opposed to the body having been clear all along.
+    ran: bool = False
+    reason: str = ""
+
+
 @dataclass
 class RungSampling:
     """Sampling policy and state for one rung."""
@@ -76,6 +100,9 @@ class RungSampling:
     fetched_msns: set[int] = field(default_factory=set)
     init_segment: Fmp4Analysis | None = None
     init_uri: str | None = None
+    # The `EXT-X-MAP` body itself, kept because a decoder handed a bare `moof`/`mdat` fragment
+    # has no `moov` to read the track from. Only a protected rung keeps it.
+    init_body: bytes = b""
 
     def should_fetch(self, msn: int) -> bool:
         if msn in self.fetched_msns:
@@ -101,15 +128,22 @@ class SegmentSampler:
         fetcher: Fetcher,
         *,
         encrypted: bool = False,
+        drm: DrmContext | None = None,
         max_tracked_msns: int = 2000,
     ) -> None:
         self.sampling = sampling
         self.fetcher = fetcher
         self.encrypted = encrypted
+        self.drm = drm
         self.max_tracked_msns = max_tracked_msns
 
     async def ensure_init(self, init_uri: str | None) -> FetchResult | None:
-        """Fetch and parse the EXT-X-MAP target once per rung."""
+        """Fetch and parse the EXT-X-MAP target once per rung.
+
+        On a protected ladder this is also where the rung's protection is read and its content
+        key obtained: `tenc` declares the scheme, the initialisation-vector size and the key
+        identifier of this track, and none of the three is knowable from the playlist alone.
+        """
         if not init_uri or self.sampling.init_uri == init_uri:
             return None
         result = await self.fetcher.fetch(init_uri)
@@ -126,6 +160,9 @@ class SegmentSampler:
                     result.bytes_received,
                     init_uri,
                 )
+            if self.encrypted and self.drm is not None:
+                self.sampling.init_body = result.body
+                await self.drm.read_init(self.sampling.variant, result.body)
         return result
 
     async def fetch_segment(
@@ -155,7 +192,16 @@ class SegmentSampler:
             cutoff = sorted(self.sampling.fetched_msns)[: len(self.sampling.fetched_msns) // 2]
             self.sampling.fetched_msns.difference_update(cutoff)
 
-        analysis = self._analyse(result, uri=uri, msn=msn, declared_duration=declared_duration)
+        decrypted = self._decrypt(result.body)
+        analysis = self._analyse(
+            result,
+            body=decrypted.body,
+            encrypted=decrypted.encrypted,
+            uri=uri,
+            msn=msn,
+            declared_duration=declared_duration,
+        )
+        analysis.drm_reason = decrypted.reason
 
         return SampledSegment(
             variant=self.sampling.variant,
@@ -167,10 +213,42 @@ class SegmentSampler:
             analysis=analysis,
             declared_duration=declared_duration,
             discontinuity_before=discontinuity_before,
+            decoded_body=(self.sampling.init_body + decrypted.body if decrypted.ran else b""),
+            drm_reason=decrypted.reason,
         )
 
+    def _decrypt(self, body: bytes) -> DecryptedBody:
+        """The bytes the parsers read, whether they are still encrypted, and why.
+
+        A clear rendition passes through untouched. A protected one is decrypted when this run
+        holds its key, and otherwise comes back encrypted carrying the reason — which the
+        engine states as a finding rather than letting the rendition read as one that passed
+        every bitstream check.
+        """
+        if not self.encrypted:
+            return DecryptedBody(body=body, encrypted=False)
+        if self.drm is None or not body:
+            return DecryptedBody(body=body, encrypted=True)
+
+        protection = self.drm.protection(self.sampling.variant)
+        if protection is not None and not protection.info.protected:
+            # `tenc` says this track carries no encryption, whatever the ladder declares.
+            return DecryptedBody(body=body, encrypted=False)
+
+        result = self.drm.decrypt(self.sampling.variant, body)
+        if result.ok:
+            return DecryptedBody(body=result.data, encrypted=False, ran=True)
+        return DecryptedBody(body=body, encrypted=True, reason=result.reason)
+
     def _analyse(
-        self, result: FetchResult, *, uri: str, msn: int, declared_duration: float | None
+        self,
+        result: FetchResult,
+        *,
+        body: bytes,
+        encrypted: bool,
+        uri: str,
+        msn: int,
+        declared_duration: float | None,
     ) -> SegmentAnalysis:
         """Parse the body, and record a parser failure as a fact about that segment.
 
@@ -180,13 +258,13 @@ class SegmentSampler:
         """
         try:
             return analyse(
-                result.body,
+                body,
                 uri=uri,
                 declared_duration=declared_duration,
                 variant_id=self.sampling.variant,
                 msn=msn,
                 init_segment=self.sampling.init_segment,
-                encrypted=self.encrypted,
+                encrypted=encrypted,
             )
         except Exception as exc:
             log.exception(
@@ -203,7 +281,7 @@ class SegmentSampler:
                 variant_id=self.sampling.variant,
                 msn=msn,
                 declared_duration=declared_duration,
-                encrypted=self.encrypted,
+                encrypted=encrypted,
             )
             failed.parse_error = f"The analyzer did not parse this segment: {type(exc).__name__}"
             return failed
