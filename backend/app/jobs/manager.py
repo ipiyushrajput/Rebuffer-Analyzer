@@ -25,6 +25,7 @@ from app.db.models import Finding as FindingRow
 from app.db.models import Incident as IncidentRow
 from app.db.models import Job as JobRow
 from app.db.models import PlaylistSample, PlaylistSnapshot, SegmentSample, VirtualBufferSample
+from app.jobs.samples import SampleRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,8 @@ class JobHandle:
     options: SessionOptions
     session: AnalysisSession | None = None
     task: asyncio.Task[AnalysisResult] | None = None
+    # Set for a run that records its samples; None for one that draws them live instead.
+    recorder: SampleRecorder | None = None
     status: str = "PENDING"
     created_at: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
     started_at: dt.datetime | None = None
@@ -222,7 +225,15 @@ class JobManager:
             handle.started_at = dt.datetime.now(dt.UTC)
             handle.ends_at = handle.started_at + dt.timedelta(seconds=handle.options.duration_s)
 
+            # A run nobody is watching has to write its polls and fetches down, or it leaves
+            # behind findings and nothing to look at. `record_evidence` is already true for
+            # aging and false for realtime, which draws its charts from the socket instead.
+            recorder = SampleRecorder(handle.id) if handle.options.record_evidence else None
+            handle.recorder = recorder
+
             async def on_event(kind: str, payload: dict[str, Any]) -> None:
+                if recorder is not None:
+                    await recorder.observe(kind, payload)
                 if self._event_sink is not None:
                     await self._event_sink(handle.id, kind, payload)
 
@@ -261,6 +272,10 @@ class JobManager:
                 raise
             finally:
                 handle.finished_at = dt.datetime.now(dt.UTC)
+                # Before the job row is written: what the run measured in its last seconds is
+                # part of the run, and a cancelled or failed one keeps what it got to.
+                if recorder is not None:
+                    await recorder.flush()
                 await self._persist_job(handle)
 
             await self._persist_result(handle, result)
@@ -294,6 +309,10 @@ class JobManager:
         handle = self.jobs.get(job_id)
         if handle is None or handle.session is None:
             return
+        # Player telemetry arrives from the browser rather than from the engine, so it does
+        # not pass the event sink. A session that records its samples records these too.
+        if handle.recorder is not None:
+            await handle.recorder.observe("player_sample", {"data": payload})
         await handle.session.ingest_player_event(payload)
 
     # -- persistence -----------------------------------------------------------

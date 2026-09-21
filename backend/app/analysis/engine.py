@@ -642,7 +642,20 @@ class AnalysisSession:
             cause_rule_ids=[R.MED_STALE.id] if stale else [],
         )
 
-        await self._emit("playlist_snapshot", {"layer": layer.value, "data": snapshot.summary()})
+        # Freshness and the playlist state are computed here and nowhere else, so they ride
+        # the snapshot: a stored sample without them would draw a flat zero on the freshness
+        # chart, which claims a measurement that was never taken.
+        await self._emit(
+            "playlist_snapshot",
+            {
+                "layer": layer.value,
+                "data": {
+                    **snapshot.summary(),
+                    "freshness_s": machine.seconds_since_new_segment(snapshot.at),
+                    "state": machine.state.value,
+                },
+            },
+        )
 
         if not snapshot.ok or snapshot.playlist is None:
             return
