@@ -242,7 +242,10 @@ frontend/src/
   segment's initialisation segment in front of it and a `decrypted/manifest.json` naming its
   source URI, media sequence number and rendition. The store is bounded by
   `evidence_max_bytes` and `evidence_segments_per_rendition`, and a segment sampled while an
-  incident was open is evicted last. `README.txt` always states what is there and what is
+  incident was open is evicted last. **The budget is per job and aging records evidence by
+  default**, so the host's worst case is `evidence_max_bytes × rba_max_concurrent_jobs` —
+  480 MB at the defaults; raising either is a decision about the memory the host has.
+  `README.txt` always states what is there and what is
   not: evidence recording off, decryption off, the key server's reason, or `cbcs` without
   `mp4decrypt` — a bundle that is short of something never leaves a reader guessing.
   `cbcs` is decrypted only by Bento4's `mp4decrypt`, reported by `/api/health`; `cenc` stays

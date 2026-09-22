@@ -212,8 +212,15 @@ class Thresholds(BaseModel):
     # is tens of gigabytes, so the store keeps a rolling window: the newest segments per
     # rendition, under one overall budget, with anything sampled during an incident evicted
     # last. A bundle states how many segments it holds and how many were dropped.
-    evidence_max_bytes: int = 64 * 1024 * 1024
-    evidence_segments_per_rendition: int = 20
+    #
+    # **This budget is per job, and aging runs record evidence by default.** The analyzer's
+    # worst case is therefore `evidence_max_bytes * rba_max_concurrent_jobs` held in memory —
+    # 480 MB at these defaults and twenty concurrent jobs. Raise it only against the memory
+    # the host actually has.
+    evidence_max_bytes: int = 24 * 1024 * 1024
+    # Twelve segments of a six-second rung is just over a minute of each rendition, which is
+    # long enough to carry an incident and its approach.
+    evidence_segments_per_rendition: int = 12
 
     # Tizen segment retry policy modelled by the Virtual Player Buffer.
     segment_retry_attempts: int = 2
