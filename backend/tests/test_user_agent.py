@@ -187,8 +187,11 @@ def test_the_evidence_bundle_readme_states_the_user_agent() -> None:
         channel_name = "Fixture HD"
         result = None
         options = SessionOptions(ua_profile="tizen9")
+        # A run that recorded no evidence. The User-Agent is stated either way, because it
+        # is a condition of the measurement rather than a property of the media.
+        session = None
 
-    readme = _bundle_readme(_Handle())  # type: ignore[arg-type]
+    readme = _bundle_readme(_Handle(), decrypt_evidence=False)  # type: ignore[arg-type]
 
     assert "tizen9" in readme
     assert DEVICE_STRINGS["tizen9"] in readme
