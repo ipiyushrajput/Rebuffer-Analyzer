@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.analysis import attribution, av_pairing, correlate, vpb
+from app.analysis import evidence as evidence_store
 from app.analysis.collectors.playlist_poller import PlaylistPoller, PollTarget, Snapshot
 from app.analysis.collectors.segment_sampler import (
     RungSampling,
@@ -273,6 +274,16 @@ class AnalysisSession:
 
         self.collector = FindingCollector()
         self.incidents = correlate.IncidentTracker(self.thresholds)
+        # The media an evidence bundle is built from. Built only for a run that was asked to
+        # record evidence; a run that was not holds no segment bytes at all.
+        self.evidence: evidence_store.EvidenceStore | None = (
+            evidence_store.EvidenceStore(
+                max_bytes=self.thresholds.evidence_max_bytes,
+                per_rendition=self.thresholds.evidence_segments_per_rendition,
+            )
+            if self.options.record_evidence
+            else None
+        )
         self.layers: dict[StreamLayer, LayerContext] = {}
         self.event_log: list[dict[str, Any]] = []
         self.stalls: list[correlate.StallEvent] = []
@@ -1064,7 +1075,34 @@ class AnalysisSession:
         ):
             await self._run_quality_detectors(sample, variant=variant, layer=layer)
 
+        self._keep_evidence(target, sample)
+
         await self._emit("segment_result", {"layer": layer.value, "data": sample.as_dict()})
+
+    def _keep_evidence(self, target: PollTarget, sample: SampledSegment) -> None:
+        """Hold this segment's bytes for the bundle, if this run was asked to record any.
+
+        A protected segment is kept as it was served and, when a key was obtained, as it was
+        decrypted. Nothing here touches the key: `SampledSegment.decoded_body` is what the
+        decrypt already produced for the bitstream rules, and it is reused rather than
+        decrypting a second time.
+        """
+        if self.evidence is None or not sample.available:
+            return
+        self.evidence.add(
+            evidence_store.EvidenceSegment(
+                variant=target.variant,
+                kind=target.kind,
+                msn=sample.msn,
+                uri=sample.uri,
+                at=sample.completed_at,
+                raw=sample.result.body,
+                decrypted=sample.decoded_body,
+                drm_reason=sample.drm_reason,
+                # Sampled while something was already wrong, so the last thing evicted.
+                pinned=self.incidents.anything_open,
+            )
+        )
 
     async def _pair_across_renditions(
         self, context: LayerContext, target: PollTarget, sample: SampledSegment

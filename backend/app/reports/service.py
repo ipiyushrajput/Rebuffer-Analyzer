@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import json
 import logging
 import re
 import zipfile
@@ -26,6 +27,7 @@ from app.analysis.engine import AnalysisResult
 from app.config import get_settings
 from app.db import session as db_session
 from app.db.models import PlaylistSnapshot, Report
+from app.drm import settings as drm_settings
 from app.jobs.manager import JobHandle
 from app.reports.render_html import render_bulk_report, render_html_for_handle
 from app.reports.render_pdf import PdfUnavailable, render_pdf_bytes
@@ -213,24 +215,68 @@ async def generate_bulk(
     }
 
 
-def _bundle_readme(handle: JobHandle) -> str:
-    """What this bundle holds and under what conditions it was collected.
+def _bundle_readme(handle: JobHandle, *, decrypt_evidence: bool) -> str:
+    """What this bundle holds, under what conditions it was collected, and what is missing.
 
     The User-Agent belongs here for the same reason it belongs in the report appendix: a CDN
     and a packager both answer per User-Agent, so somebody replaying these URLs by hand gets
     a different response unless they send the same string.
+
+    A bundle that is short of something says so, and says why. "No decrypted media" has four
+    causes — nothing was protected, decryption is switched off in Settings, the key server
+    refused, or the scheme needs a binary this host does not have — and a reader who cannot
+    tell them apart cannot act on any of them.
     """
     # A bundle can be pulled while the run is still going, so the options come off the handle
     # when no result exists yet. Both carry the same fields.
     options = handle.result.options if handle.result is not None else handle.options.public()
+    store = handle.session.evidence if handle.session is not None else None
+
     lines = [
         "RBA evidence bundle",
         "",
         f"Job:       {handle.id}",
         f"Channel:   {handle.channel_name}",
         "",
-        "result.json  every finding, measurement and verdict this run produced",
-        "playlists/   the manifests as they were served, one file per refresh",
+        "result.json   every finding, measurement and verdict this run produced",
+        "playlists/    the manifests as they were served, one file per refresh",
+    ]
+
+    if store is None:
+        lines += [
+            "",
+            "No segment media is included: this run was not asked to record evidence.",
+            "Start it with evidence recording on, in the analysis form or in Settings.",
+        ]
+    else:
+        clear = store.count - store.encrypted_count
+        if clear:
+            lines.append(f"segments/     {clear} segment(s) as served, unprotected")
+        if store.encrypted_count:
+            lines.append(f"encrypted/    {store.encrypted_count} segment(s) as served, protected")
+        if store.decrypted_count and decrypt_evidence:
+            lines.append(
+                f"decrypted/    {store.decrypted_count} segment(s) decrypted, each with its "
+                "initialisation segment in front of it, plus manifest.json mapping every "
+                "file to its source URI, media sequence number and rendition"
+            )
+        lines += ["", f"Segments held: {store.count}."]
+        if store.evicted:
+            lines.append(
+                f"{store.evicted} older segment(s) were dropped to stay inside the evidence "
+                "budget; segments sampled while an incident was open are kept longest. Raise "
+                "evidence_max_bytes or evidence_segments_per_rendition in Settings to keep more."
+            )
+        if store.encrypted_count and not decrypt_evidence:
+            lines.append(
+                "No decrypted media: decryption of evidence is switched off in Settings → DRM."
+            )
+        elif store.encrypted_count and not store.decrypted_count:
+            lines.append("No decrypted media: no segment in this bundle was decrypted.")
+        for reason, count in sorted(store.reasons().items()):
+            lines.append(f"{count} segment(s) were not decrypted. {reason}")
+
+    lines += [
         "",
         "Requests in this run were made with:",
         f"  User-Agent profile  {options.get('ua_profile', 'unknown')}",
@@ -239,16 +285,59 @@ def _bundle_readme(handle: JobHandle) -> str:
         "TLS verification is off on every fetch, by design; the certificate chain is still",
         "inspected and reported in result.json.",
         "",
+        "No content key, private key or CPIX credential is in this bundle. Keys live in",
+        "memory for the life of the job and are never written anywhere.",
+        "",
     ]
     return "\n".join(lines)
 
 
-async def build_evidence_bundle(handle: JobHandle) -> bytes:
-    """Segments and playlist snapshots recorded around each incident, as ZIP bytes.
+def _write_segments(bundle: zipfile.ZipFile, handle: JobHandle, *, decrypt_evidence: bool) -> None:
+    """The sampled media, and a manifest for whatever was decrypted.
 
-    Built in memory from the database rows and streamed to the caller, so an evidence
-    download leaves nothing behind on the analyzer host.
+    A clear segment lands under `segments/`, a protected one under `encrypted/` as it was
+    served, and — when the setting allows it and a key was held — under `decrypted/video/` or
+    `decrypted/audio/` with its initialisation segment in front, which is a file a decoder
+    opens rather than a fragment it cannot. `decrypted/manifest.json` maps every decrypted
+    file back to its source URI, media sequence number and rendition, so a packager can tell
+    which segment of which rung reproduces a defect.
     """
+    store = handle.session.evidence if handle.session is not None else None
+    if store is None or not store.segments:
+        return
+
+    manifest: list[dict[str, Any]] = []
+    for segment in store.segments:
+        folder = "encrypted" if segment.encrypted else "segments"
+        path = f"{folder}/{_slug(segment.variant)}/{segment.msn:012d}.{segment.extension}"
+        bundle.writestr(path, segment.raw)
+        if not decrypt_evidence or not segment.decrypted:
+            continue
+        # `kind` is the rendition's own — "video", "audio" or "subtitles" — so a reader finds
+        # the track they are chasing without opening every file.
+        decrypted_path = (
+            f"decrypted/{segment.kind or 'video'}/{_slug(segment.variant)}/{segment.msn:012d}.mp4"
+        )
+        bundle.writestr(decrypted_path, segment.decrypted)
+        manifest.append(segment.manifest_row(decrypted_path))
+
+    if manifest:
+        bundle.writestr("decrypted/manifest.json", json.dumps(manifest, indent=2, default=str))
+
+
+async def build_evidence_bundle(handle: JobHandle) -> bytes:
+    """Segments and playlist snapshots recorded during the run, as ZIP bytes.
+
+    Built in memory from the database rows and the session's own evidence store, and streamed
+    to the caller, so an evidence download leaves nothing behind on the analyzer host.
+
+    The segments are the part that was missing: this function wrote `result.json` and the
+    playlists and claimed in its docstring to write segments, and wrote none — for a clear
+    channel as much as a protected one. A protected segment goes in twice when the setting
+    allows it, as served and as decrypted, because the two answer different questions: what
+    the CDN sent, and what a decoder reads.
+    """
+    drm = await drm_settings.load()
     async with db_session.session_scope() as session:
         snapshots = (
             (
@@ -267,11 +356,9 @@ async def build_evidence_bundle(handle: JobHandle) -> bytes:
         if handle.result is not None:
             bundle.writestr(
                 "result.json",
-                io.StringIO(
-                    __import__("json").dumps(handle.result.as_dict(), indent=2, default=str)
-                ).getvalue(),
+                json.dumps(handle.result.as_dict(), indent=2, default=str),
             )
-        bundle.writestr("README.txt", _bundle_readme(handle))
+        bundle.writestr("README.txt", _bundle_readme(handle, decrypt_evidence=drm.decrypt_evidence))
         for snapshot in snapshots:
             stamp = snapshot.ts.strftime("%Y%m%dT%H%M%S%f")
             bundle.writestr(
@@ -288,6 +375,7 @@ async def build_evidence_bundle(handle: JobHandle) -> bytes:
                         bundle.writestr(
                             f"playlists/{_slug(variant)}/{stamp}.m3u8", snapshot_obj.raw
                         )
+            _write_segments(bundle, handle, decrypt_evidence=drm.decrypt_evidence)
     return buffer.getvalue()
 
 

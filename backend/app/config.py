@@ -208,6 +208,12 @@ class Thresholds(BaseModel):
 
     # Evidence recording window around an incident, in seconds.
     evidence_window_s: float = 30.0
+    # How much sampled media an evidence bundle may carry. A rung sampled in full for a day
+    # is tens of gigabytes, so the store keeps a rolling window: the newest segments per
+    # rendition, under one overall budget, with anything sampled during an incident evicted
+    # last. A bundle states how many segments it holds and how many were dropped.
+    evidence_max_bytes: int = 64 * 1024 * 1024
+    evidence_segments_per_rendition: int = 20
 
     # Tizen segment retry policy modelled by the Virtual Player Buffer.
     segment_retry_attempts: int = 2

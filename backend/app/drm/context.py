@@ -21,9 +21,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from app.drm.cenc import CENC, TrackEncryption, read_track_encryption
+from app.drm.cenc import CBCS, CENC, TrackEncryption, read_track_encryption
 from app.drm.cpix import DEFAULT_ENDPOINT, CpixCredentials, CpixError, KeyStore
-from app.drm.decrypt import DecryptResult, decrypt_segment
+from app.drm.decrypt import (
+    DecryptResult,
+    decrypt_segment,
+    decrypt_with_mp4decrypt,
+    mp4decrypt_path,
+)
 from app.drm.detect import DrmInfo, extract_kid, normalise_kid
 from app.net.fetcher import Fetcher
 
@@ -38,14 +43,31 @@ class RenditionProtection:
     info: DrmInfo = field(default_factory=DrmInfo)
     track: TrackEncryption | None = None
     key_hex: str = ""
+    # This rung's initialisation segment. `mp4decrypt` reads a file and needs the `tenc` box
+    # in front of the fragment to know what it is decrypting; the in-process path takes the
+    # `TrackEncryption` above instead and never looks at this.
+    init_segment: bytes = b""
     # Counted so a report states how much of the rung the rules actually read.
     segments_decrypted: int = 0
     segments_failed: int = 0
 
     @property
+    def scheme(self) -> str:
+        return self.track.scheme if self.track else ""
+
+    @property
     def decryptable(self) -> bool:
-        """Whether a segment of this rung can be handed to the bitstream rules."""
-        return bool(self.key_hex) and bool(self.track and self.track.supported)
+        """Whether a segment of this rung can be handed to the bitstream rules.
+
+        `cenc` is decrypted in process. `cbcs` is a different cipher — AES-CBC with a
+        crypt/skip pattern — and is decryptable only where Bento4's `mp4decrypt` is installed;
+        without it the rung is reported as unread rather than attempted.
+        """
+        if not self.key_hex or self.track is None or not self.track.is_protected:
+            return False
+        if self.track.scheme == CENC:
+            return True
+        return self.track.scheme == CBCS and mp4decrypt_path() is not None
 
     def as_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"variant": self.variant, **self.info.as_dict()}
@@ -106,7 +128,11 @@ class DrmContext:
         be clear on a protected ladder — a packager commonly leaves one rendition in the open
         — comes back unprotected and is analysed without a key.
         """
-        protection = RenditionProtection(variant=variant, info=DrmInfo(system=self.declared.system))
+        protection = RenditionProtection(
+            variant=variant,
+            info=DrmInfo(system=self.declared.system),
+            init_segment=init_segment,
+        )
         self.renditions[variant] = protection
 
         track = read_track_encryption(init_segment)
@@ -121,10 +147,11 @@ class DrmContext:
         kid = normalise_kid(track.default_kid) or extract_kid(init_segment) or self.declared.kid
         protection.info.kid = kid
 
-        if track.scheme != CENC:
+        if track.scheme != CENC and not (track.scheme == CBCS and mp4decrypt_path()):
             protection.info.reason = (
                 f"The track is encrypted with the {track.scheme} scheme, which this analyzer "
-                "does not decrypt. Only cenc (AES-CTR) is decrypted."
+                "decrypts in process only for cenc (AES-CTR). cbcs needs Bento4's mp4decrypt, "
+                "and that binary is not installed on this analyzer host."
             )
             return protection
         if not self.needs_key_server:
@@ -177,7 +204,15 @@ class DrmContext:
         if not protection.decryptable:
             return DecryptResult(reason=protection.info.reason or "No content key is held.")
 
-        result = decrypt_segment(body, key_hex=protection.key_hex, track=protection.track)
+        if protection.scheme == CBCS:
+            result = decrypt_with_mp4decrypt(
+                body,
+                key_hex=protection.key_hex,
+                kid_hex=(protection.info.kid or "").replace("-", ""),
+                init_segment=protection.init_segment,
+            )
+        else:
+            result = decrypt_segment(body, key_hex=protection.key_hex, track=protection.track)
         if result.ok:
             protection.segments_decrypted += 1
         else:

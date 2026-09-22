@@ -49,6 +49,13 @@ class DrmSettings(BaseModel):
     # sends no CORS headers still plays.
     license_url: str = Field(default="")
 
+    # Whether an evidence bundle carries the decrypted media as well as the encrypted bytes.
+    # Off by default: decrypted media is the content in the clear, and a bundle is forwarded
+    # to whoever a defect belongs to. On, the bundle adds `decrypted/` beside `encrypted/`,
+    # which is what a packager needs to reproduce a bitstream defect. The key itself is never
+    # written, decrypted or not.
+    decrypt_evidence: bool = Field(default=False)
+
     @property
     def credentials(self) -> CpixCredentials:
         return CpixCredentials(
@@ -79,6 +86,7 @@ class DrmSettings(BaseModel):
             "cpix_content_id": self.cpix_content_id,
             "keys_configured": self.keys_configured,
             "playback_configured": self.playback_configured,
+            "decrypt_evidence": self.decrypt_evidence,
             **self.credentials.describe(),
         }
 

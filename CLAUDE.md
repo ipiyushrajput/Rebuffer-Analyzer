@@ -234,6 +234,19 @@ frontend/src/
   never attempted. A rendition whose payload was not read says which of the reasons applied,
   through `INFO-001` and the report's protection table — a protected channel must never read
   as one that passed every bitstream check.
+- **An evidence bundle carries the media it was collected for.** `app/analysis/evidence.py`
+  holds the sampled segment bytes in memory for the life of a run that was asked to record
+  evidence, and `reports/service.py::_write_segments` streams them into the archive:
+  `segments/` for a clear rung, `encrypted/` for a protected one as it was served, and —
+  only when `decrypt_evidence` is on in Settings → DRM — `decrypted/video|audio/` with each
+  segment's initialisation segment in front of it and a `decrypted/manifest.json` naming its
+  source URI, media sequence number and rendition. The store is bounded by
+  `evidence_max_bytes` and `evidence_segments_per_rendition`, and a segment sampled while an
+  incident was open is evicted last. `README.txt` always states what is there and what is
+  not: evidence recording off, decryption off, the key server's reason, or `cbcs` without
+  `mp4decrypt` — a bundle that is short of something never leaves a reader guessing.
+  `cbcs` is decrypted only by Bento4's `mp4decrypt`, reported by `/api/health`; `cenc` stays
+  in process. No key, private key or credential reaches a bundle.
 - **DRM credentials are a location, never key material.** `cpix_client_cert`,
   `cpix_client_key` and `cpix_server_cert` are a path on the analyzer host or an HTTPS URL,
   configured once in Settings → DRM or in `backend/.env`; `.env.example` carries the names

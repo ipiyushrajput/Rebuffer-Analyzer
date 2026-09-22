@@ -77,6 +77,15 @@ Every finding states the measurement, the root cause, the responsible party and 
   reported as one through `INFO-001` and in the report's protection table, with the reason —
   never analysed as though the bitstream checks had passed. The deployment is configured once
   in **Settings → DRM**; see [DRM](#drm).
+- **An evidence bundle carries the stream.** A run recording evidence holds the sampled
+  segment bytes and streams them into the archive beside `result.json` and the playlist
+  snapshots — `segments/` for a clear rung, `encrypted/` for a protected one as the CDN
+  served it, and, where a deployment turns it on in Settings → DRM, `decrypted/` with each
+  segment's initialisation segment in front of it and a manifest naming every file's source
+  URI, media sequence number and rendition. The window is bounded and the bytes around an
+  incident are kept longest; the bundle's `README.txt` states how many segments it holds, how
+  many were dropped, and which reason applies when it holds no decrypted media. No content
+  key, private key or credential is ever written to one.
 - **A demuxed ladder is measured as one.** Every TV Plus CMAF channel carries its audio in a
   rendition of its own, and its video segments hold no audio track — which is the format
   working, not a defect. The ladder's packaging is read from the master and carried to every

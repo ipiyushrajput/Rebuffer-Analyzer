@@ -127,6 +127,8 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
       'nth_segment_sampling_other_rungs',
       'ladder_sweep_interval_s',
       'evidence_window_s',
+      'evidence_max_bytes',
+      'evidence_segments_per_rendition',
       'segment_retry_attempts',
       'segment_retry_backoff_s',
     ],

@@ -17,7 +17,17 @@ def test_health_reports_every_dependency() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] in ("ok", "degraded")
-    assert set(body["checks"]) == {"ffmpeg", "ffprobe", "playwright", "database"}
+    assert set(body["checks"]) == {
+        "ffmpeg",
+        "ffprobe",
+        "playwright",
+        "mp4decrypt",
+        "database",
+    }
+    # Bento4 is optional — cenc decrypts in process — so a host without it is a working
+    # deployment, not a degraded one, and the check says so without hiding the consequence.
+    assert body["checks"]["mp4decrypt"]["ok"] is True
+    assert body["checks"]["mp4decrypt"]["detail"]
     assert "thresholds" in body
     assert body["thresholds"]["rebuffer_ratio_threshold"] == 0.25
 

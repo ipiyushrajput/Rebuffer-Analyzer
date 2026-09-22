@@ -224,3 +224,61 @@ async def test_the_summary_carries_no_key_material() -> None:
     assert KEY.hex() not in rendered
     assert CONFIGURED.client_key not in rendered
     assert KID in rendered, "the identifier is stated; the key never is"
+
+
+async def test_an_evidence_bundle_carries_no_key_material() -> None:
+    """Nothing written into a bundle names the key, whether the media is decrypted or not.
+
+    The decrypted bytes are the content, not the key: a reader of the bundle can watch the
+    segment and cannot derive what decrypted it. The key lives in `KeyStore` in memory for
+    the life of the job, and neither the archive nor the README ever sees it.
+    """
+    import datetime as dt
+    import io
+    import zipfile
+
+    from app.analysis import evidence as ev
+    from app.analysis.engine import SessionOptions
+    from app.reports.service import _bundle_readme, _write_segments
+
+    context = widevine_context({KID: KEY.hex()})
+    protection = await context.read_init("video_720", init_segment())
+    assert protection.key_hex == KEY.hex(), "the key was obtained, so this proves something"
+
+    store = ev.EvidenceStore()
+    store.add(
+        ev.EvidenceSegment(
+            variant="video_720",
+            kind="video",
+            msn=1,
+            uri="https://cdn.example/video_720/1.m4s",
+            at=dt.datetime(2026, 9, 22, tzinfo=dt.UTC),
+            raw=b"\x00" * 64,
+            decrypted=b"\x01" * 64,
+        )
+    )
+
+    class _Session:
+        evidence = store
+        layers: dict[str, object] = {}
+
+    class _Handle:
+        id = "job-1"
+        channel_name = "Protected HD"
+        result = None
+        options = SessionOptions(record_evidence=True)
+        session = _Session()
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        _write_segments(bundle, _Handle(), decrypt_evidence=True)  # type: ignore[arg-type]
+    readme = _bundle_readme(_Handle(), decrypt_evidence=True)  # type: ignore[arg-type]
+
+    with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as archive:
+        written = "".join(archive.namelist()) + "".join(
+            archive.read(name).decode("utf-8", "ignore") for name in archive.namelist()
+        )
+
+    assert KEY.hex() not in written
+    assert KEY.hex() not in readme
+    assert CONFIGURED.client_key not in readme
