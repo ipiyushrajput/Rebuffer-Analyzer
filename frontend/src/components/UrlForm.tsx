@@ -7,7 +7,8 @@
  */
 
 import { useState } from 'react'
-import { CHECK_SETS, UA_PROFILES, VPB_MODES } from '../lib/constants'
+import { CHECK_SETS, VPB_MODES } from '../lib/constants'
+import { useUaProfiles } from '../lib/uaProfiles'
 import { Field, cx } from './ui'
 
 export interface JobOptions {
@@ -35,7 +36,7 @@ export const emptyForm = (recordEvidence = false): UrlFormValue => ({
   ssai_url: '',
   channel_name: '',
   options: {
-    ua_profile: 'tizen5',
+    ua_profile: '',
     check_sets: [],
     renditions: null,
     record_evidence: recordEvidence,
@@ -103,6 +104,7 @@ interface Props {
 }
 
 export function UrlForm({ value, onChange, disabled }: Props) {
+  const uaProfiles = useUaProfiles()
   const [expanded, setExpanded] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
   const [keyPair, setKeyPair] = useState({ kid: '', key: '' })
@@ -200,7 +202,9 @@ export function UrlForm({ value, onChange, disabled }: Props) {
                 onChange={(e) => setOptions({ ua_profile: e.target.value })}
                 disabled={disabled}
               >
-                {UA_PROFILES.map((profile) => (
+                {/* Empty means "whatever Settings says", resolved on the backend. */}
+                <option value="">Default from Settings</option>
+                {uaProfiles.map((profile) => (
                   <option key={profile.id} value={profile.id}>
                     {profile.label}
                   </option>

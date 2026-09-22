@@ -9,38 +9,103 @@ from __future__ import annotations
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
-# The Tizen Smart-TV client the TV Plus player identifies as. Every outbound request uses
-# this profile unless the job selects another one.
-TIZEN_USER_AGENT = (
-    "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/538.1 "
-    "(KHTML, like Gecko) Version/5.0 TV Safari/538.1"
-)
 
-USER_AGENT_PROFILES: dict[str, str] = {
-    "tizen5": TIZEN_USER_AGENT,
-    "tizen4": (
-        "Mozilla/5.0 (SMART-TV; Linux; Tizen 4.0) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Version/4.0 TV Safari/537.36"
+class UserAgentProfile(NamedTuple):
+    """One Smart-TV client the analyzer can identify as."""
+
+    label: str
+    user_agent: str
+
+
+# Every Tizen release TV Plus ships on, newest first, as the device sends it. A CDN or a
+# packager can serve differently per User-Agent, so which one a run went out as is part of
+# what the run measured — it is recorded in the result and stated in the report.
+#
+# **These strings are copied character for character from the device.** The 2.4 entry says
+# `Linux` where every later one says `LINUX`, and `Tizen 2.4.0` where the others carry one
+# decimal; both are correct and neither is to be tidied up.
+USER_AGENT_PROFILE_TABLE: dict[str, UserAgentProfile] = {
+    "tizen10": UserAgentProfile(
+        "Tizen 10.0 (2026)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 10.0) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) 130.0.6723.116/10.0 TV Safari/537.36",
     ),
-    "tizen6": (
-        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Version/6.0 TV Safari/537.36"
+    "tizen9": UserAgentProfile(
+        "Tizen 9.0 (2025)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 9.0) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) 120.0.6099.5/9.0 TV Safari/537.36",
     ),
-    "tizen7": (
+    "tizen8": UserAgentProfile(
+        "Tizen 8.0 (2024)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 8.0) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) 108.0.5359.1/8.0 TV Safari/537.36",
+    ),
+    "tizen7": UserAgentProfile(
+        "Tizen 7.0 (2023)",
         "Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) 92.0.4515.166/7.0 TV Safari/537.36"
+        "(KHTML, like Gecko) 94.0.4606.31/7.0 TV Safari/537.36",
     ),
-    "desktop": (
+    "tizen65": UserAgentProfile(
+        "Tizen 6.5 (2022)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.5) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) 85.0.4183.93/6.5 TV Safari/537.36",
+    ),
+    "tizen6": UserAgentProfile(
+        "Tizen 6.0 (2021)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) 76.0.3809.146/6.0 TV Safari/537.36",
+    ),
+    "tizen55": UserAgentProfile(
+        "Tizen 5.5 (2020)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 5.5) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) 69.0.3497.106.1/5.5 TV Safari/537.36",
+    ),
+    "tizen5": UserAgentProfile(
+        "Tizen 5.0 (2019)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 5.0) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Version/5.0 TV Safari/537.36",
+    ),
+    "tizen4": UserAgentProfile(
+        "Tizen 4.0 (2018)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 4.0) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Version/4.0 TV Safari/537.36",
+    ),
+    "tizen3": UserAgentProfile(
+        "Tizen 3.0 (2017)",
+        "Mozilla/5.0 (SMART-TV; LINUX; Tizen 3.0) AppleWebKit/538.1 "
+        "(KHTML, like Gecko) Version/3.0 TV Safari/538.1",
+    ),
+    "tizen24": UserAgentProfile(
+        "Tizen 2.4 (2016)",
+        "Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 "
+        "(KHTML, like Gecko) Version/2.4.0 TV Safari/538.1",
+    ),
+    # Not a television. Kept for the comparison an analyst runs when a CDN is suspected of
+    # serving Smart-TV clients differently.
+    "desktop": UserAgentProfile(
+        "Desktop Chrome (comparison)",
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     ),
 }
+
+# The profile a job uses when nothing else says otherwise. A deployment changes this in
+# Settings, which is read through `default_ua_profile()`; this is the fallback when no
+# setting has been stored.
+DEFAULT_UA_PROFILE = "tizen10"
+
+USER_AGENT_PROFILES: dict[str, str] = {
+    key: profile.user_agent for key, profile in USER_AGENT_PROFILE_TABLE.items()
+}
+
+TIZEN_USER_AGENT = USER_AGENT_PROFILES[DEFAULT_UA_PROFILE]
 
 
 class VpbMode(str, Enum):
@@ -78,6 +143,15 @@ class Thresholds(BaseModel):
     segment_extinf_max_ratio_to_td: float = 1.5
     segment_extinf_absolute_max_s: float = 120.0
     av_pts_delta_critical_ms: int = 1000
+    # A demuxed rung and its audio rendition are polled independently, so the audio segment
+    # matching a video segment is often not published yet at the moment the video one is
+    # sampled. The pair is held for this many playlist refreshes before it is given up on,
+    # rather than measured against whichever audio segment happens to be there.
+    av_pair_defer_refreshes: int = 3
+    # How far two segments' decode times may sit apart and still be the same moment on the
+    # timeline. Audio and video are segmented on their own boundaries, so a pair that shares
+    # a media sequence number still starts a fraction of a second apart by design.
+    av_pair_overlap_tolerance_s: float = 1.0
     master_repoll_interval_s: int = 20
     # A packager recomputes BANDWIDTH and AVERAGE-BANDWIDTH per poll, so a small drift is
     # ordinary. Past this fraction the declared rate no longer describes the rung and ABR
@@ -276,3 +350,26 @@ def set_thresholds(new: Thresholds) -> Thresholds:
     global _thresholds
     _thresholds = new
     return _thresholds
+
+
+# The profile every job starts with, replaced at startup and on save by what Settings holds.
+# It lived as a hardcoded literal in five places, so the Settings selection was stored and
+# never read: changing it changed nothing. One value, one reader.
+_default_ua_profile = DEFAULT_UA_PROFILE
+
+
+def default_ua_profile() -> str:
+    """The User-Agent profile a job uses unless it names another one."""
+    return _default_ua_profile
+
+
+def set_default_ua_profile(profile: str) -> str:
+    """Adopt the stored default. A profile the table no longer declares is refused.
+
+    A stale id must not silently become somebody else's User-Agent, for the same reason a
+    stale rule-severity override is dropped rather than carried onto whichever rule takes
+    that identifier next.
+    """
+    global _default_ua_profile
+    _default_ua_profile = profile if profile in USER_AGENT_PROFILE_TABLE else DEFAULT_UA_PROFILE
+    return _default_ua_profile

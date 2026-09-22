@@ -85,7 +85,7 @@ An agent that behaves like a playback client against HLS (TS, fMP4/CMAF, audio-o
 | Downloads Gantt per rendition | Realtime chart 13 |
 | Traffic (bytes/s) and bandwidth charts | Realtime chart 14 |
 | Audio vs video PTS delta per chunk, red above 1 s | `AV-005`, `av_pts_delta_critical_ms`, Realtime chart 10 |
-| Configurable User-Agent per stream | `Thresholds`-adjacent `ua_profile` job option, `config.USER_AGENT_PROFILES` |
+| Configurable User-Agent per stream | `ua_profile` job option over `config.USER_AGENT_PROFILE_TABLE` — eleven Tizen releases (2.4 to 10.0) and one desktop string, defaulting to Tizen 10.0 from Settings → General and overridable per analysis; recorded in the result, the report appendix and the evidence `README.txt` |
 
 ---
 

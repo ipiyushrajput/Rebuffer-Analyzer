@@ -213,6 +213,36 @@ async def generate_bulk(
     }
 
 
+def _bundle_readme(handle: JobHandle) -> str:
+    """What this bundle holds and under what conditions it was collected.
+
+    The User-Agent belongs here for the same reason it belongs in the report appendix: a CDN
+    and a packager both answer per User-Agent, so somebody replaying these URLs by hand gets
+    a different response unless they send the same string.
+    """
+    # A bundle can be pulled while the run is still going, so the options come off the handle
+    # when no result exists yet. Both carry the same fields.
+    options = handle.result.options if handle.result is not None else handle.options.public()
+    lines = [
+        "RBA evidence bundle",
+        "",
+        f"Job:       {handle.id}",
+        f"Channel:   {handle.channel_name}",
+        "",
+        "result.json  every finding, measurement and verdict this run produced",
+        "playlists/   the manifests as they were served, one file per refresh",
+        "",
+        "Requests in this run were made with:",
+        f"  User-Agent profile  {options.get('ua_profile', 'unknown')}",
+        f"  User-Agent          {options.get('user_agent', 'unknown')}",
+        "",
+        "TLS verification is off on every fetch, by design; the certificate chain is still",
+        "inspected and reported in result.json.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 async def build_evidence_bundle(handle: JobHandle) -> bytes:
     """Segments and playlist snapshots recorded around each incident, as ZIP bytes.
 
@@ -241,6 +271,7 @@ async def build_evidence_bundle(handle: JobHandle) -> bytes:
                     __import__("json").dumps(handle.result.as_dict(), indent=2, default=str)
                 ).getvalue(),
             )
+        bundle.writestr("README.txt", _bundle_readme(handle))
         for snapshot in snapshots:
             stamp = snapshot.ts.strftime("%Y%m%dT%H%M%S%f")
             bundle.writestr(

@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.analysis import attribution, correlate, vpb
+from app.analysis import attribution, av_pairing, correlate, vpb
 from app.analysis.collectors.playlist_poller import PlaylistPoller, PollTarget, Snapshot
 from app.analysis.collectors.segment_sampler import (
     RungSampling,
@@ -26,6 +26,8 @@ from app.analysis.collectors.segment_sampler import (
     SegmentSampler,
     choose_full_rungs,
 )
+from app.analysis.layout import LadderLayout
+from app.analysis.layout import detect as detect_layout
 from app.analysis.rules import ads as ads_rules
 from app.analysis.rules import catalogue as R
 from app.analysis.rules import master as master_rules
@@ -37,7 +39,14 @@ from app.analysis.rules import transport as transport_rules
 from app.analysis.rules.base import Finding, FindingCollector, Severity, StreamLayer
 from app.analysis.verdict import Verdict
 from app.analysis.verdict import build as build_verdict
-from app.config import Thresholds, get_settings, get_thresholds
+from app.config import (
+    DEFAULT_UA_PROFILE,
+    TIZEN_USER_AGENT,
+    USER_AGENT_PROFILES,
+    Thresholds,
+    get_settings,
+    get_thresholds,
+)
 from app.drm.context import DrmContext
 from app.drm.detect import DrmInfo, describe_keys
 from app.drm.settings import DrmSettings
@@ -69,7 +78,9 @@ class SessionOptions:
     """Everything a job can configure (§1.3)."""
 
     duration_s: float = 300.0
-    ua_profile: str = "tizen5"
+    # Resolved by the caller from the Settings default; this is the fallback for a
+    # `SessionOptions` built directly, as the CLI and the tests do.
+    ua_profile: str = DEFAULT_UA_PROFILE
     check_sets: tuple[str, ...] = DEFAULT_CHECK_SETS
     renditions: tuple[str, ...] | None = None
     record_evidence: bool = False
@@ -87,6 +98,10 @@ class SessionOptions:
         return {
             "duration_s": self.duration_s,
             "ua_profile": self.ua_profile,
+            # The profile id alone does not say what went out on the wire: a reader of an
+            # escalation has to be able to see the exact string the CDN and the packager
+            # answered, because both can serve differently per User-Agent.
+            "user_agent": USER_AGENT_PROFILES.get(self.ua_profile, TIZEN_USER_AGENT),
             "check_sets": list(self.check_sets),
             "renditions": list(self.renditions) if self.renditions else None,
             "record_evidence": self.record_evidence,
@@ -166,6 +181,12 @@ class LayerContext:
     buffers: dict[str, vpb.VirtualPlayerBuffer] = field(default_factory=dict)
     bandwidth_by_variant: dict[str, int | None] = field(default_factory=dict)
     target_duration_by_variant: dict[str, float] = field(default_factory=dict)
+    # How each rung is packaged. None for a single-rendition channel, which has no master to
+    # read a layout off.
+    layout: LadderLayout | None = None
+    # One per (video rung, audio rendition) pair on a demuxed ladder, keyed by the video
+    # rung. A muxed ladder builds none: its skew comes off the segment itself.
+    pairings: dict[str, av_pairing.AvPairing] = field(default_factory=dict)
     encrypted: bool = False
     content_host: str = ""
     segment_count: int = 0
@@ -466,6 +487,9 @@ class AnalysisSession:
         master = parse_master(text, result.final_url)
         context.master = master
         context.encrypted = master.is_encrypted
+        # Which rungs carry their audio and which point at a rendition for it. Read once,
+        # here, and consulted by every check that asks what a segment is supposed to contain.
+        context.layout = detect_layout(master)
         drm = (
             self._ensure_drm(describe_keys(master.session_keys), context)
             if master.is_encrypted
@@ -550,6 +574,33 @@ class AnalysisSession:
                 self._fetcher,
                 encrypted=context.encrypted,
                 drm=drm,
+            )
+
+        self._build_pairings(context, selected)
+
+    def _build_pairings(self, context: LayerContext, selected: list[Any]) -> None:
+        """One pairing per demuxed rung, against the audio rendition it is polled with.
+
+        A rung whose audio group resolves to several renditions — a channel with an English
+        and a Spanish track — is paired against the first the master lists, which is the one
+        the ladder presents by default. Nothing is paired for a muxed rung: its skew is read
+        off its own segments, as it always was.
+        """
+        if context.layout is None:
+            return
+        polled = set(context.targets)
+        for variant in selected:
+            layout = context.layout.get(variant.variant_id)
+            if layout is None or not layout.demuxed:
+                continue
+            audio = next((a for a in layout.audio_variants if a in polled), None)
+            if audio is None:
+                continue
+            context.pairings[variant.variant_id] = av_pairing.AvPairing(
+                video_variant=variant.variant_id,
+                audio_variant=audio,
+                defer_refreshes=self.thresholds.av_pair_defer_refreshes,
+                overlap_tolerance_s=self.thresholds.av_pair_overlap_tolerance_s,
             )
 
     def _ensure_drm(self, declared: DrmInfo, context: LayerContext) -> DrmContext | None:
@@ -769,6 +820,14 @@ class AnalysisSession:
             )
 
         await self._sample_new_segments(context, target, playlist, snapshot)
+        # A refresh of the audio rendition is the event that could have published the segment
+        # a deferred pair is waiting for, so the deferral clock advances here and nowhere
+        # else. A video segment whose audio never arrives is given up on rather than measured
+        # against whichever audio segment happens to be in the window.
+        if target.kind == "audio":
+            for pairing in context.pairings.values():
+                if pairing.audio_variant == variant:
+                    pairing.expire()
         await self._check_cross_variant(context, snapshot.at)
 
     async def _sample_new_segments(
@@ -950,9 +1009,11 @@ class AnalysisSession:
                 thresholds=self.thresholds,
                 declared_bandwidth=context.bandwidth_by_variant.get(variant),
                 is_audio_only=target.kind == "audio",
+                layout=context.layout.get(variant) if context.layout else None,
                 at=sample.completed_at,
             )
         )
+        await self._pair_across_renditions(context, target, sample)
         await self._record(
             segment_rules.check_segment_pair(
                 history,
@@ -1004,6 +1065,55 @@ class AnalysisSession:
             await self._run_quality_detectors(sample, variant=variant, layer=layer)
 
         await self._emit("segment_result", {"layer": layer.value, "data": sample.as_dict()})
+
+    async def _pair_across_renditions(
+        self, context: LayerContext, target: PollTarget, sample: SampledSegment
+    ) -> None:
+        """Feed this segment into every pairing it belongs to and measure what that unlocks.
+
+        A video segment goes to its own rung's pairing; an audio segment goes to every rung
+        that takes its audio from that rendition, because one audio rendition usually serves
+        the whole ladder.
+        """
+        if not context.pairings:
+            return
+        variant = target.variant
+        analysis = sample.analysis
+        segment = av_pairing.TrackSegment(
+            variant=variant,
+            msn=analysis.msn,
+            uri=analysis.uri,
+            first_pts=(
+                analysis.audio_first_pts if target.kind == "audio" else analysis.video_first_pts
+            ),
+            last_pts=(
+                analysis.audio_last_pts if target.kind == "audio" else analysis.video_last_pts
+            ),
+            at=sample.completed_at,
+        )
+
+        touched: list[av_pairing.AvPairing] = []
+        if target.kind == "audio":
+            for pairing in context.pairings.values():
+                if pairing.audio_variant == variant:
+                    pairing.add_audio(segment)
+                    touched.append(pairing)
+        else:
+            own = context.pairings.get(variant)
+            if own is not None:
+                own.add_video(segment)
+                touched.append(own)
+
+        for pairing in touched:
+            await self._record(
+                segment_rules.check_cross_rendition_av(
+                    pairing,
+                    layer=context.layer,
+                    thresholds=self.thresholds,
+                    at=sample.completed_at,
+                )
+            )
+            pairing.trim()
 
     async def _run_quality_detectors(
         self, sample: SampledSegment, *, variant: str, layer: StreamLayer
@@ -1241,6 +1351,7 @@ class AnalysisSession:
                     )
 
         await self._record(self._player_ratio_finding())
+        await self._check_demuxed_coverage()
 
         self.incidents.close_all(self.ended_at)
         findings = self.collector.all()
@@ -1294,6 +1405,27 @@ class AnalysisSession:
             drm=self.drm.summary() if self.drm is not None else {},
         )
 
+    async def _check_demuxed_coverage(self) -> None:
+        """AUD-006 and AUD-007, once per demuxed rung, over the whole window.
+
+        Both are questions about the window rather than about one segment — whether any
+        audio segment covers a video segment's range, and whether the two totals drifted —
+        so they are asked once, at the end, on everything that was sampled. The detector has
+        been in the rule set since the beginning and nothing ever called it, so `AUD-006`
+        and `AUD-007` were declared and unreachable.
+        """
+        for context in self.layers.values():
+            for pairing in context.pairings.values():
+                video_ranges, audio_ranges = pairing.ranges()
+                await self._record(
+                    segment_rules.check_demuxed_audio_coverage(
+                        video_ranges=video_ranges,
+                        audio_ranges=audio_ranges,
+                        variant=pairing.video_variant,
+                        layer=context.layer,
+                    )
+                )
+
     def _player_ratio_finding(self) -> Finding | None:
         stalls = [e for e in self.player_events if e.get("event") == "stall_end"]
         if not stalls:
@@ -1327,10 +1459,15 @@ class AnalysisSession:
                 history = context.histories.get(variant.variant_id)
                 measured = history.last if history else None
                 sps = (measured.sps if measured else None) or {}
+                layout = context.layout.get(variant.variant_id) if context.layout else None
                 rows.append(
                     {
                         "layer": context.layer.value,
                         "variant": variant.variant_id,
+                        # Muxed or demuxed, and which rendition carries the audio. A reader
+                        # of the ladder has to be able to tell a rung whose segments hold no
+                        # audio by design from one that is missing it.
+                        "layout": layout.as_dict() if layout else None,
                         "declared": {
                             "bandwidth": variant.bandwidth,
                             "average_bandwidth": variant.average_bandwidth,

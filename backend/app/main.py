@@ -53,6 +53,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Severities an operator reassigned are in force before the first job starts, so a run
     # never files findings under a classification the deployment has already changed.
     await settings_api.load_rule_severities_from_db()
+    # The stored User-Agent default, in force before the first job starts. Without this the
+    # Settings selection is written down and never read, and every run goes out as whichever
+    # profile the code shipped with.
+    await settings_api.load_preferences_into_config()
 
     from app.jobs.manager import job_manager
     from app.ws.hub import hub

@@ -39,7 +39,10 @@ def test_settings_expose_thresholds_and_the_rule_catalogue() -> None:
         rules = client.get("/api/settings/rules").json()
 
     assert settings["thresholds"]["cross_variant_msn_error_spread"] == 5
-    assert "tizen5" in settings["ua_profiles"]
+    # A row per profile, not a bare id: the picker renders the label and the string the
+    # requests are actually made with, and holds no second copy of the table.
+    assert {row["id"] for row in settings["ua_profiles"]} >= {"tizen5", "tizen10", "desktop"}
+    assert all(row["label"] and row["user_agent"] for row in settings["ua_profiles"])
     assert rules["count"] > 100
     assert all(rule["root_cause"] for rule in rules["rules"])
 

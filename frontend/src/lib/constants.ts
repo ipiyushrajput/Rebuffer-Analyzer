@@ -100,13 +100,15 @@ export const CHECK_SETS = [
   { id: 'subtitles', label: 'Subtitles' },
 ] as const
 
-export const UA_PROFILES = [
-  { id: 'tizen5', label: 'Tizen 5.0 (TV Plus)' },
-  { id: 'tizen4', label: 'Tizen 4.0' },
-  { id: 'tizen6', label: 'Tizen 6.0' },
-  { id: 'tizen7', label: 'Tizen 7.0' },
-  { id: 'desktop', label: 'Desktop Chrome (comparison)' },
-] as const
+/**
+ * The User-Agent profiles come from `GET /api/settings`, not from here.
+ *
+ * This file used to carry its own copy, and it drifted: it listed five profiles with labels
+ * that no longer matched the strings the backend actually sent. One list, served by the side
+ * that makes the requests.
+ *
+ * @see useUaProfiles in `src/lib/uaProfiles.ts`
+ */
 
 export const AGING_PRESETS = [
   { minutes: 15, label: '15 min' },
