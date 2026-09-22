@@ -4,7 +4,7 @@ PIP   := backend/.venv/bin/pip
 PORT  ?= 8010
 
 .PHONY: help venv install dev backend frontend test test-backend test-frontend lint \
-        lint-backend lint-frontend build up down logs rules clean hooks
+        lint-backend lint-frontend build up down logs rules migrate clean hooks
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -59,6 +59,10 @@ build: ## Build the frontend bundle
 rules: ## Regenerate docs/RULES.md from the rule registry
 	cd backend && .venv/bin/python -m app.cli rules --markdown > ../docs/RULES.md
 	@echo "docs/RULES.md regenerated"
+
+migrate: ## Bring the database schema up to this build
+	cd backend && .venv/bin/python -m alembic upgrade head
+	@echo "database schema is at head"
 
 up: ## Start the stack with docker compose
 	docker compose up -d --build

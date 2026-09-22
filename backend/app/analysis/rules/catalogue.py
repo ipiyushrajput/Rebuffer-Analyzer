@@ -2298,7 +2298,7 @@ SKIP_AV_PAIR_NUMBERING = _r(
     "number identifies one moment across the ladder.",
     NONE,
     "HLS AV Doctor DemuxAnalyzer",
-    ("av_pair_overlap_tolerance_s",),
+    ("av_pair_min_overlap_fraction",),
 )
 NO_DEFECT = _r(
     "INFO-900",

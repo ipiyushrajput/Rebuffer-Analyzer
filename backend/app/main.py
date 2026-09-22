@@ -47,6 +47,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # connection, and every later request fails the same way with no explanation.
         logger.error("database schema creation failed: %s", db_session.describe_error(exc))
 
+    # `create_all` above adds a table that is missing and never touches one that is there, so
+    # a revision that adds a column is outstanding until somebody runs it. Said once, here,
+    # naming the columns and the command: the alternative is an `Unknown column` traceback on
+    # every request and every batch of samples, with nothing pointing at the cause.
+    drift = await db_session.schema_drift(force=True)
+    if drift:
+        logger.error(
+            "the database is behind this build: %s. Until the migration is applied, every "
+            "write to those tables is refused and the measurements in them are lost — %s.",
+            db_session.describe_drift(drift),
+            db_session.MIGRATION_COMMAND,
+        )
+
     from app.api import settings as settings_api
 
     await settings_api.load_thresholds_from_db()

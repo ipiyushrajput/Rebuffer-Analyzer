@@ -611,7 +611,7 @@ class AnalysisSession:
                 video_variant=variant.variant_id,
                 audio_variant=audio,
                 defer_refreshes=self.thresholds.av_pair_defer_refreshes,
-                overlap_tolerance_s=self.thresholds.av_pair_overlap_tolerance_s,
+                min_overlap_fraction=self.thresholds.av_pair_min_overlap_fraction,
             )
 
     def _ensure_drm(self, declared: DrmInfo, context: LayerContext) -> DrmContext | None:

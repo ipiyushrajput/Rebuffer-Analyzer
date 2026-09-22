@@ -98,8 +98,9 @@ Every finding states the measurement, the root cause, the responsible party and 
   whether the rung has anywhere else to put its audio before it fires, and still fires on a
   muxed rung that is genuinely silent. A/V skew on such a ladder is measured across the two
   renditions: video and audio segments are paired by absolute media sequence number, verified
-  to overlap on the timeline, and every skew finding names both segments and how they were
-  matched. A video segment whose audio is not published yet is held rather than measured
+  to overlap on the timeline by at least half the video segment's own length, and every skew
+  finding names both segments and how they were matched. A video segment whose own audio
+  segment was never sampled is paired with nothing rather than with the one beside it. A video segment whose audio is not published yet is held rather than measured
   against the wrong one, and a video range no audio segment covers is `AUD-006`.
 - **The analyzer identifies as a Samsung TV.** Every manifest and segment request carries a
   Tizen `User-Agent`, because a CDN and a packager both answer per User-Agent and a run made

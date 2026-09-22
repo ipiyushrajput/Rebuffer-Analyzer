@@ -30,6 +30,26 @@ def _playwright_status() -> dict[str, Any]:
     return {"installed": True, "detail": "PDF export renders the same HTML report"}
 
 
+async def _schema_status() -> dict[str, Any]:
+    """Whether the database has the columns this build writes.
+
+    Degrading on drift is the point: the rail is the only place an operator looks before
+    wondering why a run produced no samples, and a schema a migration behind refuses every
+    write to the tables it touches.
+    """
+    drift = await db_session.schema_drift()
+    if not drift:
+        return {"ok": True, "detail": "the database has every column this build writes"}
+    return {
+        "ok": False,
+        "detail": (
+            f"{db_session.describe_drift(drift)}. Writes to those tables are refused until "
+            f"the migration is applied — {db_session.MIGRATION_COMMAND}."
+        ),
+        "missing": drift,
+    }
+
+
 def _mp4decrypt_status() -> dict[str, Any]:
     """Bento4, which is how a `cbcs` track is decrypted and the only way it is.
 
@@ -63,6 +83,7 @@ async def health() -> dict[str, Any]:
         "playwright": _playwright_status(),
         "mp4decrypt": _mp4decrypt_status(),
         "database": database,
+        "schema": await _schema_status(),
     }
     degraded = [name for name, value in checks.items() if not _is_ok(value)]
 

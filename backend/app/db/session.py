@@ -135,6 +135,75 @@ async def create_all() -> None:
         await connection.run_sync(Base.metadata.create_all)
 
 
+# The last schema comparison and when it was taken, so `/api/health` can report the drift
+# without inspecting the database on every poll — and so an operator who runs the migration
+# sees the badge clear without restarting the backend.
+_schema_drift: dict[str, list[str]] = {}
+_schema_checked_at: float = 0.0
+SCHEMA_CHECK_TTL_S = 60.0
+
+
+def _inspect_drift(connection: Any) -> dict[str, list[str]]:
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(connection)
+    present = set(inspector.get_table_names())
+    drift: dict[str, list[str]] = {}
+    for table in Base.metadata.sorted_tables:
+        if table.name not in present:
+            # `create_all` makes a table that is absent, so this is not drift.
+            continue
+        have = {column["name"] for column in inspector.get_columns(table.name)}
+        absent = [column.name for column in table.columns if column.name not in have]
+        if absent:
+            drift[table.name] = absent
+    return drift
+
+
+async def schema_drift(*, force: bool = False) -> dict[str, list[str]]:
+    """Columns the code writes that the database does not have, by table.
+
+    `create_all` creates a table that is missing and never alters one that is there, so a
+    revision that adds a column leaves a deployment which has not run it with a schema the
+    code writes against and the server rejects. What that looks like is one
+    `OperationalError: Unknown column` per request and per batch of samples — thousands of
+    lines of traceback, every measurement in those tables lost, and nothing anywhere saying
+    that a migration is outstanding.
+
+    Reported rather than repaired: Alembic owns the schema, the revision already exists, and
+    applying DDL behind an operator's back is not something this project does. The answer is
+    cached briefly so running the migration clears the report without a restart.
+    """
+    global _schema_drift, _schema_checked_at
+    import time
+
+    if not force and (time.monotonic() - _schema_checked_at) < SCHEMA_CHECK_TTL_S:
+        return _schema_drift
+    try:
+        async with engine().connect() as connection:
+            _schema_drift = await connection.run_sync(_inspect_drift)
+    except Exception as exc:
+        # A database that will not answer is already reported by `healthcheck`; this must not
+        # turn into a second, competing story about the same outage.
+        logger.warning("the schema could not be compared: %s", describe_error(exc))
+        _schema_drift = {}
+    _schema_checked_at = time.monotonic()
+    return _schema_drift
+
+
+def describe_drift(drift: dict[str, list[str]]) -> str:
+    """The drift as one sentence, naming every column so the report is actionable."""
+    return "; ".join(
+        f"{table} is missing {', '.join(columns)}" for table, columns in sorted(drift.items())
+    )
+
+
+MIGRATION_COMMAND = (
+    "run `make migrate`, or `cd backend && .venv/bin/python -m alembic upgrade head` "
+    "(Windows: `deploy\\windows\\rba.cmd migrate`)"
+)
+
+
 async def healthcheck() -> dict[str, Any]:
     """Report reachability without revealing host, user, or database name."""
     try:

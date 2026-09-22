@@ -18,6 +18,7 @@
     test      pytest + vitest.
     lint      ruff + mypy + eslint + tsc.
     rules     Regenerate docs\RULES.md from the rule registry.
+    migrate   Bring the database schema up to this build (alembic upgrade head).
     analyse   Analyse one channel headlessly. Pass the URL and any CLI flags after it.
     diagnose  Report what segment sampling did for one channel, and why.
     setup     Re-run the installer (deploy\windows\setup.ps1).
@@ -32,7 +33,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('dev', 'backend', 'frontend', 'serve', 'build', 'test', 'lint', 'rules', 'analyse', 'diagnose', 'setup', 'clean', 'help')]
+    [ValidateSet('dev', 'backend', 'frontend', 'serve', 'build', 'test', 'lint', 'rules', 'migrate', 'analyse', 'diagnose', 'setup', 'clean', 'help')]
     [string]$Command = 'dev',
 
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
@@ -103,6 +104,7 @@ switch ($Command) {
             'test'     = 'pytest + vitest'
             'lint'     = 'ruff + mypy + eslint + tsc'
             'rules'    = 'regenerate docs\RULES.md from the rule registry'
+            'migrate'  = 'bring the database schema up to this build'
             'analyse'  = 'analyse one channel headlessly; pass the URL and any CLI flags'
             'diagnose' = 'report what segment sampling did for one channel, and why'
             'setup'    = 're-run the installer'
@@ -273,6 +275,22 @@ switch ($Command) {
             Pop-Location
         }
         Write-Detail 'docs\RULES.md regenerated'
+    }
+
+    'migrate' {
+        # `create_all` at startup adds a table that is missing and never alters one that is
+        # there, so a revision adding a column is outstanding until this is run. The backend
+        # says so at startup and on the rail; this is the command it names.
+        $python = Get-VenvPython
+        Write-Step 'Applying database migrations'
+        Push-Location (Join-Path $RepoRoot 'backend')
+        try {
+            & $python -m alembic upgrade head
+            Assert-LastExit 'The database migration failed.'
+        } finally {
+            Pop-Location
+        }
+        Write-Detail 'database schema is at head'
     }
 
     'analyse' {

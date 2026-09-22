@@ -105,7 +105,7 @@ class AvPairing:
     video_variant: str
     audio_variant: str
     defer_refreshes: int = 3
-    overlap_tolerance_s: float = 1.0
+    min_overlap_fraction: float = 0.5
 
     # Sampled segments held until they are paired or given up on, by media sequence number.
     pending_video: dict[int, TrackSegment] = field(default_factory=dict)
@@ -143,28 +143,52 @@ class AvPairing:
 
     # -- matching --------------------------------------------------------------
 
-    def _overlaps(self, video: TrackSegment, audio: TrackSegment) -> bool:
-        v_start, v_end = video.start_s, video.end_s
-        a_start, a_end = audio.start_s, audio.end_s
-        if v_start is None or v_end is None or a_start is None or a_end is None:
-            return False
-        return a_start < v_end + self.overlap_tolerance_s and (
-            a_end > v_start - self.overlap_tolerance_s
-        )
+    def _required_overlap_s(self, video: TrackSegment) -> float | None:
+        """How much of this video segment an audio segment has to cover to be its pair.
 
-    def _best_by_time(self, video: TrackSegment) -> TrackSegment | None:
-        """The audio segment sharing the most of this video segment's range."""
+        A fraction of the segment's own length, so the test scales with the ladder: on a
+        six-second rung at the default half, an audio segment must share three seconds of the
+        video's range. That is generous to a packager segmenting audio on its own boundaries
+        and fatal to the failure this closes — two *adjacent* segments touching at a boundary,
+        which share milliseconds and are one whole segment apart.
+        """
         v_start, v_end = video.start_s, video.end_s
         if v_start is None or v_end is None:
             return None
+        span = v_end - v_start
+        if span <= 0:
+            return None
+        return span * self.min_overlap_fraction
+
+    def _overlap_s(self, video: TrackSegment, audio: TrackSegment) -> float:
+        """Seconds of the timeline the two share. Zero or less means they do not meet."""
+        v_start, v_end = video.start_s, video.end_s
+        a_start, a_end = audio.start_s, audio.end_s
+        if v_start is None or v_end is None or a_start is None or a_end is None:
+            return 0.0
+        return min(v_end, a_end) - max(v_start, a_start)
+
+    def _same_moment(self, video: TrackSegment, audio: TrackSegment) -> bool:
+        required = self._required_overlap_s(video)
+        if required is None:
+            return False
+        return self._overlap_s(video, audio) >= required
+
+    def _best_by_time(self, video: TrackSegment) -> TrackSegment | None:
+        """The audio segment sharing the most of this video segment's range, or none.
+
+        "Most" is not enough on its own: the segment before the right one shares a boundary
+        with it, so it overlaps by a few milliseconds and would win against nothing. The
+        winner has to clear `_required_overlap_s` as well.
+        """
+        required = self._required_overlap_s(video)
+        if required is None:
+            return None
         best: TrackSegment | None = None
-        best_overlap = 0.0
+        best_overlap = required
         for audio in self.audio_by_msn.values():
-            a_start, a_end = audio.start_s, audio.end_s
-            if a_start is None or a_end is None:
-                continue
-            overlap = min(v_end, a_end) - max(v_start, a_start)
-            if overlap > best_overlap:
+            overlap = self._overlap_s(video, audio)
+            if overlap >= best_overlap:
                 best, best_overlap = audio, overlap
         return best
 
@@ -180,7 +204,7 @@ class AvPairing:
         for msn in sorted(self.pending_video):
             video = self.pending_video[msn]
             out_of_patience = self.waited.get(msn, 0) > self.defer_refreshes
-            pair = self._match_one(video, out_of_patience=out_of_patience)
+            pair = self._match_one(video)
             if pair is None:
                 if out_of_patience:
                     del self.pending_video[msn]
@@ -193,37 +217,47 @@ class AvPairing:
             self.paired += 1
         return pairs
 
-    def _match_one(self, video: TrackSegment, *, out_of_patience: bool) -> MatchedPair | None:
-        if self.shared_numbering is not False:
-            candidate = self.audio_by_msn.get(video.msn)
-            if candidate is not None:
-                if self._overlaps(video, candidate):
-                    self.shared_numbering = True
-                    return MatchedPair(video=video, audio=candidate, match=MATCH_SEQUENCE)
-                # Same number, different moment: the two playlists number from different
-                # bases. Settled once, for the life of the session.
-                self.shared_numbering = False
-            elif not out_of_patience:
-                # The audio segment for this number is not published yet. Waiting is what
-                # `expire()` counts; nothing is measured against a different segment until
-                # the deferral runs out.
-                return None
+    def _match_one(self, video: TrackSegment) -> MatchedPair | None:
+        """This video segment's audio segment, or nothing.
 
-        # Either the numbers disagree, or the number never arrived and the wait is over.
-        # Overlapping decode times are the looser match, and the one the caller reports.
+        Nothing is a perfectly good answer, and it is the answer whenever the audio segment
+        bearing this number has not been sampled. The temptation is to reach for the nearest
+        audio segment instead; that is what produced
+        `AV-005: audio segment 6394313 starts -5991 ms from video segment 6394314` on a
+        stream in step — a skew of exactly one segment, which is the signature of a
+        mispairing and not of anything a packager did.
+
+        **A missing number is not evidence that the two playlists number differently.** It is
+        evidence that a segment was not sampled, which is ordinary: renditions are polled on
+        their own schedules. Only a number that *both* playlists use, for moments that do not
+        overlap, proves the bases differ — and only then is matching by time sound.
+        """
+        candidate = self.audio_by_msn.get(video.msn)
+        if candidate is not None:
+            if self._same_moment(video, candidate):
+                self.shared_numbering = True
+                return MatchedPair(video=video, audio=candidate, match=MATCH_SEQUENCE)
+            # A number both playlists carry, for two moments that are not the same one. This
+            # is the only sound evidence that they count from different bases, and it settles
+            # the question for the life of the session.
+            self.shared_numbering = False
+
+        if self.shared_numbering is not False:
+            # The numbers agree, or nothing has shown otherwise. The audio segment for this
+            # one either has not arrived yet or never will, and neither is a reason to
+            # measure this video segment against a different one. A video range that no audio
+            # segment ever covers is what `AUD-006` reports, over everything sampled, at the
+            # end of the run.
+            return None
+
         by_time = self._best_by_time(video)
         if by_time is None:
             return None
         if by_time.msn == video.msn:
-            # The numbered audio segment did arrive, just late enough that the wait ran out
-            # first. The numbers agree after all, and calling this a time match would report
-            # INFO-006 against a ladder that numbers its renditions perfectly well.
-            self.shared_numbering = True
+            # The bases differ elsewhere on this rendition, but these two numbers happen to
+            # name the same moment. That is a sequence match, and reporting it as a time one
+            # would overstate what the fallback was needed for.
             return MatchedPair(video=video, audio=by_time, match=MATCH_SEQUENCE)
-        if self.shared_numbering is None:
-            # A time match on a different number, where the matching one never appeared, is
-            # itself the proof that the two playlists do not count from the same base.
-            self.shared_numbering = False
         return MatchedPair(video=video, audio=by_time, match=MATCH_TIME)
 
     def expire(self) -> int:
