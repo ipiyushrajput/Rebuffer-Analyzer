@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.analysis.engine import AnalysisResult, AnalysisSession, SessionOptions
-from app.config import get_settings, get_thresholds
+from app.config import default_ua_profile, get_settings, get_thresholds
 from app.db import session as db_session
 from app.db.models import Finding as FindingRow
 from app.db.models import Incident as IncidentRow
@@ -497,7 +497,7 @@ class JobManager:
 def _options_from_params(params: dict[str, Any]) -> SessionOptions:
     return SessionOptions(
         duration_s=float(params.get("duration_s", 300.0)),
-        ua_profile=str(params.get("ua_profile", "tizen5")),
+        ua_profile=str(params.get("ua_profile") or default_ua_profile()),
         check_sets=tuple(params.get("check_sets") or ("baseline",)),
         renditions=tuple(params["renditions"]) if params.get("renditions") else None,
         record_evidence=bool(params.get("record_evidence", False)),

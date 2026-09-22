@@ -55,6 +55,8 @@ export function DrmSettingsPanel() {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<Draft>(EMPTY)
   const [enabled, setEnabled] = useState(true)
+  const [decryptEvidence, setDecryptEvidence] = useState(false)
+  const [licensePath, setLicensePath] = useState<'relay' | 'direct'>('relay')
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
@@ -62,14 +64,21 @@ export function DrmSettingsPanel() {
   const drm = stored.data?.drm
 
   useEffect(() => {
-    if (drm) setEnabled(drm.enabled)
+    if (!drm) return
+    setEnabled(drm.enabled)
+    setDecryptEvidence(drm.decrypt_evidence)
+    setLicensePath(drm.license_request_path)
   }, [drm])
 
   const save = useMutation({
     mutationFn: () => {
       // A field left blank is left out of the request, so saving the licence URL cannot blank
       // a credential this page was never shown.
-      const body: Record<string, string | boolean> = { enabled }
+      const body: Record<string, string | boolean> = {
+        enabled,
+        decrypt_evidence: decryptEvidence,
+        license_request_path: licensePath,
+      }
       for (const [key, value] of Object.entries(draft)) {
         if (value.trim()) body[key] = value.trim()
       }
@@ -86,7 +95,11 @@ export function DrmSettingsPanel() {
   })
 
   const chip = drm ? statusChip(drm) : null
-  const dirty = enabled !== (drm?.enabled ?? true) || Object.values(draft).some((v) => v.trim())
+  const dirty =
+    enabled !== (drm?.enabled ?? true) ||
+    decryptEvidence !== (drm?.decrypt_evidence ?? false) ||
+    licensePath !== (drm?.license_request_path ?? 'relay') ||
+    Object.values(draft).some((v) => v.trim())
 
   return (
     <div className="space-y-4">
@@ -138,6 +151,30 @@ export function DrmSettingsPanel() {
             </InlineAlert>
           )}
 
+          {/*
+            An evidence bundle already carries the protected segments as the CDN served them.
+            This adds the decrypted copy beside them, which is what a packager needs to
+            reproduce a bitstream defect — and is the content in the clear, in a file that
+            gets forwarded. Off unless a deployment decides otherwise.
+          */}
+          <label className="flex items-center gap-2 text-small text-ink-soft">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={decryptEvidence}
+              onChange={(e) => setDecryptEvidence(e.target.checked)}
+              disabled={!enabled}
+            />
+            Include decrypted media in evidence bundles
+          </label>
+          {decryptEvidence && (
+            <InlineAlert tone="info">
+              Bundles will carry the decrypted segments alongside the encrypted ones, each with
+              its initialisation segment in front of it. No content key is ever written to a
+              bundle, a report or a log.
+            </InlineAlert>
+          )}
+
           <Field
             label="Widevine licence URL"
             htmlFor="drm-license"
@@ -153,6 +190,29 @@ export function DrmSettingsPanel() {
               autoComplete="off"
             />
           </Field>
+
+          <Field
+            label="Licence request path"
+            htmlFor="drm-license-path"
+            hint="Where the browser sends the licence challenge. The relay forwards it from this host, which works whatever the licence server's CORS policy is and keeps its address off the page."
+          >
+            <select
+              id="drm-license-path"
+              className="input"
+              value={licensePath}
+              onChange={(e) => setLicensePath(e.target.value as 'relay' | 'direct')}
+            >
+              <option value="relay">Relay through this analyzer (default)</option>
+              <option value="direct">Direct from the browser</option>
+            </select>
+          </Field>
+          {licensePath === 'direct' && (
+            <InlineAlert tone="info">
+              The page will post the challenge to the licence server itself, so that server has
+              to allow a cross-origin POST and its URL reaches the page. Use it to establish
+              whether it does; the relay needs neither.
+            </InlineAlert>
+          )}
 
           <Field
             label="CPIX endpoint"

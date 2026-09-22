@@ -22,7 +22,12 @@ from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
-from app.config import TIZEN_USER_AGENT, USER_AGENT_PROFILES, get_thresholds
+from app.config import (
+    DEFAULT_UA_PROFILE,
+    TIZEN_USER_AGENT,
+    USER_AGENT_PROFILES,
+    get_thresholds,
+)
 
 # Verification is disabled deliberately (§0.1); the warning would otherwise be emitted on
 # every single fetch and bury real log lines. httpx does not use urllib3, but any library
@@ -237,7 +242,7 @@ class Fetcher:
     def __init__(
         self,
         *,
-        ua_profile: str = "tizen5",
+        ua_profile: str = DEFAULT_UA_PROFILE,
         timeout_s: float | None = None,
         per_host_connections: int = 8,
         extra_headers: dict[str, str] | None = None,

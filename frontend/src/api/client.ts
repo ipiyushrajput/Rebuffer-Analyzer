@@ -93,6 +93,12 @@ export interface PlayerDrm {
   system_label: string
   key_system: string
   license_path: string
+  /**
+   * 'relay' means `license_path` is this application's own relay endpoint; 'direct' means it
+   * is the licence server's own URL and the browser posts to it, which a deployment chooses
+   * in Settings -> DRM.
+   */
+  license_request_path: 'relay' | 'direct'
   configured: boolean
 }
 
@@ -110,6 +116,10 @@ export interface DrmSettings {
   cpix_content_id: string
   keys_configured: boolean
   playback_configured: boolean
+  /** Whether an evidence bundle carries the decrypted media beside the encrypted bytes. */
+  decrypt_evidence: boolean
+  /** Where the browser sends the licence challenge: through this analyzer, or straight on. */
+  license_request_path: 'relay' | 'direct'
   configured: boolean
   endpoint: string
   client_cert_set: boolean

@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from app.analysis.engine import OPTIONAL_CHECK_SETS, SessionOptions
-from app.config import USER_AGENT_PROFILES
+from app.config import USER_AGENT_PROFILES, default_ua_profile
 
 AGING_PRESETS_MINUTES = (15, 30, 60, 180, 360, 720, 1440)
 
@@ -15,7 +15,10 @@ AGING_PRESETS_MINUTES = (15, 30, 60, 180, 360, 720, 1440)
 class JobOptionsIn(BaseModel):
     """Job options (§1.3). Clear keys are held in memory and never persisted or printed."""
 
-    ua_profile: str = "tizen5"
+    # Empty means "whatever Settings says", resolved at `to_session_options` rather than at
+    # class definition: a literal default here is read once at import and never changes, which
+    # is how the Settings selection came to be stored and ignored.
+    ua_profile: str = ""
     check_sets: list[str] = Field(default_factory=list)
     renditions: list[str] | None = None
     record_evidence: bool | None = None
@@ -26,7 +29,7 @@ class JobOptionsIn(BaseModel):
     @field_validator("ua_profile")
     @classmethod
     def _known_profile(cls, value: str) -> str:
-        if value not in USER_AGENT_PROFILES:
+        if value and value not in USER_AGENT_PROFILES:
             raise ValueError(f"Unknown User-Agent profile: {value}")
         return value
 
@@ -41,7 +44,7 @@ class JobOptionsIn(BaseModel):
     def to_session_options(self, *, duration_s: float, default_record: bool) -> SessionOptions:
         return SessionOptions(
             duration_s=duration_s,
-            ua_profile=self.ua_profile,
+            ua_profile=self.ua_profile or default_ua_profile(),
             check_sets=("baseline", *dict.fromkeys(self.check_sets)),
             renditions=tuple(self.renditions) if self.renditions else None,
             record_evidence=self.record_evidence

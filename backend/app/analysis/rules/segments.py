@@ -12,6 +12,8 @@ import itertools
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.analysis.av_pairing import MATCH_TIME, AvPairing, MatchedPair
+from app.analysis.layout import VariantLayout
 from app.analysis.rules import catalogue as R
 from app.analysis.rules.base import Finding, StreamLayer
 from app.config import Thresholds
@@ -42,6 +44,9 @@ def check_segment(
     thresholds: Thresholds,
     declared_bandwidth: int | None = None,
     is_audio_only: bool = False,
+    # How the ladder packages this rung. None for a single-rendition channel, where there is
+    # no master to read a layout off and the rung is muxed by construction.
+    layout: VariantLayout | None = None,
     at: dt.datetime | None = None,
 ) -> list[Finding]:
     findings: list[Finding] = []
@@ -165,6 +170,7 @@ def check_segment(
         at=moment,
         evidence=evidence,
         is_audio_only=is_audio_only,
+        layout=layout,
     )
     findings += _check_av(
         analysis, variant=variant, layer=layer, thresholds=thresholds, at=moment, evidence=evidence
@@ -244,14 +250,44 @@ def _check_audio(
     at: dt.datetime,
     evidence: dict[str, Any],
     is_audio_only: bool,
+    layout: VariantLayout | None,
 ) -> list[Finding]:
     findings: list[Finding] = []
-    if analysis.has_video and not analysis.has_audio and not is_audio_only:
+    if not analysis.has_video:
+        return findings
+    if layout is not None:
+        layout.observe(has_audio=analysis.has_audio, has_video=analysis.has_video, msn=analysis.msn)
+
+    # A rung whose audio lives in a rendition of its own is *supposed* to produce video
+    # segments with no audio track. AUD-003 is about a rung that has nowhere else to carry
+    # its audio, so it asks the ladder, not the segment. Without a layout — a single-rendition
+    # channel, or a caller that did not supply one — the rung is muxed by construction.
+    demuxed = layout.demuxed if layout is not None else False
+
+    if not analysis.has_audio and not is_audio_only and not demuxed:
         findings.append(
             R.AUD_MISSING_IN_MUXED.raise_finding(
                 f"Segment {analysis.msn} on {variant} carries video and no audio elementary "
                 "stream.",
                 evidence=evidence,
+                stream_layer=layer,
+                variant=variant,
+                at=at,
+            )
+        )
+    elif analysis.has_audio and demuxed and layout is not None and not layout.disagreement_reported:
+        layout.disagreement_reported = True
+        findings.append(
+            R.AUD_LAYOUT_DISAGREES.raise_finding(
+                f"{variant} takes its audio from rendition "
+                f"{', '.join(layout.audio_variants)} and segment {analysis.msn} of the rung "
+                f"itself also carries an audio track ({analysis.audio_codec or 'unnamed'}).",
+                evidence={
+                    **evidence,
+                    "audio_group": layout.audio_group,
+                    "audio_variants": list(layout.audio_variants),
+                    "segment_audio_codec": analysis.audio_codec,
+                },
                 stream_layer=layer,
                 variant=variant,
                 at=at,
@@ -293,6 +329,88 @@ def _check_av(
                 f"against an error threshold of {thresholds.av_skew_error_ms} ms "
                 f"(normal is under {thresholds.av_skew_normal_ms} ms).",
                 evidence={**evidence, "av_skew_ms": skew},
+                stream_layer=layer,
+                variant=variant,
+                at=at,
+            )
+        )
+    return findings
+
+
+def check_cross_rendition_av(
+    pairing: AvPairing,
+    *,
+    layer: StreamLayer,
+    thresholds: Thresholds,
+    at: dt.datetime | None = None,
+) -> list[Finding]:
+    """A/V skew on a demuxed rung, measured on the pairs `AvPairing` matched.
+
+    Same thresholds and same rules as the muxed path, because it is the same defect: the
+    audio starts at a different timeline position than the video it is presented with. Only
+    where the two timestamps come from differs, so every finding carries the pair it was
+    measured on — video rung, audio rendition, both media sequence numbers, both URIs — and
+    whether the pair was matched by sequence number or by time.
+    """
+    findings: list[Finding] = []
+    moment = at or dt.datetime.now(dt.UTC)
+    variant = pairing.video_variant
+
+    for pair in pairing.match():
+        if pair.match == MATCH_TIME and not pairing.fallback_reported:
+            pairing.fallback_reported = True
+            findings.append(
+                R.SKIP_AV_PAIR_NUMBERING.raise_finding(
+                    f"{variant} and its audio rendition {pairing.audio_variant} do not number "
+                    f"their segments from the same base: video segment {pair.video.msn} and "
+                    f"audio segment {pair.audio.msn} cover the same moment. The A/V pairs on "
+                    f"this rung were matched by overlapping decode times, within "
+                    f"{pairing.overlap_tolerance_s} s.",
+                    evidence=pair.evidence(),
+                    stream_layer=layer,
+                    variant=variant,
+                    at=moment,
+                )
+            )
+        findings += _check_pair_skew(
+            pair, variant=variant, layer=layer, thresholds=thresholds, at=moment
+        )
+    return findings
+
+
+def _check_pair_skew(
+    pair: MatchedPair,
+    *,
+    variant: str,
+    layer: StreamLayer,
+    thresholds: Thresholds,
+    at: dt.datetime,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    skew = pair.skew_ms
+    magnitude = abs(skew)
+    evidence = {**pair.evidence(), "av_skew_ms": skew}
+
+    if magnitude >= thresholds.av_pts_delta_critical_ms:
+        findings.append(
+            R.AV_DELTA_CRITICAL.raise_finding(
+                f"Audio segment {pair.audio.msn} on {pair.audio.variant} starts {skew:+.0f} ms "
+                f"from video segment {pair.video.msn} on {variant}, against a critical "
+                f"threshold of {thresholds.av_pts_delta_critical_ms} ms.",
+                evidence=evidence,
+                stream_layer=layer,
+                variant=variant,
+                at=at,
+            )
+        )
+    elif magnitude > thresholds.av_skew_error_ms:
+        findings.append(
+            R.AV_SKEW.raise_finding(
+                f"Audio segment {pair.audio.msn} on {pair.audio.variant} starts {skew:+.0f} ms "
+                f"from video segment {pair.video.msn} on {variant}, against an error threshold "
+                f"of {thresholds.av_skew_error_ms} ms (normal is under "
+                f"{thresholds.av_skew_normal_ms} ms).",
+                evidence=evidence,
                 stream_layer=layer,
                 variant=variant,
                 at=at,

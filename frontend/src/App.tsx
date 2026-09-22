@@ -73,13 +73,24 @@ export default function App() {
   const thresholds = (settings?.thresholds as Record<string, number>) ?? {}
 
   const degraded = (health?.degraded as string[]) ?? []
+  /*
+   * Bento4 is optional rather than degrading: `cenc` — every TV Plus channel measured so far
+   * — is decrypted in process with no binary at all. What it costs to be without it is one
+   * scheme, so it is stated as a capability rather than counted as a failure.
+   */
+  const checks = (health?.checks as Record<string, { installed?: boolean }> | undefined) ?? {}
+  const noBento4 = checks.mp4decrypt?.installed === false
   const railHealth = {
     ok: degraded.length === 0,
     label: degraded.length === 0 ? 'System healthy' : 'Degraded',
-    detail:
+    detail: [
       degraded.length === 0
         ? 'Analyzer host · every dependency answers'
         : degraded.map((item) => DEGRADED_NOTE[item] ?? `${item} is unavailable.`).join(' '),
+      noBento4 ? 'mp4decrypt is not installed, so cbcs tracks are not decrypted.' : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
   }
 
   return (

@@ -304,13 +304,15 @@
 {% if ladder %}
 <table>
   <thead>
-    <tr><th>Rung</th><th>Declared bandwidth</th><th>Declared / measured resolution</th>
+    <tr><th>Rung</th><th>Audio</th><th>Declared bandwidth</th><th>Declared / measured resolution</th>
       <th>Declared / measured frame rate</th><th>Profile · level</th><th>Ref frames</th><th>Scan</th><th>Peak measured</th></tr>
   </thead>
   <tbody>
   {% for row in ladder %}
     <tr>
       <td><code>{{ row.variant }}</code></td>
+      {# Muxed or demuxed: a rung whose segments hold no audio by design must not read as one missing it. #}
+      <td class="small">{% if row.layout %}{{ row.layout.layout }}{% if row.layout.audio_variants %}<br><span class="muted mono">{{ row.layout.audio_variants|join(', ') }}</span>{% endif %}{% else %}—{% endif %}</td>
       <td class="mono">{{ (row.declared.bandwidth or 0) // 1000 }} kbit/s</td>
       <td class="mono">{{ row.declared.resolution or '—' }}<br><span class="muted">{{ row.measured.resolution or '—' }}</span></td>
       <td class="mono">{{ row.declared.frame_rate or '—' }}<br><span class="muted">{{ '%.3f'|format(row.measured.frame_rate) if row.measured.frame_rate else '—' }}</span></td>
@@ -322,7 +324,8 @@
   {% endfor %}
   </tbody>
 </table>
-<p class="small muted">The upper value is the manifest declaration; the lower value is what the bitstream carries.</p>
+<p class="small muted">The upper value is the manifest declaration; the lower value is what the bitstream carries.
+  A rung marked <strong>demuxed</strong> takes its audio from the rendition named beneath, so its own segments carry video only.</p>
 {% else %}
 <p>No rung was sampled deeply enough to build the ladder audit.</p>
 {% endif %}
@@ -414,6 +417,23 @@
 {% if drm.key_server_error %}
 <p class="small">The key server: {{ drm.key_server_error }}</p>
 {% endif %}
+</div>
+{% endif %}
+
+{% if user_agent %}
+<h3>What the analyzer identified as</h3>
+<div class="card">
+<p class="small muted">
+  Every manifest and segment request in this run carried the User-Agent below. A CDN and a
+  packager both answer per User-Agent, so a rerun under a different profile measures a
+  different response.
+</p>
+<table>
+  <thead><tr><th>Profile</th><th>User-Agent sent</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">{{ ua_profile }}</td><td class="mono">{{ user_agent }}</td></tr>
+  </tbody>
+</table>
 </div>
 {% endif %}
 

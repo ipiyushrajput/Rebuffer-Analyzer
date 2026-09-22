@@ -21,7 +21,7 @@ from urllib.parse import quote, urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
-from app.config import get_settings, get_thresholds
+from app.config import default_ua_profile, get_settings, get_thresholds
 from app.hls.playlist import is_master
 from app.hls.uri import resolve
 from app.net.fetcher import Fetcher
@@ -48,18 +48,29 @@ URI_ATTRIBUTE_TAGS = (
 _URI_ATTR = re.compile(r'(URI=")([^"]+)(")')
 
 _fetcher: Fetcher | None = None
+# The profile the cached client was built with. The proxy is what carries the preview's
+# requests, so it has to identify as whatever Settings currently says; a client pinned for
+# the life of the process would go on sending the profile that was default at startup.
+_fetcher_profile = ""
 
 
 def _client() -> Fetcher:
-    global _fetcher
+    global _fetcher, _fetcher_profile
+    wanted = default_ua_profile()
+    if _fetcher is not None and _fetcher_profile != wanted:
+        # Replaced rather than reconfigured: the User-Agent is fixed when the client is
+        # built. The old one is left to be garbage-collected with its connection pool; a
+        # Settings change is rare and a live preview keeps whatever it already opened.
+        _fetcher = None
     if _fetcher is None:
         settings = get_settings()
         _fetcher = Fetcher(
-            ua_profile="tizen5",
+            ua_profile=wanted,
             # The proxy serves a live player, so it tolerates a longer stall than a check does.
             timeout_s=max(get_thresholds().request_timeout_s, 15.0),
             per_host_connections=settings.rba_per_host_connections,
         )
+        _fetcher_profile = wanted
     return _fetcher
 
 

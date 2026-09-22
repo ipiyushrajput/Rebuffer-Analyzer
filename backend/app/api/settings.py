@@ -14,7 +14,15 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.config import Thresholds, get_settings, get_thresholds, set_thresholds
+from app.config import (
+    USER_AGENT_PROFILE_TABLE,
+    Thresholds,
+    default_ua_profile,
+    get_settings,
+    get_thresholds,
+    set_default_ua_profile,
+    set_thresholds,
+)
 from app.db import session as db_session
 from app.db.models import SettingRow
 
@@ -26,7 +34,7 @@ PREFERENCES_KEY = "preferences"
 RULE_SEVERITY_KEY = "rule_severity"
 
 DEFAULT_PREFERENCES: dict[str, Any] = {
-    "ua_profile": "tizen5",
+    "ua_profile": default_ua_profile(),
     "max_concurrent_jobs": 20,
     "bulk_default_concurrency": 5,
     "sample_retention_days": 30,
@@ -106,10 +114,22 @@ async def read_settings() -> dict[str, Any]:
     }
 
 
-def _ua_profiles() -> list[str]:
-    from app.config import USER_AGENT_PROFILES
+def _ua_profiles() -> list[dict[str, str]]:
+    """Every profile, with the string each one sends.
 
-    return list(USER_AGENT_PROFILES)
+    The list is served rather than duplicated in the client: it used to exist twice, and the
+    copy in `constants.ts` drifted from the one the requests actually go out with.
+    """
+    return [
+        {"id": key, "label": profile.label, "user_agent": profile.user_agent}
+        for key, profile in USER_AGENT_PROFILE_TABLE.items()
+    ]
+
+
+async def load_preferences_into_config() -> None:
+    """Put the stored User-Agent default in force for jobs started from now on."""
+    preferences = await _load_preferences()
+    set_default_ua_profile(str(preferences.get("ua_profile") or default_ua_profile()))
 
 
 @router.put("/settings")
@@ -125,6 +145,9 @@ async def write_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if "preferences" in payload:
         preferences = {**preferences, **payload["preferences"]}
         await _store(PREFERENCES_KEY, preferences)
+        # In force immediately, not at the next restart: an operator who changes the profile
+        # and starts a run expects that run to go out as what they chose.
+        set_default_ua_profile(str(preferences.get("ua_profile") or default_ua_profile()))
 
     return {
         "thresholds": thresholds.model_dump(mode="json"),

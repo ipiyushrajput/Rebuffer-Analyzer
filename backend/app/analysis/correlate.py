@@ -243,6 +243,16 @@ class IncidentTracker:
             return incident
         return None
 
+    @property
+    def anything_open(self) -> bool:
+        """Whether any incident is open right now.
+
+        Read by the evidence store: a segment sampled while something is wrong is the one
+        worth keeping when the budget runs out, and that is only knowable at the moment it
+        is sampled.
+        """
+        return bool(self._open)
+
     def close_all(self, at: dt.datetime) -> None:
         for key, incident in list(self._open.items()):
             incident.ended_at = at

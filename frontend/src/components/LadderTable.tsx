@@ -14,6 +14,16 @@ export interface LadderRow {
     codecs: string | null
     video_range: string | null
   }
+  /**
+   * How the rung is packaged. `null` for a single-rendition channel, which has no master to
+   * read a layout off. A demuxed rung's segments carry video only, by design — the reason
+   * AUD-003 no longer fires on them.
+   */
+  layout: {
+    layout: 'muxed' | 'demuxed'
+    audio_group: string | null
+    audio_variants: string[]
+  } | null
   measured: {
     resolution: string | null
     profile: string | null
@@ -72,6 +82,7 @@ export function LadderTable({ rows }: { rows: LadderRow[] }) {
           <thead>
             <tr>
               <th>Rung</th>
+              <th>Audio</th>
               <th>Bandwidth</th>
               <th>Resolution</th>
               <th>Frame rate</th>
@@ -86,6 +97,14 @@ export function LadderTable({ rows }: { rows: LadderRow[] }) {
             {rows.map((row) => (
               <tr key={`${row.layer}:${row.variant}`}>
                 <td className="font-semibold text-ink">{row.variant}</td>
+                <td className="text-micro text-ink">
+                  {row.layout ? row.layout.layout : '—'}
+                  {row.layout && row.layout.audio_variants.length > 0 && (
+                    <div className="font-mono text-[11px] text-ink-faint">
+                      {row.layout.audio_variants.join(', ')}
+                    </div>
+                  )}
+                </td>
                 <Cell declared={kbps(row.declared.bandwidth)} measured={undefined} />
                 <Cell declared={row.declared.resolution} measured={row.measured.resolution} />
                 <Cell
@@ -125,7 +144,8 @@ export function LadderTable({ rows }: { rows: LadderRow[] }) {
       )}
       <p className="px-5 py-2.5 text-micro text-ink-muted">
         The upper value in each cell is the manifest declaration; the lower value is what the
-        bitstream carries.
+        bitstream carries. A rung marked <span className="font-mono">demuxed</span> takes its
+        audio from the rendition named beneath it, so its own segments carry video only.
       </p>
     </div>
   )

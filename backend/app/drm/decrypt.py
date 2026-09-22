@@ -24,8 +24,12 @@ parsers downstream read exactly what a player would decode.
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.drm.cenc import CBCS, CencError, TrackEncryption, decrypt_fragment
 
@@ -34,6 +38,13 @@ logger = logging.getLogger(__name__)
 
 class DecryptError(Exception):
     """The segment could not be decrypted. The message is what a finding states."""
+
+
+# The two backends, named in every result so a reader knows which produced the bytes.
+IN_PROCESS = "cenc"
+MP4DECRYPT = "mp4decrypt"
+
+MP4DECRYPT_BINARY = "mp4decrypt"
 
 
 @dataclass(slots=True)
@@ -45,10 +56,100 @@ class DecryptResult:
     reason: str = ""
     # What the decrypt cost, so a long aging run can be judged on more than its findings.
     duration_ms: float = 0.0
+    # Which backend produced these bytes. Empty on a failure that never reached one.
+    backend: str = ""
 
     @property
     def size(self) -> int:
         return len(self.data)
+
+
+def mp4decrypt_path() -> str | None:
+    """Where Bento4's `mp4decrypt` is on this host, or None.
+
+    It is the only way `cbcs` is decrypted: that scheme is AES-CBC with a crypt/skip pattern,
+    a different cipher from the AES-CTR `app/drm/cenc.py` implements. A host without it reads
+    a `cbcs` channel's transport and timing and says the payload was not read, rather than
+    attempting a cipher it does not have.
+    """
+    return shutil.which(MP4DECRYPT_BINARY)
+
+
+def backends() -> dict[str, bool]:
+    """What this host can decrypt with. Reported by `/api/health`."""
+    return {IN_PROCESS: available(), MP4DECRYPT: mp4decrypt_path() is not None}
+
+
+def decrypt_with_mp4decrypt(
+    data: bytes,
+    *,
+    key_hex: str,
+    kid_hex: str,
+    init_segment: bytes = b"",
+    timeout_s: float = 20.0,
+) -> DecryptResult:
+    """One fragment through Bento4, for the scheme the in-process path refuses.
+
+    `mp4decrypt` reads a file and writes a file, so the fragment goes to a temporary
+    directory with its initialisation segment in front of it — Bento4 needs the `tenc` box to
+    know what it is decrypting — and the directory goes away whether it succeeded or not. The
+    key is passed on the command line as `--key <KID>:<KEY>`, which is the only interface it
+    has; it is never logged and never written to a file.
+    """
+    started = time.perf_counter()
+    if not key_hex or not kid_hex:
+        return DecryptResult(reason="No content key and key identifier pair for this rendition.")
+    binary = mp4decrypt_path()
+    if binary is None:
+        return DecryptResult(
+            reason=(
+                "This track uses the cbcs scheme, which needs Bento4's mp4decrypt, and that "
+                "binary is not installed on this analyzer host."
+            )
+        )
+
+    with tempfile.TemporaryDirectory(prefix="rba-decrypt-") as workdir:
+        source = Path(workdir) / "in.mp4"
+        target = Path(workdir) / "out.mp4"
+        source.write_bytes(init_segment + data)
+        try:
+            # A fixed argv with no shell: the only variable parts are paths this function
+            # created and the key, which never reaches a log or a file.
+            completed = subprocess.run(
+                [binary, "--key", f"{kid_hex}:{key_hex}", str(source), str(target)],
+                capture_output=True,
+                timeout=timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return DecryptResult(
+                reason=f"mp4decrypt did not finish within {timeout_s:.0f} s.",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                backend=MP4DECRYPT,
+            )
+        elapsed = (time.perf_counter() - started) * 1000
+        if completed.returncode != 0 or not target.exists():
+            # stderr can echo the command line, and the command line carries the key.
+            return DecryptResult(
+                reason=f"mp4decrypt exited {completed.returncode} without producing output.",
+                duration_ms=elapsed,
+                backend=MP4DECRYPT,
+            )
+        plain = target.read_bytes()
+
+    expected = len(init_segment) + len(data)
+    if len(plain) < expected * 0.8:
+        # Decryption rewrites sample payloads in place; a much smaller file means Bento4
+        # dropped tracks rather than decrypting them, and it is not the packager's bitstream.
+        return DecryptResult(
+            reason=(
+                f"mp4decrypt produced {len(plain)} bytes from {expected}, under the 80% a "
+                "decrypt of this fragment has to keep."
+            ),
+            duration_ms=elapsed,
+            backend=MP4DECRYPT,
+        )
+    return DecryptResult(data=plain, ok=True, duration_ms=elapsed, backend=MP4DECRYPT)
 
 
 def available() -> bool:
@@ -127,4 +228,4 @@ def decrypt_segment(
         )
     # A fragment that comes back byte for byte identical carried no `senc`, so there was
     # nothing in it to decrypt and its bytes are already the ones a decoder reads.
-    return DecryptResult(data=plain, ok=True, duration_ms=elapsed)
+    return DecryptResult(data=plain, ok=True, duration_ms=elapsed, backend=IN_PROCESS)

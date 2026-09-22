@@ -166,6 +166,36 @@ def test_reports_are_listed_filtered_and_deleted(origin: FixtureServer) -> None:
         assert client.delete(f"/api/reports/{report_id}").status_code == 404
 
 
+def test_an_evidence_bundle_carries_the_segments_it_was_collected_for(
+    origin: FixtureServer,
+) -> None:
+    """The defect this closes: the bundle wrote `result.json` and the playlists and claimed
+    in its docstring to write segments. It wrote none, on a clear channel as much as a
+    protected one, so an evidence download for a stream defect never carried the stream."""
+    url = build_simple_channel(origin, variant_count=1, segment_count=3)
+
+    with TestClient(create_app()) as client:
+        session_id = client.post(
+            "/api/realtime/sessions",
+            json={"playback_url": url, "options": {"record_evidence": True}},
+        ).json()["id"]
+        time.sleep(6.0)
+        bundle = client.get(f"/api/jobs/{session_id}/evidence.zip")
+        client.delete(f"/api/realtime/sessions/{session_id}")
+
+    assert bundle.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+        names = archive.namelist()
+        readme = archive.read("README.txt").decode()
+        segments = [n for n in names if n.startswith("segments/")]
+        assert segments, f"no segment media in the bundle: {names}"
+        assert archive.read(segments[0]), "a segment file with no bytes in it"
+
+    # A clear channel has nothing to decrypt, and nothing to say about keys either way.
+    assert "decrypted/" not in "".join(names)
+    assert "Segments held:" in readme
+
+
 def test_an_evidence_bundle_is_a_zip_with_playlists(origin: FixtureServer) -> None:
     url = build_simple_channel(origin, variant_count=1, segment_count=3)
 

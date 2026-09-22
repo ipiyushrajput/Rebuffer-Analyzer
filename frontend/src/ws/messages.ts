@@ -141,10 +141,24 @@ export interface PlayerEventOut {
     | 'error'
     | 'dropped_frames'
     | 'startup'
+    /*
+     * The licence lifecycle in the browser: the key session opening, a licence loading, the
+     * first fragment decrypting, or the page having no secure context to do EME in at all.
+     * `details` names which. A DRM failure is then evidence in the run rather than a console
+     * line nobody kept.
+     */
+    | 'drm'
   ts?: string
   variant?: string
   level?: number
+  /** The rendition's own bitrate, sent only when the player switches rung. */
   bitrate?: number
+  /**
+   * What the player measured the network doing, in bits per second. A different quantity
+   * from `bitrate`: on a small segment off a nearby CDN hls.js estimates in gigabits, which
+   * is not a rung anyone is playing.
+   */
+  bandwidth_bps?: number
   buffer_s?: number
   stall_duration_s?: number
   dropped?: number

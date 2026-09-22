@@ -164,14 +164,21 @@ def pat_section() -> bytes:
 
 
 def pmt_section(
-    *, with_audio: bool = True, audio_type: int = STREAM_TYPE_AAC, with_scte35: bool = False
+    *,
+    with_audio: bool = True,
+    with_video: bool = True,
+    audio_type: int = STREAM_TYPE_AAC,
+    with_scte35: bool = False,
 ) -> bytes:
     body = bytearray()
     body += (1).to_bytes(2, "big")
     body += b"\xc1\x00\x00"
-    body += (0xE000 | VIDEO_PID).to_bytes(2, "big")
+    # The PCR rides on whichever elementary stream the segment actually carries. A demuxed
+    # audio rendition has no video PID at all, so it cannot be the video one.
+    body += (0xE000 | (VIDEO_PID if with_video else AUDIO_PID)).to_bytes(2, "big")
     body += (0xF000).to_bytes(2, "big")
-    body += bytes([STREAM_TYPE_H264]) + (0xE000 | VIDEO_PID).to_bytes(2, "big") + b"\xf0\x00"
+    if with_video:
+        body += bytes([STREAM_TYPE_H264]) + (0xE000 | VIDEO_PID).to_bytes(2, "big") + b"\xf0\x00"
     if with_audio:
         body += bytes([audio_type]) + (0xE000 | AUDIO_PID).to_bytes(2, "big") + b"\xf0\x00"
     if with_scte35:
@@ -278,6 +285,10 @@ class SegmentSpec:
     duration: float = 6.0
     pts_offset_s: float = 0.0
     with_audio: bool = True
+    # False builds an audio-only segment: no video PID in the PMT and no video PES. That is
+    # what a demuxed audio rendition publishes, and the only way to produce an A/V skew that
+    # no single segment carries.
+    with_video: bool = True
     audio_pts_offset_ms: float = 0.0
     start_with_idr: bool = True
     include_sps: bool = True
@@ -304,7 +315,11 @@ def build_ts_segment(spec: SegmentSpec) -> bytes:
     if not spec.missing_pmt:
         muxer.psi(
             PMT_PID,
-            pmt_section(with_audio=spec.with_audio, with_scte35=spec.scte35_section is not None),
+            pmt_section(
+                with_audio=spec.with_audio,
+                with_video=spec.with_video,
+                with_scte35=spec.scte35_section is not None,
+            ),
         )
 
     video_pts = int(spec.pts_offset_s * PTS_HZ)
@@ -323,14 +338,15 @@ def build_ts_segment(spec: SegmentSpec) -> bytes:
     filler = 0 if spec.tiny else spec.padding_bytes
     nals += _annexb(1, b"\x9a" * filler) if filler else b""
 
-    muxer.pes(
-        VIDEO_PID,
-        nals,
-        video_pts,
-        stream_id=0xE0,
-        pcr=video_pts,
-        skip_counter=spec.continuity_error,
-    )
+    if spec.with_video:
+        muxer.pes(
+            VIDEO_PID,
+            nals,
+            video_pts,
+            stream_id=0xE0,
+            pcr=video_pts,
+            skip_counter=spec.continuity_error,
+        )
 
     if spec.with_audio:
         audio_pts = video_pts + int(spec.audio_pts_offset_ms / 1000.0 * PTS_HZ)
@@ -345,11 +361,13 @@ def build_ts_segment(spec: SegmentSpec) -> bytes:
             ),
             audio_pts,
             stream_id=0xC0,
+            pcr=audio_pts if not spec.with_video else None,
         )
 
     # A second PES so last_pts lands at the end of the declared duration.
     end_pts = video_pts + int(spec.duration * PTS_HZ)
-    muxer.pes(VIDEO_PID, _annexb(1, b"\x9a" * 64), end_pts, stream_id=0xE0)
+    if spec.with_video:
+        muxer.pes(VIDEO_PID, _annexb(1, b"\x9a" * 64), end_pts, stream_id=0xE0)
     if spec.with_audio:
         muxer.pes(
             AUDIO_PID,
@@ -452,10 +470,16 @@ def render_master_playlist(
     if independent_segments:
         lines.append("#EXT-X-INDEPENDENT-SEGMENTS")
     for group_id, name, uri in audio_renditions or []:
-        lines.append(
+        entry = (
             f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="{group_id}",NAME="{name}",'
-            f'LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="{uri}"'
+            f'LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES'
         )
+        # An empty URI renders the entry without one, which is how RFC 8216 §4.3.4.2.1
+        # spells audio that rides in the video segments. Such a rung is muxed, and the
+        # layout detector has to say so despite the AUDIO attribute.
+        if uri:
+            entry += f',URI="{uri}"'
+        lines.append(entry)
     for variant in variants:
         attrs = [f"BANDWIDTH={variant.bandwidth}"]
         if variant.average_bandwidth:

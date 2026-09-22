@@ -103,12 +103,20 @@ def player_config(info: DrmInfo, stored: DrmSettings) -> dict[str, object]:
     the relay path, never the licence server's own URL.
     """
     widevine = info.system is KeySystem.WIDEVINE and stored.enabled
+    direct = stored.license_request_path == "direct"
+    # `direct` is the one case where the licence server's own URL reaches the page, and it
+    # only does so because a deployment asked for it: the browser cannot post to a server it
+    # has not been told about. Everything else keeps the relay path.
+    license_path = ""
+    if widevine:
+        license_path = stored.license_url.strip() if direct else "/api/drm/license"
     return {
         "protected": info.protected,
         "system": info.system.value,
         "system_label": info.system.label,
         "key_system": "com.widevine.alpha" if widevine else "",
-        "license_path": "/api/drm/license" if widevine else "",
+        "license_path": license_path,
+        "license_request_path": stored.license_request_path if widevine else "relay",
         # False means the deployment has no licence URL configured, which is what a page says
         # instead of letting the player fail with an EME error nobody can read.
         "configured": stored.playback_configured if widevine else True,

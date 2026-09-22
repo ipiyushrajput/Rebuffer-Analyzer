@@ -285,6 +285,10 @@ def render_report(
         "ref_frames_differ": len(ref_frames) > 1,
         "redirect_chains": result.redirect_chains,
         "thresholds": result.thresholds.model_dump(mode="json"),
+        # A CDN and a packager can both serve differently per User-Agent, so the string the
+        # run went out as is part of what the run measured, and an escalation has to carry it.
+        "ua_profile": result.options.get("ua_profile", ""),
+        "user_agent": result.options.get("user_agent", ""),
         # A reader of an escalation has to be able to see that a severity was reassigned on
         # this deployment, the same way the thresholds a finding was measured against are
         # stated. An unreassigned analyzer renders nothing here.

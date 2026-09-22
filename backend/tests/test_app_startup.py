@@ -17,7 +17,17 @@ def test_health_reports_every_dependency() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] in ("ok", "degraded")
-    assert set(body["checks"]) == {"ffmpeg", "ffprobe", "playwright", "database"}
+    assert set(body["checks"]) == {
+        "ffmpeg",
+        "ffprobe",
+        "playwright",
+        "mp4decrypt",
+        "database",
+    }
+    # Bento4 is optional — cenc decrypts in process — so a host without it is a working
+    # deployment, not a degraded one, and the check says so without hiding the consequence.
+    assert body["checks"]["mp4decrypt"]["ok"] is True
+    assert body["checks"]["mp4decrypt"]["detail"]
     assert "thresholds" in body
     assert body["thresholds"]["rebuffer_ratio_threshold"] == 0.25
 
@@ -39,7 +49,10 @@ def test_settings_expose_thresholds_and_the_rule_catalogue() -> None:
         rules = client.get("/api/settings/rules").json()
 
     assert settings["thresholds"]["cross_variant_msn_error_spread"] == 5
-    assert "tizen5" in settings["ua_profiles"]
+    # A row per profile, not a bare id: the picker renders the label and the string the
+    # requests are actually made with, and holds no second copy of the table.
+    assert {row["id"] for row in settings["ua_profiles"]} >= {"tizen5", "tizen10", "desktop"}
+    assert all(row["label"] and row["user_agent"] for row in settings["ua_profiles"])
     assert rules["count"] > 100
     assert all(rule["root_cause"] for rule in rules["rules"])
 

@@ -56,6 +56,31 @@ def _float(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+# What a signed BIGINT holds. The player's numbers come from a browser, so the recorder is
+# the boundary that decides what the database is asked to store: handing the driver a value
+# the column cannot take fails the whole batch, not just the row.
+BIGINT_MAX = 2**63 - 1
+BIGINT_MIN = -(2**63)
+
+
+def _bigint(value: Any) -> int | None:
+    """One integer a BIGINT column will accept, or None with the reason logged.
+
+    A value past the range is dropped rather than clamped: a clamped number is a measurement
+    that reads as real and is not, and this project reports what it measured or says it could
+    not.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return None
+    whole = int(value)
+    if BIGINT_MIN <= whole <= BIGINT_MAX:
+        return whole
+    logger.warning("a player sample reported %s, past what the column stores; dropped", whole)
+    return None
+
+
 def playlist_row(job_id: str, layer: str, data: dict[str, Any]) -> PlaylistSample:
     """One playlist poll, from the payload the socket carries."""
     return PlaylistSample(
@@ -105,14 +130,21 @@ def segment_row(job_id: str, layer: str, data: dict[str, Any]) -> SegmentSample:
 
 
 def player_row(job_id: str, data: dict[str, Any]) -> PlayerSample:
-    """One report from the browser player, which only a watched session produces."""
+    """One report from the browser player, which only a watched session produces.
+
+    `bitrate` and `bandwidth_bps` are different quantities and are kept apart: the first is
+    the rung the player switched to, the second is what it measured the network doing. They
+    shared a column until a 2.8 Gbps throughput estimate overflowed it and took a whole batch
+    of samples with it.
+    """
     return PlayerSample(
         job_id=job_id,
         ts=_moment(data.get("at")),
         event=str(data.get("event") or "")[:32],
         buffer_s=_float(data.get("buffer_s")),
         level=int(data["level"]) if isinstance(data.get("level"), int) else None,
-        bitrate=int(data["bitrate"]) if isinstance(data.get("bitrate"), (int, float)) else None,
+        bitrate=_bigint(data.get("bitrate")),
+        bandwidth_bps=_bigint(data.get("bandwidth_bps")),
         dropped_frames=int(data.get("dropped_frames") or 0),
         stall_duration_s=_float(data.get("stall_duration_s")),
     )
@@ -128,6 +160,10 @@ class SampleRecorder:
         self._last_flush = dt.datetime.now(dt.UTC)
         self.written = 0
         self.failed_flushes = 0
+        # Rows the database refused one at a time, after a batch failed. Counted separately
+        # from a failed flush: a flush that salvages 249 of 250 is not the same event as one
+        # that loses everything, and `sampling_state` reports the difference.
+        self.rows_dropped = 0
 
     async def observe(self, kind: str, payload: dict[str, Any]) -> None:
         """Turn one engine event into a row, and flush when the batch is full or stale."""
@@ -174,3 +210,35 @@ class SampleRecorder:
             # a database that refuses them must not take the analysis down with it.
             self.failed_flushes += 1
             logger.exception("%d sample(s) for job %s could not be written", len(rows), self.job_id)
+            await self._write_individually(rows)
+
+    async def _write_individually(self, rows: list[Any]) -> None:
+        """Retry a failed batch row by row, keeping every row the database will take.
+
+        One row the column cannot hold used to discard the whole batch with it — a single
+        malformed player sample cost 137 good measurements. A batch is a transport
+        optimisation, not a unit of meaning, so a row that fails should lose only itself.
+        """
+        if len(rows) <= 1:
+            return
+        kept = 0
+        for row in rows:
+            try:
+                async with db_session.session_scope() as session:
+                    session.add(row)
+                kept += 1
+            except Exception as exc:
+                self.rows_dropped += 1
+                logger.warning(
+                    "one %s sample for job %s was refused and dropped: %s",
+                    type(row).__name__,
+                    self.job_id,
+                    db_session.describe_error(exc),
+                )
+        self.written += kept
+        logger.info(
+            "%d of %d sample(s) for job %s were salvaged after the batch failed",
+            kept,
+            len(rows),
+            self.job_id,
+        )
