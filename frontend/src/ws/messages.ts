@@ -144,7 +144,14 @@ export interface PlayerEventOut {
   ts?: string
   variant?: string
   level?: number
+  /** The rendition's own bitrate, sent only when the player switches rung. */
   bitrate?: number
+  /**
+   * What the player measured the network doing, in bits per second. A different quantity
+   * from `bitrate`: on a small segment off a nearby CDN hls.js estimates in gigabits, which
+   * is not a rung anyone is playing.
+   */
+  bandwidth_bps?: number
   buffer_s?: number
   stall_duration_s?: number
   dropped?: number

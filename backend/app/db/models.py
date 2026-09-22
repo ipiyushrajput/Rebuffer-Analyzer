@@ -229,7 +229,19 @@ class PlayerSample(Base):
     event: Mapped[str] = mapped_column(String(32))
     buffer_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     level: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    bitrate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The rendition's own bitrate, from the rung the player switched to. A ladder tops out in
+    # the low tens of megabits, but this is BIGINT anyway: the column used to be a signed INT
+    # and a browser reporting anything past 2^31 took the whole batch of samples down with it.
+    bitrate: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), nullable=True
+    )
+    # What the player measured the network doing, which is a different quantity from the
+    # bitrate above: hls.js's estimate on a small segment off a nearby CDN reads in gigabits
+    # per second. Keeping the two apart is what stops the played-rung chart plotting
+    # throughput spikes as if they were rung changes.
+    bandwidth_bps: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), nullable=True
+    )
     dropped_frames: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stall_duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

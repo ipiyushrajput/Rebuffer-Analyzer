@@ -46,7 +46,12 @@ class PlayerEvent(BaseModel):
     ts: str | float | None = None
     variant: str | None = None
     level: int | None = None
+    # The rendition's own bitrate, sent only on a rung switch.
     bitrate: int | None = None
+    # What the player measured the network doing, on every fragment load. A different
+    # quantity from `bitrate` and kept in its own field: hls.js estimates in gigabits per
+    # second on a fast local fetch, which is not a rung anyone is playing.
+    bandwidth_bps: int | None = None
     buffer_s: float | None = None
     stall_duration_s: float | None = None
     dropped: int | None = None

@@ -140,10 +140,16 @@ export function Player({ src, onEvent, drm }: Props) {
       })
 
       hls.on(Events.FRAG_LOADED, (_e, data: FragLoadedData) => {
+        /*
+         * `bwEstimate` is what hls.js measured the network doing, not the rung being played.
+         * It went into `bitrate` until a 2.8 Gbps estimate overflowed that column and took a
+         * whole batch of samples with it — and until then it was drawing throughput spikes on
+         * the played-rung chart. The rung comes from LEVEL_SWITCHED and nowhere else.
+         */
         onEvent({
           event: 'frag_loaded',
           variant: currentVariant,
-          bitrate: data.frag.stats?.bwEstimate,
+          bandwidth_bps: data.frag.stats?.bwEstimate,
         })
       })
 

@@ -20,7 +20,7 @@ from sqlalchemy import delete, func, select
 
 from app.db import session as db_session
 from app.db.models import PlayerSample, PlaylistSample, SegmentSample
-from app.jobs.samples import BATCH_ROWS, SampleRecorder, playlist_row, segment_row
+from app.jobs.samples import BATCH_ROWS, SampleRecorder, player_row, playlist_row, segment_row
 from app.main import create_app
 
 JOB = "recorder-test"
@@ -268,3 +268,72 @@ async def test_a_real_job_records_what_it_measured(origin) -> None:  # type: ign
         async with db_session.session_scope() as session:
             for model in (PlaylistSample, SegmentSample):
                 await session.execute(delete(model).where(model.job_id == handle.id))
+
+
+# -- what a browser reports, and what the columns can hold ---------------------
+
+
+def test_a_throughput_estimate_and_a_rung_bitrate_are_different_columns() -> None:
+    """They shared one, and the bigger of the two overflowed it.
+
+    `bwEstimate` is what hls.js measured the network doing; on a small segment off a nearby
+    CDN it reads in gigabits per second. The rendition bitrate is tens of megabits. Sharing a
+    column meant the played-rung chart drew throughput spikes as rung changes, and meant a
+    2.8 Gbps estimate failed the INSERT for every sample flushed with it.
+    """
+    switched = player_row(JOB, {"event": "level_switched", "level": 3, "bitrate": 5_400_000})
+    loaded = player_row(JOB, {"event": "frag_loaded", "bandwidth_bps": 2_816_259_958})
+
+    assert (switched.bitrate, switched.bandwidth_bps) == (5_400_000, None)
+    assert (loaded.bitrate, loaded.bandwidth_bps) == (None, 2_816_259_958)
+
+
+def test_a_gigabit_estimate_is_stored_rather_than_refused() -> None:
+    """The exact value from the deployment's error, which a signed INT could not hold."""
+    row = player_row(JOB, {"event": "frag_loaded", "bandwidth_bps": 2_816_259_958})
+
+    assert row.bandwidth_bps == 2_816_259_958
+
+
+@pytest.mark.parametrize(
+    "value", [2**63, -(2**63) - 1, float("inf"), float("nan"), "fast", None, True]
+)
+def test_a_number_the_column_cannot_hold_is_dropped_not_handed_to_the_driver(value: object) -> None:
+    """A browser can report anything, so the recorder is where it stops.
+
+    Dropped rather than clamped: a clamped number is a measurement that reads as real and is
+    not, and this project reports what it measured or says it could not.
+    """
+    row = player_row(JOB, {"event": "frag_loaded", "bandwidth_bps": value})
+
+    assert row.bandwidth_bps is None
+
+
+@pytest.mark.asyncio()
+async def test_one_refused_row_loses_only_itself() -> None:
+    """A batch is a transport optimisation, not a unit of meaning.
+
+    One malformed player sample used to discard every other sample flushed with it — 137 of
+    them, in the run that surfaced this. The batch insert is still tried first; only when it
+    fails does the recorder go row by row.
+    """
+    await _clear()
+    recorder = SampleRecorder(JOB)
+    good = [playlist_row(JOB, "PLAYBACK", {"variant": f"v{i}", "at": _now()}) for i in range(9)]
+    # A row the database will refuse: `variant` is NOT NULL.
+    broken = playlist_row(JOB, "PLAYBACK", {"variant": "v9", "at": _now()})
+    broken.variant = None  # type: ignore[assignment]
+
+    try:
+        await recorder._write([*good[:4], broken, *good[4:]])
+
+        assert await _count(PlaylistSample) == 9, "the nine writable rows were kept"
+        assert recorder.written == 9
+        assert recorder.rows_dropped == 1
+        assert recorder.failed_flushes == 1, "and the batch failure is still reported"
+    finally:
+        await _clear()
+
+
+def _now() -> str:
+    return dt.datetime.now(dt.UTC).isoformat()

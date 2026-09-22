@@ -130,7 +130,11 @@ def _player(row: PlayerSample) -> dict[str, Any]:
         "event": row.event,
         "buffer_s": row.buffer_s,
         "level": row.level,
+        # The rung being played, and separately what the player measured the network doing.
+        # They shared a field until a gigabit throughput estimate drew itself on the
+        # played-rung chart as if the player had switched to a rung that does not exist.
         "bitrate": row.bitrate,
+        "bandwidth_bps": row.bandwidth_bps,
         "dropped_frames": row.dropped_frames,
         "stall_duration_s": row.stall_duration_s,
     }
