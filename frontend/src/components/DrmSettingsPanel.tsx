@@ -62,6 +62,7 @@ export function DrmSettingsPanel() {
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [enabled, setEnabled] = useState(true);
   const [decryptEvidence, setDecryptEvidence] = useState(false);
+  const [licensePath, setLicensePath] = useState<"relay" | "direct">("relay");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -84,6 +85,7 @@ export function DrmSettingsPanel() {
       const body: Record<string, string | boolean> = {
         enabled,
         decrypt_evidence: decryptEvidence,
+        license_request_path: licensePath,
       };
       for (const [key, value] of Object.entries(draft)) {
         if (value.trim()) body[key] = value.trim();
@@ -104,6 +106,7 @@ export function DrmSettingsPanel() {
   const dirty =
     enabled !== (drm?.enabled ?? true) ||
     decryptEvidence !== (drm?.decrypt_evidence ?? false) ||
+    licensePath !== (drm?.license_request_path ?? "relay") ||
     Object.values(draft).some((v) => v.trim());
 
   return (
@@ -199,6 +202,34 @@ export function DrmSettingsPanel() {
               autoComplete="off"
             />
           </Field>
+
+          <Field
+            label="Licence request path"
+            htmlFor="drm-license-path"
+            hint="Where the browser sends the licence challenge. The relay forwards it from this host, which works whatever the licence server's CORS policy is and keeps its address off the page."
+          >
+            <select
+              id="drm-license-path"
+              className="input"
+              value={licensePath}
+              onChange={(e) =>
+                setLicensePath(e.target.value as "relay" | "direct")
+              }
+            >
+              <option value="relay">
+                Relay through this analyzer (default)
+              </option>
+              <option value="direct">Direct from the browser</option>
+            </select>
+          </Field>
+          {licensePath === "direct" && (
+            <InlineAlert tone="info">
+              The page will post the challenge to the licence server itself, so
+              that server has to allow a cross-origin POST and its URL reaches
+              the page. Use it to establish whether it does; the relay needs
+              neither.
+            </InlineAlert>
+          )}
 
           <Field
             label="CPIX endpoint"

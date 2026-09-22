@@ -320,6 +320,36 @@ The host needs a route to the CPIX endpoint and to the licence server. Without o
 protected channel is still polled and measured for transport, timing and playlist defects,
 and its report states per rendition that the payload was not read and why.
 
+### Playing a protected channel in the preview
+
+**The analysis needs none of this.** The backend obtains the key over CPIX and decrypts the
+segments itself, so every finding, chart and report on a protected channel is produced
+whether the preview plays or not. What follows is only about the picture in the Realtime tab.
+
+Encrypted Media Extensions are available only in a **secure context**, which is a property of
+the page's origin and of nothing else. `navigator.requestMediaKeySystemAccess` is undefined
+on a plain `http://` origin that is not localhost, so the preview stops with "The browser
+refused Widevine key-system access at http://…" and names the remedy. Neither the stream nor
+the licence server has to be HTTPS; only the page.
+
+Three ways to get one, in the order they cost anything:
+
+| Route | Certificate | What it takes |
+|---|---|---|
+| Open the app at `http://localhost:8080` **on the deployment host itself** | none | Nothing. `localhost` and `127.0.0.1` are secure contexts by definition. |
+| Trust the origin in Chrome: `--unsafely-treat-insecure-origin-as-secure=http://107.109.131.68:8080`, or the `OverrideSecurityRestrictionsOnInsecureOrigin` enterprise policy | none | A flag per machine, or one policy for the fleet. Designed for internal deployments. |
+| Serve the page over HTTPS | self-signed or an internal CA | An nginx `listen 443` block and a certificate the browsers trust. |
+
+The preview logs the licence lifecycle into the run's own event log — the key session opening,
+the licence loading, the first fragment decrypting — so a DRM failure is evidence in the
+analysis rather than a console line nobody kept.
+
+**Settings → DRM → "Licence request path"** decides where the browser posts the challenge.
+*Relay* (the default) posts to this application's `/api/drm/license`, which forwards it from
+the analyzer host: that works whatever the licence server's CORS policy is, and keeps the
+server's address off the page. *Direct* posts to the licence server from the browser, which
+works only where that server allows a cross-origin POST — and establishes whether it does.
+
 ### Decrypting `cbcs` channels
 
 `cenc` (AES-CTR) is decrypted in this process, with no binary installed: that is every TV

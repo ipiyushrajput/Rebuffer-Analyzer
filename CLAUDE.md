@@ -247,6 +247,19 @@ frontend/src/
   `mp4decrypt` — a bundle that is short of something never leaves a reader guessing.
   `cbcs` is decrypted only by Bento4's `mp4decrypt`, reported by `/api/health`; `cenc` stays
   in process. No key, private key or credential reaches a bundle.
+- **EME needs a secure context, and that is the page's origin, not the stream.**
+  `navigator.requestMediaKeySystemAccess` is undefined on a plain `http://` origin that is not
+  localhost, and hls.js turns that into `keySystemNoAccess` — a message naming nothing
+  actionable. `Player.tsx` checks `window.isSecureContext` and the method itself before
+  constructing hls.js on a protected stream and states the origin and the three remedies;
+  `explainDrm` turns every other DRM error into its own cause. The licence lifecycle —
+  `KEY_LOADED`, the first `FRAG_DECRYPTED`, the element's `encrypted` event — is sent as a
+  `drm` player event so it lands in the run's event log. Robustness is named
+  (`SW_SECURE_CRYPTO`) rather than left at hls.js's `''`. `license_request_path` chooses
+  where the challenge is posted: `relay` (the default) through `/api/drm/license`, which
+  works whatever the licence server's CORS policy is and keeps its address off the page, or
+  `direct` from the browser, which is the only case where that URL reaches a page and only
+  because a deployment asked for it.
 - **DRM credentials are a location, never key material.** `cpix_client_cert`,
   `cpix_client_key` and `cpix_server_cert` are a path on the analyzer host or an HTTPS URL,
   configured once in Settings → DRM or in `backend/.env`; `.env.example` carries the names

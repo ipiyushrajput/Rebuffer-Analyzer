@@ -76,7 +76,12 @@ Every finding states the measurement, the root cause, the responsible party and 
   server and it sends no CORS headers. A rendition whose key could not be obtained is
   reported as one through `INFO-001` and in the report's protection table, with the reason —
   never analysed as though the bitstream checks had passed. The deployment is configured once
-  in **Settings → DRM**; see [DRM](#drm).
+  in **Settings → DRM**; see [DRM](#drm). The **preview** is the one part that needs the page
+  itself to be a secure context, because Encrypted Media Extensions are only available on
+  one: `http://localhost`, a Chrome origin-trust flag, or HTTPS. Nothing about the stream or
+  the licence server has to be HTTPS, and the analysis is unaffected either way — the
+  preview states which origin is the problem rather than failing with a player error nobody
+  can read, and the licence lifecycle goes into the run's event log.
 - **An evidence bundle carries the stream.** A run recording evidence holds the sampled
   segment bytes and streams them into the archive beside `result.json` and the playlist
   snapshots — `segments/` for a clear rung, `encrypted/` for a protected one as the CDN

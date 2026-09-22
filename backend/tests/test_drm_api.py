@@ -255,3 +255,65 @@ def test_the_relay_is_not_a_general_purpose_proxy(api: TestClient, origin: Fixtu
     response = api.post("/api/drm/license", content=b"x" * (256 * 1024 + 1))
 
     assert response.status_code == 413
+
+
+# ---------------------------------------------------------------------------
+# Where the licence challenge is posted from
+# ---------------------------------------------------------------------------
+
+
+def test_the_relay_is_the_licence_path_a_page_is_given_by_default() -> None:
+    """The browser is told this application's own endpoint, never the licence server's URL.
+
+    That is what makes a licence server with no CORS headers play at all, and it keeps the
+    server's address off a page anybody can open.
+    """
+    from app.api.drm import player_config
+    from app.drm.detect import DrmInfo, KeySystem
+    from app.drm.settings import DrmSettings
+
+    stored = DrmSettings(license_url="https://licence.example/widevine")
+    config = player_config(DrmInfo(system=KeySystem.WIDEVINE), stored)
+
+    assert config["license_request_path"] == "relay"
+    assert config["license_path"] == "/api/drm/license"
+    assert stored.license_url not in str(config)
+
+
+def test_direct_mode_hands_the_page_the_licence_server_itself() -> None:
+    """A deployment can ask for this to establish whether that server allows the POST at all.
+    It is the only case where the URL reaches a page, and only because it was asked for."""
+    from app.api.drm import player_config
+    from app.drm.detect import DrmInfo, KeySystem
+    from app.drm.settings import DrmSettings
+
+    stored = DrmSettings(
+        license_url="https://licence.example/widevine", license_request_path="direct"
+    )
+    config = player_config(DrmInfo(system=KeySystem.WIDEVINE), stored)
+
+    assert config["license_request_path"] == "direct"
+    assert config["license_path"] == "https://licence.example/widevine"
+
+
+def test_a_clear_channel_is_never_given_a_licence_path_in_either_mode() -> None:
+    from app.api.drm import player_config
+    from app.drm.detect import DrmInfo, KeySystem
+    from app.drm.settings import DrmSettings
+
+    stored = DrmSettings(
+        license_url="https://licence.example/widevine", license_request_path="direct"
+    )
+    config = player_config(DrmInfo(system=KeySystem.NONE), stored)
+
+    assert config["license_path"] == ""
+    assert config["license_request_path"] == "relay"
+
+
+def test_a_licence_path_that_is_neither_mode_is_refused() -> None:
+    import pydantic
+
+    from app.drm.settings import DrmSettings
+
+    with pytest.raises(pydantic.ValidationError):
+        DrmSettings(license_request_path="whatever")

@@ -49,6 +49,14 @@ class DrmSettings(BaseModel):
     # sends no CORS headers still plays.
     license_url: str = Field(default="")
 
+    # Where the browser sends the licence challenge. "relay" posts it to this application's
+    # own `/api/drm/license`, which forwards it from the analyzer host: that works whatever
+    # the licence server's CORS policy is, and keeps its address off the page. "direct" posts
+    # it to the licence server from the browser, which is falsifiable — it proves whether
+    # that server allows a cross-origin POST — and is how the reference implementation the
+    # team already had did it. The relay is the default because it always works.
+    license_request_path: str = Field(default="relay", pattern="^(relay|direct)$")
+
     # Whether an evidence bundle carries the decrypted media as well as the encrypted bytes.
     # Off by default: decrypted media is the content in the clear, and a bundle is forwarded
     # to whoever a defect belongs to. On, the bundle adds `decrypted/` beside `encrypted/`,
@@ -87,6 +95,7 @@ class DrmSettings(BaseModel):
             "keys_configured": self.keys_configured,
             "playback_configured": self.playback_configured,
             "decrypt_evidence": self.decrypt_evidence,
+            "license_request_path": self.license_request_path,
             **self.credentials.describe(),
         }
 
