@@ -26,6 +26,9 @@ const DEGRADED_NOTE: Record<string, string> = {
   ffprobe: 'ffprobe is absent, so the decode-error and quality detectors do not run.',
   playwright: 'Playwright is absent, so PDF export is unavailable. HTML export works.',
   database: 'The database does not answer, so jobs and reports are not persisted.',
+  // Replaced below by the backend's own sentence, which names the missing columns and
+  // the command. This is the fallback for a response that carries no detail.
+  schema: 'The database is behind this build, so writes to some tables are refused.',
 }
 
 export default function App() {
@@ -78,7 +81,8 @@ export default function App() {
    * — is decrypted in process with no binary at all. What it costs to be without it is one
    * scheme, so it is stated as a capability rather than counted as a failure.
    */
-  const checks = (health?.checks as Record<string, { installed?: boolean }> | undefined) ?? {}
+  const checks =
+    (health?.checks as Record<string, { installed?: boolean; detail?: string }> | undefined) ?? {}
   const noBento4 = checks.mp4decrypt?.installed === false
   const railHealth = {
     ok: degraded.length === 0,
@@ -86,7 +90,12 @@ export default function App() {
     detail: [
       degraded.length === 0
         ? 'Analyzer host · every dependency answers'
-        : degraded.map((item) => DEGRADED_NOTE[item] ?? `${item} is unavailable.`).join(' '),
+        : degraded
+            // The backend's own detail where it has one: for a schema a migration behind it
+            // names the columns and the command, which is the whole of what an operator
+            // needs and more than a fixed sentence here could say.
+            .map((item) => checks[item]?.detail ?? DEGRADED_NOTE[item] ?? `${item} is unavailable.`)
+            .join(' '),
       noBento4 ? 'mp4decrypt is not installed, so cbcs tracks are not decrypted.' : '',
     ]
       .filter(Boolean)

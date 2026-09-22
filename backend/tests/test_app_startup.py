@@ -23,6 +23,7 @@ def test_health_reports_every_dependency() -> None:
         "playwright",
         "mp4decrypt",
         "database",
+        "schema",
     }
     # Bento4 is optional — cenc decrypts in process — so a host without it is a working
     # deployment, not a degraded one, and the check says so without hiding the consequence.

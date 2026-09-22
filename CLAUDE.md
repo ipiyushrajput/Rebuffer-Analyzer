@@ -36,6 +36,7 @@ make lint         # ruff + mypy + eslint + tsc --noEmit
 make build        # frontend production build + backend wheel
 make up / make down   # docker compose
 make rules        # regenerate docs/RULES.md from the rule registry
+make migrate      # alembic upgrade head
 ```
 
 On Windows the same tasks run through PowerShell, since there is no `make`:
@@ -44,7 +45,7 @@ On Windows the same tasks run through PowerShell, since there is no `make`:
 deploy\windows\setup.cmd -Dev       # venv, backend, Playwright, node_modules, .env
 deploy\windows\rba.cmd dev          # backend :8010 + Vite dev server :5173
 deploy\windows\rba.cmd serve        # build the bundle, serve it on :8080 with the backend
-deploy\windows\rba.cmd test|lint|build|rules|analyse|clean|help
+deploy\windows\rba.cmd test|lint|build|rules|migrate|analyse|clean|help
 ```
 
 `rba.cmd` mirrors the Makefile target for target; add a target to one and add it to the
@@ -123,9 +124,13 @@ frontend/src/
   segment with the audio segment covering it — by **absolute media sequence number**, never by
   position in a sampled list, because one missed segment shifts every later position by one
   and reads as a skew of exactly one segment duration. A pair is measured only once the two
-  overlap in time; two playlists numbering from different bases fall back to time matching and
-  say so through `INFO-006`; an audio segment not published yet defers for
-  `av_pair_defer_refreshes` rather than being measured against the wrong one. `AUD-006` and
+  overlap in time — by at least `av_pair_min_overlap_fraction` of the video segment's own
+  length, because the segment *before* the right one touches it at its boundary and shares
+  milliseconds; measuring against that one reported a skew of exactly one segment duration on
+  a stream in step. **A missing number is not evidence that the two playlists number
+  differently**, only that a segment was not sampled: the time fallback, and `INFO-006`, are
+  licensed solely by a number both playlists carry for moments that do not overlap. A video
+  segment whose audio never arrives produces no pair at all, and `AUD-006` reports it. `AUD-006` and
   `AUD-007` run once at the end over everything sampled.
 - Thresholds are never inlined. They live in `app/config.py` (`Thresholds`), are editable
   in the Settings tab, and are persisted in the DB.
@@ -155,6 +160,15 @@ frontend/src/
   `database` by default; `both` mirrors a copy to `RBA_REPORTS_DIR`. Bulk archives and
   evidence bundles are built in memory and streamed. A schema change needs an Alembic
   revision in `backend/alembic/versions/`.
+- **The database is reconciled at startup and never altered behind an operator.**
+  `create_all` adds a table that is missing and never touches one that is there, so a
+  revision adding a column does nothing until somebody runs it — and until then the code
+  writes a column the server rejects, once per request and once per batch of samples.
+  `db/session.py::schema_drift()` compares the models against the live tables and the drift
+  is stated at startup, degrades `/api/health` and reaches the rail, naming the columns and
+  the command (`make migrate`, `rba.cmd migrate`, `alembic upgrade head`). It is reported,
+  not repaired: Alembic owns the schema. The answer is cached for a minute so running the
+  migration clears the badge without a restart.
 - **A listing sorts keys, never rows.** MySQL's filesort packs every selected column into
   `sort_buffer_size`, and a `jobs` row carries two JSON columns and five TEXT ones, so
   `select(Model).order_by(...)` over a table with history fails with error 1038, "Out of sort
