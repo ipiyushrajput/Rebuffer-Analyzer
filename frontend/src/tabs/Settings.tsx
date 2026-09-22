@@ -108,7 +108,7 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
       // Demuxed ladders only: how long a video segment waits for the audio segment covering
       // it, and how far apart the two may start and still be the same moment.
       'av_pair_defer_refreshes',
-      'av_pair_overlap_tolerance_s',
+      'av_pair_min_overlap_fraction',
     ],
   },
   {

@@ -148,10 +148,13 @@ class Thresholds(BaseModel):
     # sampled. The pair is held for this many playlist refreshes before it is given up on,
     # rather than measured against whichever audio segment happens to be there.
     av_pair_defer_refreshes: int = 3
-    # How far two segments' decode times may sit apart and still be the same moment on the
-    # timeline. Audio and video are segmented on their own boundaries, so a pair that shares
-    # a media sequence number still starts a fraction of a second apart by design.
-    av_pair_overlap_tolerance_s: float = 1.0
+    # How much of a video segment's own range an audio segment has to cover to be judged the
+    # same moment on the timeline, as a fraction of that segment's length. Audio and video are
+    # segmented on their own boundaries, so a pair that shares a media sequence number still
+    # starts a fraction of a second apart by design — but the segment *before* the right one
+    # also touches it, at its boundary, and shares milliseconds. Measuring against that one
+    # reports a skew of exactly one segment duration on a stream that is in step.
+    av_pair_min_overlap_fraction: float = 0.5
     master_repoll_interval_s: int = 20
     # A packager recomputes BANDWIDTH and AVERAGE-BANDWIDTH per poll, so a small drift is
     # ordinary. Past this fraction the declared rate no longer describes the rung and ABR

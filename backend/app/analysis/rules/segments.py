@@ -364,8 +364,9 @@ def check_cross_rendition_av(
                     f"{variant} and its audio rendition {pairing.audio_variant} do not number "
                     f"their segments from the same base: video segment {pair.video.msn} and "
                     f"audio segment {pair.audio.msn} cover the same moment. The A/V pairs on "
-                    f"this rung were matched by overlapping decode times, within "
-                    f"{pairing.overlap_tolerance_s} s.",
+                    f"this rung were matched by overlapping decode times: an audio segment "
+                    f"covering at least {pairing.min_overlap_fraction:.0%} of a video "
+                    f"segment's range is taken to be its pair.",
                     evidence=pair.evidence(),
                     stream_layer=layer,
                     variant=variant,

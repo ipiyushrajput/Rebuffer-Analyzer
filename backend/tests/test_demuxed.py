@@ -304,18 +304,20 @@ def test_two_playlists_numbering_from_different_bases_fall_back_to_time() -> Non
 
 
 def test_the_fallback_to_time_matching_is_stated_once_as_info_006() -> None:
-    """Two playlists whose numbers never collide are discovered only once the deferral runs
-    out: until then a missing number is indistinguishable from an unpublished segment."""
-    pairing = _pairing(defer_refreshes=1)
+    """Once a collision has proved the bases differ, every later pair on the rung is matched
+    by time — and the reader is told that once, not once per segment."""
+    pairing = _pairing()
+    # The collision that settles it: one number, two moments that do not overlap.
+    pairing.add_video(_seg("v720p@2000k", 100, 600.0))
+    pairing.add_audio(_seg("audio_en", 100, 1200.0))
     for index in range(3):
-        pairing.add_video(_seg("v720p@2000k", 100 + index, 600.0 + index * 6))
         pairing.add_audio(_seg("audio_en", 5 + index, 600.0 + index * 6))
-    for _ in range(2):
-        pairing.expire()
+        if index:
+            pairing.add_video(_seg("v720p@2000k", 100 + index, 600.0 + index * 6))
 
     findings = segment_rules.check_cross_rendition_av(pairing, layer=LAYER, thresholds=T, at=NOW)
 
-    assert [f.rule.id for f in findings] == ["INFO-006"]
+    assert [f.rule.id for f in findings] == ["INFO-006"], "stated once for the whole rung"
     assert findings[0].evidence[0]["matched_by"] == av_pairing.MATCH_TIME
 
 
@@ -511,3 +513,112 @@ def test_an_audio_segment_that_simply_arrived_late_is_not_called_a_numbering_mis
     assert (
         segment_rules.check_cross_rendition_av(_pairing(), layer=LAYER, thresholds=T, at=NOW) == []
     )
+
+
+# ---------------------------------------------------------------------------
+# The mispairing that reached the deployment
+# ---------------------------------------------------------------------------
+#
+# Reported from a live run:
+#
+#   AV-005  Audio segment 6394313 on audio_eng starts -5991 ms from video segment
+#           6394314 on v1080p@5418k, against a critical threshold of 1000 ms.
+#
+# A skew of 5991 ms on a six-second ladder is one segment, which is the signature of a
+# mispairing and not of anything a packager did. Two defects produced it: the audio segment
+# for 6394314 had not been sampled when the deferral ran out, and the fallback then accepted
+# audio 6394313 because it overlapped video 6394314 by the nine milliseconds two adjacent
+# segments share at their boundary.
+
+
+def _ladder(count: int, *, duration: float = 6.0, first_msn: int = 6394310):
+    """Video and audio renditions in step, numbered identically, as the live channel is."""
+    video = [
+        _seg("v1080p@5418k", first_msn + i, (first_msn + i) * duration, duration)
+        for i in range(count)
+    ]
+    audio = [
+        _seg("audio_eng", first_msn + i, (first_msn + i) * duration, duration) for i in range(count)
+    ]
+    return video, audio
+
+
+def test_the_segment_before_the_right_one_is_not_accepted_as_a_pair() -> None:
+    """The exact shape of the live false positive, reduced to the two segments involved."""
+    pairing = av_pairing.AvPairing(video_variant="v1080p@5418k", audio_variant="audio_eng")
+    video, audio = _ladder(5)
+
+    # Everything the audio rendition published except the one that matches.
+    for segment in audio:
+        if segment.msn != 6394314:
+            pairing.add_audio(segment)
+    pairing.add_video(next(v for v in video if v.msn == 6394314))
+
+    for _ in range(5):
+        pairing.expire()
+    pairs = pairing.match()
+
+    assert pairs == [], "video 6394314 was paired with an audio segment that is not its own"
+    assert pairing.abandoned == 1
+
+
+def test_a_whole_ladder_in_step_raises_no_skew_finding_when_one_audio_segment_is_missed() -> None:
+    """End of the same story: the run carries on, the other pairs are measured, and the one
+    video segment with no audio of its own produces no finding at all."""
+    pairing = av_pairing.AvPairing(video_variant="v1080p@5418k", audio_variant="audio_eng")
+    video, audio = _ladder(5)
+    for segment in video:
+        pairing.add_video(segment)
+    for segment in audio:
+        if segment.msn != 6394314:
+            pairing.add_audio(segment)
+
+    for _ in range(5):
+        pairing.expire()
+    findings = segment_rules.check_cross_rendition_av(pairing, layer=LAYER, thresholds=T, at=NOW)
+
+    assert findings == [], [f.rule.id for f in findings]
+    assert pairing.paired == 4
+    assert pairing.abandoned == 1
+
+
+def test_a_real_skew_inside_a_segment_is_still_measured() -> None:
+    """The alarm that must survive: a genuine 400 ms offset shares most of the range, so the
+    pair is sound and AV-001 fires on it."""
+    pairing = av_pairing.AvPairing(video_variant="v1080p@5418k", audio_variant="audio_eng")
+    pairing.add_video(_seg("v1080p@5418k", 6394313, 6394313 * 6.0))
+    pairing.add_audio(_seg("audio_eng", 6394313, 6394313 * 6.0 + 0.4))
+
+    findings = segment_rules.check_cross_rendition_av(pairing, layer=LAYER, thresholds=T, at=NOW)
+
+    assert [f.rule.id for f in findings] == ["AV-001"]
+    assert round(findings[0].evidence[0]["av_skew_ms"]) == 400
+
+
+def test_a_missing_number_is_not_taken_as_proof_that_the_bases_differ() -> None:
+    """An audio rendition polled a little behind its video rung is ordinary. Reading that as
+    "these playlists number from different bases" raised INFO-006 on a healthy ladder and
+    licensed the time fallback that produced the mispairing."""
+    pairing = av_pairing.AvPairing(video_variant="v1080p@5418k", audio_variant="audio_eng")
+    video, _audio = _ladder(3)
+    for segment in video:
+        pairing.add_video(segment)
+    for _ in range(5):
+        pairing.expire()
+    pairing.match()
+
+    assert pairing.shared_numbering is not False
+
+
+def test_bases_that_really_do_differ_are_still_found_and_still_matched_by_time() -> None:
+    """The fallback has to keep working where it is right: one number, two moments."""
+    pairing = av_pairing.AvPairing(video_variant="v1080p@5418k", audio_variant="audio_eng")
+    pairing.add_video(_seg("v1080p@5418k", 100, 600.0))
+    pairing.add_audio(_seg("audio_eng", 100, 1200.0))  # same number, ten minutes later
+    pairing.add_audio(_seg("audio_eng", 5, 600.0))  # the one that covers it
+
+    findings = segment_rules.check_cross_rendition_av(pairing, layer=LAYER, thresholds=T, at=NOW)
+
+    assert pairing.shared_numbering is False
+    assert [f.rule.id for f in findings] == ["INFO-006"]
+    assert findings[0].evidence[0]["audio_msn"] == 5
