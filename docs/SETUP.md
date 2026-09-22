@@ -363,6 +363,9 @@ sudo apt-get install -y bento4            # Debian and Ubuntu
 brew install bento4                       # macOS
 ```
 
+On Windows, download the Bento4 binaries from <https://www.bento4.com/downloads/> and put
+the folder holding `mp4decrypt.exe` on `PATH`.
+
 `GET /api/health` reports whether it was found. Without it a `cbcs` channel's transport,
 timing and playlist checks still run, and each protected rendition says through `INFO-001`
 and the report's protection table that its payload was not read, and why.
