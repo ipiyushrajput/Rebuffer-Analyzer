@@ -52,7 +52,7 @@ Every finding states the measurement, the root cause, the responsible party and 
   lowest, middle and highest video rung and every audio rendition are sampled in full; other
   rungs every Nth segment. The master is re-polled every 20 s and the ladder swept every
   5 min.
-- **183 rules** across DNS, TLS, HTTP, CDN, master playlist, media playlist, sequence
+- **185 rules** across DNS, TLS, HTTP, CDN, master playlist, media playlist, sequence
   numbers, segments, video bitstream, audio, A/V sync, subtitles, SSAI and player telemetry.
   See [`docs/RULES.md`](docs/RULES.md). Each rule's severity is declared there and can be
   reassigned per deployment in Settings → Rule catalogue; the declaration is never edited, so
@@ -77,6 +77,26 @@ Every finding states the measurement, the root cause, the responsible party and 
   reported as one through `INFO-001` and in the report's protection table, with the reason —
   never analysed as though the bitstream checks had passed. The deployment is configured once
   in **Settings → DRM**; see [DRM](#drm).
+- **A demuxed ladder is measured as one.** Every TV Plus CMAF channel carries its audio in a
+  rendition of its own, and its video segments hold no audio track — which is the format
+  working, not a defect. The ladder's packaging is read from the master and carried to every
+  check, so `AUD-003` ("Muxed segment carries video and no audio elementary stream") asks
+  whether the rung has anywhere else to put its audio before it fires, and still fires on a
+  muxed rung that is genuinely silent. A/V skew on such a ladder is measured across the two
+  renditions: video and audio segments are paired by absolute media sequence number, verified
+  to overlap on the timeline, and every skew finding names both segments and how they were
+  matched. A video segment whose audio is not published yet is held rather than measured
+  against the wrong one, and a video range no audio segment covers is `AUD-006`.
+- **The analyzer identifies as a Samsung TV.** Every manifest and segment request carries a
+  Tizen `User-Agent`, because a CDN and a packager both answer per User-Agent and a run made
+  as a desktop browser measures a different response than the fleet sees. Eleven Tizen
+  releases are declared, from 2.4 to 10.0, plus one desktop string for comparison; the
+  default is **Tizen 10.0 (2026)**, set in **Settings → General** and overridable per
+  analysis in every form. The preview player fetches through `/api/proxy`, so its requests
+  carry the same string. The profile and the full User-Agent are recorded in the job's
+  options, stated in the report appendix and written into the evidence bundle's `README.txt`,
+  so a run can be replayed under the conditions it was measured under. The channel
+  catalogue, CASCADA and the licence server keep their own.
 - **Virtual Player Buffer.** Plus Player's own buffering configuration modelled against the
   delivery timings actually measured, so Aging and Bulk produce a rebuffering ratio with no
   player attached, and Realtime shows the model next to the real hls.js buffer. The profile

@@ -1749,6 +1749,20 @@ AUD_AC4_ALIGNMENT = _r(
     DIRECT,
     "Dolby Stream Validator AC-4 segment alignment",
 )
+AUD_LAYOUT_DISAGREES = _r(
+    "AUD-010",
+    "audio",
+    W,
+    Owner.PACKAGER,
+    "Rung declared with a separate audio rendition also carries audio in its own segments",
+    "The ladder points this rung at an audio group whose entry has its own URI, and the "
+    "rung's segments carry an audio track as well, so the device downloads the audio twice "
+    "and the manifest does not say which copy is presented.",
+    "Remove the audio track from this rung's segments, or drop the AUDIO attribute and serve "
+    "the rung muxed.",
+    INDIRECT,
+    "HLS AV Doctor DemuxAnalyzer",
+)
 AUD_OK = _r(
     "AUD-900",
     "audio",
@@ -2268,6 +2282,23 @@ SKIP_NONCONSECUTIVE = _r(
     NONE,
     "",
     ("nth_segment_sampling_other_rungs",),
+)
+SKIP_AV_PAIR_NUMBERING = _r(
+    "INFO-006",
+    "coverage",
+    I,
+    Owner.PACKAGER,
+    "A/V skew on a demuxed rung was measured on pairs matched by time, not by sequence number",
+    "The video rung and its audio rendition number their segments from different bases, so a "
+    "shared media sequence number does not identify the same moment on the two playlists. "
+    "The pairs behind every A/V finding on this rung were matched by overlapping decode "
+    "times instead, which is the looser of the two and carries the segmentation tolerance "
+    "with it.",
+    "Publish the audio rendition and the video rungs from the same EXT-X-MEDIA-SEQUENCE so a "
+    "number identifies one moment across the ladder.",
+    NONE,
+    "HLS AV Doctor DemuxAnalyzer",
+    ("av_pair_overlap_tolerance_s",),
 )
 NO_DEFECT = _r(
     "INFO-900",

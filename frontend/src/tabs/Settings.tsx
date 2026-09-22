@@ -24,13 +24,14 @@ import {
   cx,
 } from '../components/ui'
 import { IconCheck, IconSearch } from '../components/ui/icons'
-import { UA_PROFILES, VPB_MODES, type Severity } from '../lib/constants'
+import { VPB_MODES, type Severity } from '../lib/constants'
+import { useUaProfiles } from '../lib/uaProfiles'
 
 interface SettingsPayload {
   thresholds: Record<string, number | string | boolean>
   defaults: Record<string, number | string | boolean>
   preferences: Record<string, number | boolean | string>
-  ua_profiles: string[]
+  ua_profiles: { id: string; label: string; user_agent: string }[]
 }
 
 type GroupId =
@@ -104,6 +105,10 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
       'av_skew_normal_ms',
       'av_skew_error_ms',
       'av_pts_delta_critical_ms',
+      // Demuxed ladders only: how long a video segment waits for the audio segment covering
+      // it, and how far apart the two may start and still be the same moment.
+      'av_pair_defer_refreshes',
+      'av_pair_overlap_tolerance_s',
     ],
   },
   {
@@ -158,6 +163,7 @@ export function SettingsTab() {
   const { data, isLoading } = useQuery({ queryKey: ['settings'], queryFn: endpoints.settings })
   const settings = data as SettingsPayload | undefined
 
+  const uaProfiles = useUaProfiles()
   const [tab, setTab] = useState<GroupId>('profile')
   const [thresholds, setThresholds] = useState<Record<string, number | string | boolean>>({})
   const [preferences, setPreferences] = useState<Record<string, number | boolean | string>>({})
@@ -239,15 +245,24 @@ export function SettingsTab() {
                 <select
                   id="pref-ua"
                   className="input"
-                  value={String(preferences.ua_profile ?? 'tizen5')}
+                  value={String(preferences.ua_profile ?? uaProfiles[0]?.id ?? '')}
                   onChange={(e) => setPreferences({ ...preferences, ua_profile: e.target.value })}
                 >
-                  {UA_PROFILES.filter((p) => settings.ua_profiles.includes(p.id)).map((profile) => (
+                  {uaProfiles.map((profile) => (
                     <option key={profile.id} value={profile.id}>
                       {profile.label}
                     </option>
                   ))}
                 </select>
+                {/*
+                 * The label names a device; the string is what a CDN and a packager actually
+                 * answer. Both are shown because an operator picking a profile is choosing a
+                 * measurement condition, not a cosmetic setting.
+                 */}
+                <p className="mt-1 break-all font-mono text-[11px] leading-snug text-ink-muted">
+                  {uaProfiles.find((p) => p.id === String(preferences.ua_profile ?? ''))
+                    ?.user_agent ?? ''}
+                </p>
               </Field>
               <Field label="Maximum concurrent jobs" htmlFor="pref-jobs">
                 <input

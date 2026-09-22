@@ -111,8 +111,36 @@ frontend/src/
   skip the missing segment's own duration reads as a gap of exactly that length. The skipped
   boundary is reported as `INFO-005` with the count, never dropped. A config-change check is
   not gated: a change observed across a skip is still a change.
+- **A demuxed rung is not a rung missing its audio.** `app/analysis/layout.py` reads each
+  variant's packaging off the master once, at bootstrap, and `LayerContext.layout` carries it
+  to every check that asks what a segment is supposed to contain. A variant is demuxed only
+  when its `AUDIO` group resolves to an `EXT-X-MEDIA:TYPE=AUDIO` entry **with a `URI`**: an
+  entry without one is RFC 8216's spelling for audio riding in the video segments, so the
+  attribute alone does not make a rung demuxed. `AUD-003` therefore asks the ladder, not the
+  segment, and still fires on a muxed rung with nowhere else to carry its audio; a rung that
+  is demuxed *and* carries audio itself is `AUD-010`, once per rung.
+  On such a ladder no segment holds both tracks, so `app/analysis/av_pairing.py` pairs a video
+  segment with the audio segment covering it — by **absolute media sequence number**, never by
+  position in a sampled list, because one missed segment shifts every later position by one
+  and reads as a skew of exactly one segment duration. A pair is measured only once the two
+  overlap in time; two playlists numbering from different bases fall back to time matching and
+  say so through `INFO-006`; an audio segment not published yet defers for
+  `av_pair_defer_refreshes` rather than being measured against the wrong one. `AUD-006` and
+  `AUD-007` run once at the end over everything sampled.
 - Thresholds are never inlined. They live in `app/config.py` (`Thresholds`), are editable
   in the Settings tab, and are persisted in the DB.
+- **The User-Agent is a measurement condition, not a constant.** A CDN and a packager both
+  answer per User-Agent, so the profile a run went out as is part of what the run measured.
+  `USER_AGENT_PROFILE_TABLE` in `app/config.py` is the one table — id, label, exact device
+  string — and no other copy exists: the picker reads `ua_profiles` from `GET /api/settings`.
+  A default is never a literal in a caller. `default_ua_profile()` is the single resolver,
+  read by `api/schemas.py`, `jobs/manager.py`, `api/proxy.py` and `net/fetcher.py`, and the
+  proxy's cached `Fetcher` is rebuilt when the setting changes rather than pinned for the
+  life of the process. A stored default the table no longer declares falls back, exactly as a
+  stale rule-severity override does. Every result carries both `ua_profile` and the full
+  `user_agent`, and the report appendix and the evidence `README.txt` state them, because
+  evidence that cannot be replayed under the same conditions is not evidence. The catalogue,
+  CASCADA and the licence server keep their own User-Agent.
 - **The Virtual Player Buffer models Plus Player, not a generic player.** `app/analysis/vpb.py`
   carries the buffering configuration from section 3 of the TV Plus player document: a
   profile picked from the tallest rung in the ladder (1080p → FHD, 2160p → UHD), a 15 s time

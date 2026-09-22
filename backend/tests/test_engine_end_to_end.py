@@ -10,7 +10,12 @@ import asyncio
 
 from app.analysis.engine import AnalysisSession, SessionOptions
 from app.analysis.verdict import VerdictStatus
-from tests.fixtures.server import FixtureServer, Route, build_simple_channel
+from tests.fixtures.server import (
+    FixtureServer,
+    Route,
+    build_demuxed_channel,
+    build_simple_channel,
+)
 from tests.fixtures.synth import (
     PlaylistSpec,
     SegmentSpec,
@@ -272,3 +277,72 @@ async def test_the_result_serialises_to_json_safe_types(origin: FixtureServer) -
     payload = json.dumps(result.as_dict())
     assert len(payload) > 1000
     assert '"verdict"' in payload
+
+
+# ---------------------------------------------------------------------------
+# Demuxed ladders
+# ---------------------------------------------------------------------------
+
+
+async def test_a_demuxed_channel_does_not_trip_the_muxed_audio_rule(
+    origin: FixtureServer,
+) -> None:
+    """The false positive, end to end: a video segment with no audio track is what a demuxed
+    rung publishes. `AUD-003` used to fire CRITICAL on every one of them, on every TV Plus
+    CMAF channel, and take the verdict with it."""
+    url = build_demuxed_channel(origin, variant_count=2, segment_count=6)
+
+    result = await _run(url)
+
+    assert "AUD-003" not in rule_ids(result)
+    assert result.verdict.segments_checked > 0
+
+
+async def test_a_muxed_channel_missing_audio_still_trips_it(origin: FixtureServer) -> None:
+    """The alarm the gate must not silence: this rung declares no audio rendition, so its
+    own segments are the only place its audio could be, and they carry none."""
+    origin.add_text(
+        "master.m3u8",
+        render_master_playlist([VariantSpec(name="low", bandwidth=600_000, uri="low.m3u8")]),
+    )
+    spec = PlaylistSpec(segment_count=4, segment_duration=6.0, segment_prefix="low-seg")
+    origin.add_text("low.m3u8", render_media_playlist(spec))
+    for index in range(4):
+        origin.add_bytes(
+            f"low-seg{index}.ts",
+            build_ts_segment(SegmentSpec(pts_offset_s=index * 6.0, with_audio=False)),
+        )
+
+    result = await _run(origin.url("master.m3u8"))
+
+    assert "AUD-003" in rule_ids(result)
+
+
+async def test_the_ladder_table_states_each_rungs_layout(origin: FixtureServer) -> None:
+    url = build_demuxed_channel(origin, variant_count=2, segment_count=4)
+
+    result = await _run(url)
+
+    layouts = {row["variant"]: row["layout"] for row in result.ladder}
+    assert layouts
+    for entry in layouts.values():
+        assert entry is not None
+        assert entry["layout"] == "demuxed"
+        assert entry["audio_variants"]
+
+
+async def test_skew_between_a_video_rung_and_its_audio_rendition_is_measured(
+    origin: FixtureServer,
+) -> None:
+    """`AV-001` to `AV-005` never ran on a demuxed ladder: they read a skew that only a
+    segment carrying both tracks can produce. Here the audio rendition starts 400 ms after
+    the video it is presented with, and no single segment holds both."""
+    url = build_demuxed_channel(origin, variant_count=1, segment_count=6, audio_pts_offset_ms=400.0)
+
+    result = await _run(url, duration=6.0)
+
+    skew = [f for f in result.findings if f.rule.id == "AV-001"]
+    assert skew, "cross-rendition skew produced no finding"
+    evidence = skew[0].evidence[0]
+    assert evidence["audio_variant"] != evidence["video_variant"]
+    assert round(evidence["av_skew_ms"]) == 400

@@ -242,3 +242,100 @@ def build_simple_channel(
             server.add_bytes(f"{name}-seg{index}.ts", data)
 
     return server.url("master.m3u8")
+
+
+def build_demuxed_channel(
+    server: FixtureServer,
+    *,
+    variant_count: int = 2,
+    segment_count: int = 6,
+    segment_duration: float = 6.0,
+    audio_pts_offset_ms: float = 0.0,
+) -> str:
+    """Publish a channel whose audio is a rendition of its own, and return the master URL.
+
+    This is how every TV Plus CMAF channel is packaged: the video rungs carry video only and
+    point at one `EXT-X-MEDIA:TYPE=AUDIO` entry with its own segments. Analysed as a muxed
+    ladder, every one of those video segments trips `AUD-003`.
+
+    `audio_pts_offset_ms` shifts the audio rendition's timeline against the video's, which is
+    the only way to produce a cross-rendition A/V skew: no single segment carries both.
+    """
+    from tests.fixtures.synth import (
+        PlaylistSpec,
+        SegmentSpec,
+        VariantSpec,
+        build_ts_segment,
+        render_master_playlist,
+        render_media_playlist,
+    )
+
+    rungs = [
+        ("low", 600_000, "640x360", 640, 360),
+        ("mid", 1_100_000, "1280x720", 1280, 720),
+        ("high", 2_000_000, "1920x1080", 1920, 1080),
+    ][:variant_count]
+
+    variants = [
+        VariantSpec(
+            name=name,
+            bandwidth=bw,
+            resolution=res,
+            uri=f"{name}.m3u8",
+            audio_group="aac",
+            codecs="avc1.64001f",
+        )
+        for name, bw, res, _w, _h in rungs
+    ]
+    server.add_text(
+        "master.m3u8",
+        render_master_playlist(variants, audio_renditions=[("aac", "English", "audio.m3u8")]),
+    )
+
+    for name, _bw, _res, width, height in rungs:
+        spec = PlaylistSpec(
+            segment_count=segment_count,
+            segment_duration=segment_duration,
+            target_duration=int(segment_duration),
+            segment_prefix=f"{name}-seg",
+        )
+        server.add_text(f"{name}.m3u8", render_media_playlist(spec))
+        for index in range(segment_count):
+            server.add_bytes(
+                f"{name}-seg{index}.ts",
+                build_ts_segment(
+                    SegmentSpec(
+                        duration=segment_duration,
+                        pts_offset_s=index * segment_duration,
+                        width=width,
+                        height=height,
+                        # The whole point of a demuxed rung: no audio in the video segments.
+                        with_audio=False,
+                    )
+                ),
+            )
+
+    audio_spec = PlaylistSpec(
+        segment_count=segment_count,
+        segment_duration=segment_duration,
+        target_duration=int(segment_duration),
+        segment_prefix="audio-seg",
+    )
+    server.add_text("audio.m3u8", render_media_playlist(audio_spec))
+    for index in range(segment_count):
+        server.add_bytes(
+            f"audio-seg{index}.ts",
+            build_ts_segment(
+                SegmentSpec(
+                    duration=segment_duration,
+                    pts_offset_s=index * segment_duration,
+                    audio_pts_offset_ms=audio_pts_offset_ms,
+                    # Audio only, as a demuxed rendition publishes: a segment carrying both
+                    # tracks would produce a within-segment skew and prove nothing about
+                    # pairing across renditions.
+                    with_video=False,
+                )
+            ),
+        )
+
+    return server.url("master.m3u8")
