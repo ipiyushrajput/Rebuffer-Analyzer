@@ -487,3 +487,27 @@ def test_the_indexes_are_bounded_so_a_long_session_does_not_grow_without_end(kee
 
     assert len(pairing.audio_by_msn) == keep
     assert len(pairing.seen_video) == keep
+
+
+def test_an_audio_segment_that_simply_arrived_late_is_not_called_a_numbering_mismatch() -> None:
+    """The deferral running out means the segment was slow, not that the numbers disagree.
+
+    Treating the late arrival as a time match would report INFO-006 — "these two playlists
+    number from different bases" — against a ladder that numbers them identically, which is
+    a false statement in a report.
+    """
+    pairing = _pairing(defer_refreshes=1)
+    pairing.add_video(_seg("v720p@2000k", 100, 600.0))
+    for _ in range(3):
+        pairing.expire()
+
+    # It turns up after the wait was over, under the number it was always going to have.
+    pairing.add_audio(_seg("audio_en", 100, 600.0))
+    pairs = pairing.match()
+
+    assert [(p.video.msn, p.audio.msn) for p in pairs] == [(100, 100)]
+    assert pairs[0].match == av_pairing.MATCH_SEQUENCE
+    assert pairing.shared_numbering is True
+    assert (
+        segment_rules.check_cross_rendition_av(_pairing(), layer=LAYER, thresholds=T, at=NOW) == []
+    )

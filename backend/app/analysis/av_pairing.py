@@ -214,9 +214,15 @@ class AvPairing:
         by_time = self._best_by_time(video)
         if by_time is None:
             return None
+        if by_time.msn == video.msn:
+            # The numbered audio segment did arrive, just late enough that the wait ran out
+            # first. The numbers agree after all, and calling this a time match would report
+            # INFO-006 against a ladder that numbers its renditions perfectly well.
+            self.shared_numbering = True
+            return MatchedPair(video=video, audio=by_time, match=MATCH_SEQUENCE)
         if self.shared_numbering is None:
-            # A time match found where the numbered one never appeared is itself the proof
-            # that the two playlists do not count from the same base.
+            # A time match on a different number, where the matching one never appeared, is
+            # itself the proof that the two playlists do not count from the same base.
             self.shared_numbering = False
         return MatchedPair(video=video, audio=by_time, match=MATCH_TIME)
 
