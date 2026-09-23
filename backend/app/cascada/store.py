@@ -67,7 +67,8 @@ class ChannelWindow:
         }
 
 
-def _points(raw: Any) -> list[Point]:
+def points_from(raw: Any) -> list[Point]:
+    """Stored `{at, value}` points back into `Point`s, skipping anything malformed."""
     points: list[Point] = []
     if not isinstance(raw, list):
         return points
@@ -117,8 +118,8 @@ def _as_window(row: CascadaSample) -> ChannelWindow:
             end=dt.datetime.fromtimestamp(row.window_to, dt.UTC),
         ),
         stats=stats,
-        origin=_points(series.get("origin")),
-        comparison=_points(series.get("comparison")),
+        origin=points_from(series.get("origin")),
+        comparison=points_from(series.get("comparison")),
         fetched_at=fetched if fetched.tzinfo else fetched.replace(tzinfo=dt.UTC),
         truncated=row.truncated,
         cached=True,

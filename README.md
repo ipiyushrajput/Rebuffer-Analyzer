@@ -276,7 +276,8 @@ from `.env` into the repository.
 
 **Schema**: `channels`, `jobs`, `bulk_items`, `findings`, `incidents`, `samples_playlist`,
 `samples_segment`, `samples_player`, `virtual_buffer`, `playlist_snapshots`, `reports`,
-`settings`, `cascada_samples`, `batches`, `batch_items`, `batch_logs`, `batch_schedules`,
+`settings`, `cascada_samples`, `cascada_error_samples`, `batches`, `batch_items`, `batch_logs`,
+`batch_schedules`,
 each sample table indexed on `(job_id, variant, ts)` and on `(job_id, ts)`.
 
 Every column a listing orders by is indexed, and no listing sorts the rows themselves. MySQL's
@@ -333,6 +334,8 @@ GET    /api/catalogue/channels?country=&env=&page=&today=    one page of the TV 
 GET|PUT|DELETE /api/cascada/session   ·  POST /api/cascada/session/validate
 GET    /api/cascada/channel?service_id=&channel_name=&country=&refresh=
 GET    /api/cascada/channel/report.{csv|xlsx}
+GET    /api/cascada/channel/errors?service_id=&channel_name=&country=&refresh=
+GET    /api/cascada/channel/errors/report.{csv|xlsx}
 POST   /api/cascada/scans   ·  GET|DELETE /api/cascada/scans/{id}
 GET    /api/cascada/scans/{id}/report.{csv|xlsx}
 
@@ -431,6 +434,34 @@ devtools is the route, and the panel takes the whole header. What is stored neve
 to the browser — the panel shows the last four characters, the source, and when the session
 was last proven to work. A host may instead pin its own identity with `CASCADA_SESSIONID` in
 the git-ignored `backend/.env`.
+
+**Error data.** Every row also opens the channel's playback errors. The call is the
+rebuffering call with one parameter changed, `target_metrics[]=error_count`, over the same
+window, and the answer has the same `origin` / `comparison` shape — but CASCADA carries the
+value under **`errors`**, not the `error_count` that was asked for, in the unit it calls
+`times`. The parser reads `errors` (and `error_count`, should CASCADA ever answer with the
+requested name), and a response carrying neither is refused with the keys it did carry, never
+drawn as a week of gaps.
+
+`errors` is a count per minute summed over every device, not a share of viewing time, so the
+panel states a total as well as an average, and the week-on-week change relative to last week
+as well as in errors per minute. A count moves with the audience, so one number cannot mean
+the same thing for every channel: `cascada_error_threshold_per_min` is **0 — no threshold —
+until a team sets one** in Settings → CASCADA. At 0 no minute is marked and the panel states
+no above/below verdict. The verdict is recomputed from the stored series on every read, so a
+threshold changed in Settings applies to a window already fetched. Error windows are stored in
+`cascada_error_samples`, apart from the rebuffering record the batch pipeline reads, and
+download as CSV or XLSX in the same table-first layout.
+
+**Two weeks, two sets of dates.** Both panels draw last week seven days late so it lies under
+this week. The bottom axis names this week's dates; a second axis along the top names the
+previous week's, over the same range, so the two stay exactly a week apart at every zoom. The
+tooltip reads the raw minute under the pointer from both series — this week's and the minute
+seven days before it — rather than the points kept for drawing. Both axes and the tooltip are
+in UTC, the clock the window is defined in.
+
+While CASCADA answers, a panel shows what it is fetching, for which channel, and the seconds
+waited so far, with the tiles and the chart held in place.
 
 ### Automated Batch
 

@@ -1,6 +1,7 @@
-"""CSV and XLSX for the CASCADA rebuffering reports.
+"""CSV and XLSX for the CASCADA reports.
 
-Two reports: one country's rebuffering channels, and one channel's minute-by-minute series.
+Three reports: one country's rebuffering channels, one channel's minute-by-minute rebuffering,
+and one channel's minute-by-minute error count.
 
 Both are written as a table, not as a form. The column names sit on the first row and each
 record runs left to right beneath them, which is what a spreadsheet sorts, filters and pivots.
@@ -10,7 +11,8 @@ halfway down the sheet. That block is still written — an average means nothing
 window it covers — but it goes after the data in a CSV and onto its own sheet in a workbook,
 where it explains the table without getting in the way of it.
 
-Every figure is a percentage of viewing time, taken from the current week's rows alone.
+Every rebuffering figure is a percentage of viewing time, and every error figure a count of
+errors per minute; both are taken from the current week's rows alone.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import io
 from typing import Any
 
 from app.cascada.client import CHANNEL_COUNTRY, describe_window
+from app.cascada.errors import ErrorWindow
 from app.cascada.series import Window
 from app.cascada.store import ChannelWindow
 
@@ -253,6 +256,107 @@ def channel_xlsx(entry: ChannelWindow) -> bytes:
     return buffer.getvalue()
 
 
+# -- one channel's errors ----------------------------------------------------
+
+ERROR_COLUMNS = (
+    "timestamp_utc",
+    "errors",
+    "above_threshold",
+)
+
+
+def _count(value: float | None) -> str:
+    """An error count as the report prints it, or an empty cell for a minute never measured."""
+    if value is None:
+        return ""
+    return str(int(value)) if float(value).is_integer() else f"{value:.2f}"
+
+
+def _error_row(entry: ErrorWindow, point: Any) -> list[Any]:
+    threshold = entry.stats.threshold_per_min
+    above = (
+        ""
+        if point.value is None or threshold is None
+        else ("yes" if point.value > threshold else "no")
+    )
+    return [point.at.isoformat(), _count(point.value), above]
+
+
+def _error_about(entry: ErrorWindow) -> list[list[str]]:
+    stats = entry.stats
+    threshold = stats.threshold_per_min
+    about = [
+        ["field", "value"],
+        ["report", "Samsung TV Plus — CASCADA error report"],
+        ["channel", entry.channel_name],
+        ["service_id", entry.service_id],
+        ["country", entry.country],
+        ["window_utc", describe_window(entry.window)],
+        ["unit", f"errors per minute ({entry.unit})"],
+        [
+            "threshold_per_min",
+            _count(threshold) if threshold is not None else "not set (0 in Settings)",
+        ],
+        ["average_per_min", _count(stats.average_per_min)],
+        ["maximum_per_min", _count(stats.max_per_min)],
+        ["maximum_at_utc", stats.max_at.isoformat() if stats.max_at else ""],
+        ["total_errors", _count(stats.total)],
+        ["minutes_above_threshold", str(stats.minutes_above) if threshold is not None else ""],
+        ["minutes_measured", str(stats.minutes_counted)],
+        ["minutes_with_no_measurement", str(stats.minutes_missing)],
+        ["previous_week_avg_per_min", _count(stats.previous_week_average_per_min)],
+        ["measured_at_utc", entry.fetched_at.isoformat()],
+        [
+            "scope",
+            f"CASCADA is queried with channel_country={CHANNEL_COUNTRY}, so each figure is the "
+            "channel's errors across every country it runs in.",
+        ],
+    ]
+    if entry.truncated:
+        about.append(
+            [
+                "note",
+                "CASCADA returned fewer minutes than the window asked for, so these figures "
+                "cover less than the window above.",
+            ]
+        )
+    return about
+
+
+def errors_csv(entry: ErrorWindow) -> str:
+    """One channel's errors: one row per measured minute, then what they were measured against."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(list(ERROR_COLUMNS))
+    for point in entry.origin:
+        writer.writerow(_error_row(entry, point))
+
+    writer.writerow([])
+    writer.writerows(_error_about(entry))
+    return buffer.getvalue()
+
+
+def errors_xlsx(entry: ErrorWindow) -> bytes:
+    """The same content as a workbook: the minutes on one sheet, the context on another."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    minutes = workbook.active
+    minutes.title = "minutes"
+    minutes.append(list(ERROR_COLUMNS))
+    for point in entry.origin:
+        minutes.append([point.at.isoformat(), point.value, _error_row(entry, point)[2] or None])
+    minutes.freeze_panes = "A2"
+
+    about = workbook.create_sheet(ABOUT_SHEET)
+    for line in _error_about(entry):
+        about.append(line)
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
 # -- filenames ---------------------------------------------------------------
 
 
@@ -261,7 +365,9 @@ def country_filename(country: str, fmt: str, now: dt.datetime | None = None) -> 
     return f"rebuffering_report_{country.upper()}_{stamp}.{fmt}"
 
 
-def channel_filename(service_id: str, fmt: str, now: dt.datetime | None = None) -> str:
+def channel_filename(
+    service_id: str, fmt: str, now: dt.datetime | None = None, *, prefix: str = "rebuffering"
+) -> str:
     stamp = (now or dt.datetime.now(dt.UTC)).strftime("%Y%m%d")
     safe = "".join(ch for ch in service_id if ch.isalnum() or ch in "-_") or "channel"
-    return f"rebuffering_{safe}_{stamp}.{fmt}"
+    return f"{prefix}_{safe}_{stamp}.{fmt}"

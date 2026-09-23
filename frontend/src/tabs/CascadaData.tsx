@@ -12,6 +12,9 @@
  *
  * A channel is a rebuffering channel on its **average** over the window, never on a single
  * minute — that is what the country scan is for, and one spike does not qualify a channel.
+ *
+ * Every row also opens the channel's playback errors: the same CASCADA call with
+ * `target_metrics[]=error_count`, over the same window, with the same previous-week overlay.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -21,11 +24,13 @@ import {
   endpoints,
   type CascadaChannel,
   type CascadaChannelQuery,
+  type CascadaErrorChannel,
   type CascadaScan,
   type CatalogueChannel,
   type CataloguePage,
 } from '../api/client'
 import { CascadaSessionBanner } from '../components/CascadaSession'
+import { ErrorDataModal } from '../components/ErrorDataModal'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import { RebufferingModal, formatPct, utcLabel } from '../components/RebufferingModal'
 import {
@@ -86,6 +91,7 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
   const [filter, setFilter] = useState('')
   const [scanId, setScanId] = useState<string | null>(null)
   const [open, setOpen] = useState<CascadaChannelQuery | null>(null)
+  const [openErrors, setOpenErrors] = useState<CascadaChannelQuery | null>(null)
   const [showComparison, setShowComparison] = useState(true)
   const [handoffNote, setHandoffNote] = useState<string | null>(null)
 
@@ -164,6 +170,12 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
     enabled: open !== null,
   })
 
+  const errorData = useQuery({
+    queryKey: ['cascada-errors', openErrors?.service_id, openErrors?.channel_name],
+    queryFn: () => endpoints.cascadaErrors(openErrors as CascadaChannelQuery),
+    enabled: openErrors !== null,
+  })
+
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     if (!page) return []
@@ -205,7 +217,10 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
 
   const scanError = startScan.isError ? startScan.error : scan.isError ? scan.error : null
   const sessionProblem =
-    isSessionError(scanError) || isSessionError(channel.error) || scanState?.status === 'AUTH_FAILED'
+    isSessionError(scanError) ||
+    isSessionError(channel.error) ||
+    isSessionError(errorData.error) ||
+    scanState?.status === 'AUTH_FAILED'
 
   const pageLabel = page
     ? page.total_pages
@@ -217,7 +232,7 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
     <>
       <PageHeader
         title="CASCADA Data"
-        subtitle="Rebuffering measured on real televisions, week on week, for the channels TV Plus runs."
+        subtitle="Rebuffering and playback errors measured on real televisions, week on week, for the channels TV Plus runs."
         status={
           scanState ? (
             <span className="font-mono text-micro text-ink-muted">
@@ -233,7 +248,7 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
           <CascadaSessionBanner
             detail={
               scanState?.error ??
-              message(scanError ?? channel.error ?? 'CASCADA refused the call.')
+              message(scanError ?? channel.error ?? errorData.error ?? 'CASCADA refused the call.')
             }
           />
         )}
@@ -495,13 +510,22 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
                       key={`${item.service_id}-${item.number}-${index}`}
                       channel={item}
                       measured={measured.get(item.service_id) ?? null}
-                      onOpen={() =>
+                      onOpen={() => {
+                        setOpenErrors(null)
                         setOpen({
                           service_id: item.service_id,
                           channel_name: item.name,
                           country: item.country,
                         })
-                      }
+                      }}
+                      onOpenErrors={() => {
+                        setOpen(null)
+                        setOpenErrors({
+                          service_id: item.service_id,
+                          channel_name: item.name,
+                          country: item.country,
+                        })
+                      }}
                       onAnalyse={(target) => onAnalyse(target, prefillFor(item))}
                     />
                   ))}
@@ -545,6 +569,28 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
           }}
         />
       )}
+
+      {openErrors && (
+        <ErrorDataModal
+          query={openErrors}
+          channel={(errorData.data as CascadaErrorChannel | undefined) ?? null}
+          loading={errorData.isPending}
+          error={
+            errorData.isError && !isSessionError(errorData.error) ? message(errorData.error) : null
+          }
+          showComparison={showComparison}
+          onToggleComparison={setShowComparison}
+          onClose={() => setOpenErrors(null)}
+          analysable={Boolean(
+            page?.channels.find((item) => item.service_id === openErrors.service_id)?.analysable,
+          )}
+          onAnalyse={(target) => {
+            const found = page?.channels.find((item) => item.service_id === openErrors.service_id)
+            if (found) onAnalyse(target, prefillFor(found))
+            setOpenErrors(null)
+          }}
+        />
+      )}
     </>
   )
 }
@@ -553,12 +599,14 @@ function ChannelRow({
   channel,
   measured,
   onOpen,
+  onOpenErrors,
   onAnalyse,
 }: {
   channel: CatalogueChannel
   /** The scan's result for this channel, once it has one. */
   measured: CascadaBulkRow | null
   onOpen: () => void
+  onOpenErrors: () => void
   onAnalyse: (target: 'realtime' | 'aging') => void
 }) {
   const above = measured?.above_threshold ?? false
@@ -591,6 +639,9 @@ function ChannelRow({
         <div className="flex items-center justify-end gap-2">
           <button type="button" className="btn-ghost btn-sm" onClick={onOpen}>
             Rebuffering Data
+          </button>
+          <button type="button" className="btn-ghost btn-sm" onClick={onOpenErrors}>
+            Error Data
           </button>
           <button
             type="button"

@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.cascada import client, exports, service, store
+from app.cascada import client, errors, exports, service, store
 from app.cascada.auth import (
     ACCEPTED_COOKIES,
     CSRF_COOKIE,
@@ -190,6 +190,54 @@ async def download_channel_report(
     return _attachment(
         exports.channel_xlsx(entry), XLSX_MEDIA, exports.channel_filename(service_id, "xlsx")
     )
+
+
+# -- one channel's errors ----------------------------------------------------
+
+
+async def _errors_for_request(
+    service_id: str, channel_name: str, country: str, refresh: bool
+) -> errors.ErrorWindow:
+    try:
+        return await errors.error_window(
+            service_id=service_id,
+            channel_name=channel_name,
+            country=country,
+            refresh=refresh,
+        )
+    except CascadaAuthError as exc:
+        raise _auth_http(exc) from exc
+    except CascadaError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/channel/errors")
+async def read_channel_errors(
+    service_id: str = Query(..., min_length=1, description="The channel's SVC_ID"),
+    channel_name: str = Query(..., min_length=1),
+    country: str = Query("", max_length=8),
+    refresh: bool = Query(False, description="Ignore the stored window and ask CASCADA again"),
+) -> dict[str, Any]:
+    """One channel's error count per minute, with the current week and the week before it."""
+    entry = await _errors_for_request(service_id, channel_name, country, refresh)
+    return entry.as_dict()
+
+
+@router.get("/channel/errors/report.{fmt}")
+async def download_channel_errors_report(
+    fmt: str,
+    service_id: str = Query(..., min_length=1),
+    channel_name: str = Query(..., min_length=1),
+    country: str = Query("", max_length=8),
+) -> Response:
+    """One channel's error summary and per-minute rows, as CSV or XLSX."""
+    if fmt not in ("csv", "xlsx"):
+        raise HTTPException(status_code=400, detail="Format must be csv or xlsx")
+    entry = await _errors_for_request(service_id, channel_name, country, refresh=False)
+    filename = exports.channel_filename(service_id, fmt, prefix="errors")
+    if fmt == "csv":
+        return _attachment(exports.errors_csv(entry).encode("utf-8"), CSV_MEDIA, filename)
+    return _attachment(exports.errors_xlsx(entry), XLSX_MEDIA, filename)
 
 
 # -- the country scan --------------------------------------------------------

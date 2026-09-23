@@ -21,7 +21,15 @@ from typing import Any
 from urllib.parse import urlencode, urlsplit
 
 from app.cascada.auth import CascadaAuth, CascadaAuthError
-from app.cascada.series import COMPARISON, CascadaParseError, ChannelSeries, Window, parse
+from app.cascada.series import (
+    COMPARISON,
+    REBUFFERING,
+    CascadaParseError,
+    ChannelSeries,
+    Metric,
+    Window,
+    parse,
+)
 from app.config import Thresholds, get_settings
 from app.net.fetcher import Fetcher
 
@@ -36,7 +44,7 @@ PLATFORM = "Samsung TV"
 MODEL = "ALL"
 COMPARE_WITH = "1WEEK"
 EXPORT_TO_GCS = "true"
-TARGET_METRIC = "rebuffering_ratio"
+TARGET_METRIC = REBUFFERING.request_key
 
 # What `compare_with=1WEEK` adds to the answer: the seven days before the requested window.
 COMPARISON_DAYS = 7
@@ -84,11 +92,13 @@ def build_url(
     window: Window,
     limit: int,
     base_url: str | None = None,
+    metric: Metric = REBUFFERING,
 ) -> str:
-    """The realtime URL for one channel over one window.
+    """The realtime URL for one channel over one window, for one metric.
 
     `urlencode` produces `+` for the spaces in the channel group name and the platform, and
     `target_metrics%5B%5D` for the bracketed parameter, which is what the dashboard sends.
+    The metric is the only parameter that differs between the rebuffering and error calls.
     """
     settings = get_settings()
     base = (base_url or settings.cascada_base_url).rstrip("/")
@@ -104,7 +114,7 @@ def build_url(
             ("to", int(window.end.timestamp())),
             ("limit", int(limit)),
             ("compare_with", COMPARE_WITH),
-            ("target_metrics[]", TARGET_METRIC),
+            ("target_metrics[]", metric.request_key),
             ("export_to_gcs", EXPORT_TO_GCS),
         ]
     )
@@ -135,8 +145,9 @@ async def fetch_series(
     thresholds: Thresholds,
     window: Window | None = None,
     fetcher: Fetcher | None = None,
+    metric: Metric = REBUFFERING,
 ) -> ChannelSeries:
-    """Fetch and parse one channel's rebuffering series.
+    """Fetch and parse one channel's series for one metric, rebuffering unless told otherwise.
 
     Raises `CascadaAuthError` when the session is the problem and `CascadaError` for anything
     else, both carrying a sentence the operator can act on.
@@ -148,6 +159,7 @@ async def fetch_series(
         channel_id=channel_id,
         window=span,
         limit=row_limit(span, settings.cascada_row_limit_margin),
+        metric=metric,
     )
     headers = auth.headers()
 
@@ -170,7 +182,9 @@ async def fetch_series(
                 )
 
             if result.ok:
-                return _parse_body(result.text, channel_name=channel_name, window=span)
+                return _parse_body(
+                    result.text, channel_name=channel_name, window=span, metric=metric
+                )
 
             last_error = (
                 f"the call failed on the wire ({result.error})"
@@ -184,14 +198,16 @@ async def fetch_series(
                 await asyncio.sleep(RETRY_BACKOFF_S * attempt)
 
         raise CascadaError(
-            f"CASCADA did not serve the rebuffering data for {channel_name}: {last_error}."
+            f"CASCADA did not serve the {metric.label} data for {channel_name}: {last_error}."
         )
     finally:
         if own:
             await client.aclose()
 
 
-def _parse_body(body: str, *, channel_name: str, window: Window) -> ChannelSeries:
+def _parse_body(
+    body: str, *, channel_name: str, window: Window, metric: Metric = REBUFFERING
+) -> ChannelSeries:
     try:
         payload = json.loads(body)
     except ValueError as exc:
@@ -201,7 +217,7 @@ def _parse_body(body: str, *, channel_name: str, window: Window) -> ChannelSerie
         ) from exc
 
     try:
-        series = parse(payload, requested=window)
+        series = parse(payload, requested=window, metric=metric)
     except CascadaParseError as exc:
         raise CascadaError(str(exc)) from exc
 

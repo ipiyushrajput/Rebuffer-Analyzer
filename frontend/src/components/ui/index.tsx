@@ -301,6 +301,34 @@ export function Stepper({
   )
 }
 
+// --- waiting ----------------------------------------------------------------
+
+/** A turning ring for work in flight. It carries a label for assistive technology. */
+export function Spinner({ size = 28, label = 'Loading' }: { size?: number; label?: string }) {
+  return (
+    <span
+      role="status"
+      aria-label={label}
+      className="inline-block shrink-0 animate-spin rounded-full border-[3px] border-brand-100 border-t-brand-600"
+      style={{ width: size, height: size }}
+    />
+  )
+}
+
+/** Whole seconds since this component mounted, so a wait states how long it has lasted. */
+export function useElapsedSeconds(): number {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    const started = Date.now()
+    const timer = window.setInterval(
+      () => setSeconds(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    )
+    return () => window.clearInterval(timer)
+  }, [])
+  return seconds
+}
+
 // --- messages ---------------------------------------------------------------
 
 /** A stated condition in the flow of the page: what happened, in its own colour. */

@@ -223,6 +223,15 @@ frontend/src/
   minute, and a null minute is a gap rather than a zero. The session is an operator's, pasted
   in Settings and held server-side: a browser cannot hand its CASCADA cookies to another
   origin, and the value is never returned to a page or written to a log.
+- **CASCADA error data is the same call with `target_metrics[]=error_count`, answered under
+  `errors`.** The row key is not the requested name, so `series.Metric` lists every key a value
+  can arrive under and a response carrying none of them is refused, never drawn as gaps.
+  `errors` is a count per minute (`times`), so it is summed as well as averaged and its
+  threshold, `cascada_error_threshold_per_min`, is 0 — no threshold, no verdict — until a team
+  sets one. Error windows live in `cascada_error_samples`, never in `cascada_samples`, which
+  the batch pipeline reads as the rebuffering record. Both CASCADA charts draw the comparison
+  week seven days late with a second, top axis naming its dates over the same range, and the
+  tooltip reads the raw minute under the pointer, never the `lttb` point kept for drawing.
 - **A batch calls the engines, it does not reimplement them.** `app/batch/` composes what
   already exists: `app.cascada.service` for the country listing, the scan and the averaging,
   `app.analysis` through `job_manager.submit()` for every analysis and aging run. A second
