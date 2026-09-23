@@ -8,6 +8,20 @@ single channel, which is what makes a download still work weeks later.
 Where a channel was aging through the measured week, the aging run's findings are correlated
 against the minutes the rebuffering ratio was high, and the result goes into the summary and
 onto the correlation sheet.
+
+**Which aging run.** A scheduled batch starts its aging runs *after* its report, and they watch
+the week that follows. So the aging run that watched the week this batch measured is the
+*previous* batch's, for the same country and channel — that is the one correlated here. A
+channel's own `aging_job_id` is used when it has one (a report rebuilt later), else the
+previous batch's.
+
+**Which minutes.** Spike windows need per-minute data. A realtime batch without an aging run
+keeps what it always did: the spikes in the window it was selected on. Otherwise — a channel
+with an aging run to compare, or any channel of a historical batch, whose selection data is
+daily — the realtime per-minute window is read at report time for that channel alone, which
+ends now and so covers the aging run up to this moment. When the aging run started before that
+window, the report says so and does not correlate: part of the run would have nothing to be
+compared against.
 """
 
 from __future__ import annotations
@@ -21,11 +35,13 @@ from sqlalchemy import select
 from app.api.job_views import finding_payload, incident_payload
 from app.batch import correlate, exports, store, summary
 from app.batch.settings import BatchSettings
+from app.cascada import service as cascada_service
 from app.cascada import store as cascada_store
 from app.cascada.series import Window
 from app.db import session as db_session
 from app.db.models import Finding as FindingRow
 from app.db.models import Incident as IncidentRow
+from app.db.models import Job as JobRow
 from app.reports import service
 
 logger = logging.getLogger(__name__)
@@ -52,29 +68,123 @@ async def _job_evidence(job_id: str | None) -> tuple[list[dict[str, Any]], list[
         )
 
 
+async def _aging_period(job_id: str) -> tuple[dt.datetime, dt.datetime] | None:
+    """When an aging run watched: from its start to its end, or to now while it runs."""
+    async with db_session.session_scope() as session:
+        row = await session.get(JobRow, job_id)
+        if row is None or row.started_at is None:
+            return None
+        start = correlate.as_utc(row.started_at)
+        end = correlate.as_utc(row.finished_at) if row.finished_at else dt.datetime.now(dt.UTC)
+        return start, end
+
+
+async def _previous_aging(batch: dict[str, Any]) -> tuple[str | None, dict[str, str]]:
+    """The previous batch for this country, and each channel's aging run in it."""
+    previous = await store.previous_batch(batch["country"], batch["id"])
+    if previous is None:
+        return None, {}
+    return previous["id"], {
+        item["service_id"]: item["aging_job_id"]
+        for item in await store.items_for(previous["id"])
+        if item.get("aging_job_id")
+    }
+
+
 async def _correlation(
-    item: dict[str, Any], window: Window, settings: BatchSettings, threshold_pct: float
+    item: dict[str, Any],
+    window: Window,
+    settings: BatchSettings,
+    threshold_pct: float,
+    *,
+    source: str = "realtime",
+    aging_job_id: str | None = None,
+    aging_batch_id: str | None = None,
 ) -> dict[str, Any]:
-    """The spike windows for this channel, and what its aging run captured in them.
+    """The spike windows for this channel, and what the aging run that watched them captured.
 
-    Only a channel that was aging through the measured week has anything to correlate: the
-    aging run is the other half of the comparison. Without one there are still spike windows,
-    and saying so — rather than omitting them — is what tells a reader the week had spikes
-    nobody was watching.
+    A channel without an aging run still has its spike windows, and saying so — rather than
+    omitting them — is what tells a reader the week had spikes nobody was watching.
     """
-    stored = await cascada_store.read(item["service_id"], window, ttl_minutes=10**6)
-    if stored is None:
-        return {}
+    live = source != "realtime" or aging_job_id is not None
+    if not live:
+        stored = await cascada_store.read(item["service_id"], window, ttl_minutes=10**6)
+        if stored is None:
+            return {}
+        return {
+            **correlate.correlation_for(
+                points=stored.origin,
+                findings=[],
+                incidents=[],
+                threshold_pct=threshold_pct,
+                tolerance_s=settings.correlation_tolerance_s,
+                min_minutes=settings.spike_min_minutes,
+            ),
+            "spike_source": "realtime per-minute",
+            "spike_window": {"start": window.start.isoformat(), "end": window.end.isoformat()},
+        }
 
-    findings, incidents = await _job_evidence(item.get("aging_job_id"))
-    return correlate.correlation_for(
-        points=stored.origin,
-        findings=findings,
-        incidents=incidents,
-        threshold_pct=threshold_pct,
-        tolerance_s=settings.correlation_tolerance_s,
-        min_minutes=settings.spike_min_minutes,
-    )
+    try:
+        minutes = await cascada_service.channel_window(
+            service_id=item["service_id"],
+            channel_name=item["channel_name"],
+            country=item.get("country") or "",
+        )
+    except Exception as exc:
+        return {
+            "spike_source": "realtime per-minute",
+            "error": f"The realtime per-minute series could not be read: {exc}",
+            "windows": [],
+            "spike_count": 0,
+            "matched_count": 0,
+        }
+
+    spike_window = {
+        "start": minutes.window.start.isoformat(),
+        "end": minutes.window.end.isoformat(),
+    }
+    base: dict[str, Any] = {
+        "spike_source": "realtime per-minute",
+        "spike_window": spike_window,
+        "aging_job_id": aging_job_id,
+        "aging_batch_id": aging_batch_id,
+    }
+
+    findings: list[dict[str, Any]] = []
+    incidents: list[dict[str, Any]] = []
+    if aging_job_id:
+        period = await _aging_period(aging_job_id)
+        if period is not None:
+            base["aging_period"] = {"start": period[0].isoformat(), "end": period[1].isoformat()}
+            if period[0] < minutes.window.start:
+                # Correlating would compare part of the run against nothing.
+                return {
+                    **base,
+                    "coverage": (
+                        f"Not correlated: aging run {aging_job_id} started "
+                        f"{period[0]:%Y-%m-%d %H:%M} UTC, before the realtime per-minute window "
+                        f"({minutes.window.start:%Y-%m-%d %H:%M} → "
+                        f"{minutes.window.end:%Y-%m-%d %H:%M} UTC), so the window does not "
+                        "cover the aging period."
+                    ),
+                    "windows": [],
+                    "spike_count": 0,
+                    "matched_count": 0,
+                }
+            base["coverage"] = "The realtime per-minute window covers the whole aging period."
+        findings, incidents = await _job_evidence(aging_job_id)
+
+    return {
+        **correlate.correlation_for(
+            points=minutes.origin,
+            findings=findings,
+            incidents=incidents,
+            threshold_pct=threshold_pct,
+            tolerance_s=settings.correlation_tolerance_s,
+            min_minutes=settings.spike_min_minutes,
+        ),
+        **base,
+    }
 
 
 async def build(batch_id: str) -> dict[str, Any]:
@@ -86,10 +196,27 @@ async def build(batch_id: str) -> dict[str, Any]:
     settings = BatchSettings.from_snapshot(current["settings"])
     threshold_pct = float((current["settings"] or {}).get("threshold_pct", 0.25))
     window = _window_of(current)
+    source = current.get("data_source", "realtime")
+    aging_batch_id, previous_aging = await _previous_aging(current)
 
     for item in current.get("items", []):
         findings, incidents = await _job_evidence(item.get("job_id"))
-        correlation = await _correlation(item, window, settings, threshold_pct) if window else {}
+        # A channel the historical scan could not judge has no spikes to look for.
+        judged = item["status"] not in exports.NOT_JUDGED
+        aging_job_id = item.get("aging_job_id") or previous_aging.get(item["service_id"])
+        correlation = (
+            await _correlation(
+                item,
+                window,
+                settings,
+                threshold_pct,
+                source=source,
+                aging_job_id=aging_job_id,
+                aging_batch_id=aging_batch_id if not item.get("aging_job_id") else current["id"],
+            )
+            if window and judged
+            else {}
+        )
         text = summary.build(
             status=item["status"],
             findings=findings,

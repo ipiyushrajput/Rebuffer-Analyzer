@@ -63,8 +63,25 @@ async def estimate(country: str, settings: BatchSettings) -> dict[str, Any]:
     }
 
 
-async def start(country: str, kind: str = store.MANUAL) -> dict[str, Any]:
-    """Create a batch and set it running. Refuses a second batch for the same country."""
+REALTIME = cascada.REALTIME
+HISTORICAL = cascada.HISTORICAL
+
+# Channels a historical scan measured but could not judge, and ones it could not ask about.
+# They are items so the report names them; nothing analyses or ages them.
+INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+NO_PROVIDER = "NO_PROVIDER"
+NOT_JUDGED = (INSUFFICIENT_DATA, NO_PROVIDER)
+
+
+async def start(
+    country: str, kind: str = store.MANUAL, source: str | None = None
+) -> dict[str, Any]:
+    """Create a batch and set it running. Refuses a second batch for the same country.
+
+    `source` is the button that was pressed. A scheduled batch passes none and reads
+    `scheduled_data_source`, which is historical unless a team changes it; a caller that
+    predates the choice starts a realtime batch, as it always did.
+    """
     code = cat.country(country).code
     existing = await store.running_for(code)
     if existing is not None:
@@ -76,10 +93,25 @@ async def start(country: str, kind: str = store.MANUAL) -> dict[str, Any]:
     from app.batch import settings as batch_settings
 
     configured = await batch_settings.load()
+    chosen = source or (configured.scheduled_data_source if kind == store.SCHEDULED else REALTIME)
+    if chosen not in (REALTIME, HISTORICAL):
+        raise BatchError(f"Unknown data source {chosen!r}.")
     batch_id = uuid.uuid4().hex
-    await store.create(batch_id=batch_id, country=code, kind=kind, snapshot=configured.snapshot())
+    await store.create(
+        batch_id=batch_id,
+        country=code,
+        kind=kind,
+        snapshot={**configured.snapshot(), "data_source": chosen},
+    )
+    await store.log(batch_id, f"Data source: {chosen}.")
     _tasks[batch_id] = asyncio.create_task(_run(batch_id), name=f"rba:batch:{batch_id}")
-    return {"id": batch_id, "country": code, "kind": kind, "status": store.QUEUED}
+    return {
+        "id": batch_id,
+        "country": code,
+        "kind": kind,
+        "status": store.QUEUED,
+        "data_source": chosen,
+    }
 
 
 async def cancel(batch_id: str) -> dict[str, Any] | None:
@@ -124,7 +156,7 @@ async def _run(batch_id: str, resume: bool = False) -> None:
             started_at=dt.datetime.now(dt.UTC),
         )
         if not resume or not await store.items_for(batch_id):
-            await _scan(batch_id, country, settings)
+            await _scan(batch_id, country, settings, current.get("data_source", REALTIME))
         else:
             await store.log(batch_id, "Resuming after a restart; the scan already completed.")
 
@@ -178,7 +210,9 @@ async def _finish(batch_id: str, status: str, reason: str) -> None:
 SCAN_POLL_S = 2.0
 
 
-async def _scan(batch_id: str, country: str, settings: BatchSettings) -> None:
+async def _scan(
+    batch_id: str, country: str, settings: BatchSettings, source: str = REALTIME
+) -> None:
     """Measure every channel in the country and keep the ones above the threshold.
 
     This drives `cascada.start_scan` — the same scan the CASCADA Data tab runs — rather than
@@ -189,18 +223,23 @@ async def _scan(batch_id: str, country: str, settings: BatchSettings) -> None:
     until the last channel returned.
     """
     thresholds = get_thresholds()
-    scan = await cascada.start_scan(country)
+    # The realtime call is made exactly as it always was; only historical names its source.
+    scan = (
+        await cascada.start_scan(country, source=HISTORICAL)
+        if source == HISTORICAL
+        else await cascada.start_scan(country)
+    )
 
     await store.update(
         batch_id,
         channels_listed=scan.total,
         window_from=int(scan.window.start.timestamp()),
-        window_to=int(scan.window.end.timestamp()),
+        window_to=int(_window_end(scan).timestamp()),
     )
     await store.log(
         batch_id,
         f"The catalogue lists {scan.total} channel(s) for {country}. Scanning them against "
-        f"CASCADA over {cascada_client.describe_window(scan.window)}, "
+        f"CASCADA ({source}) over {_describe(scan)}, "
         f"{thresholds.cascada_scan_concurrency} at a time.",
     )
 
@@ -223,6 +262,9 @@ async def _scan(batch_id: str, country: str, settings: BatchSettings) -> None:
         raise
 
     await store.update(batch_id, channels_scanned=scan.done, channels_failed=len(scan.failures))
+    if source == HISTORICAL:
+        # The window the report states is the days CASCADA returned, known only now.
+        await store.update(batch_id, window_to=int(_window_end(scan).timestamp()))
 
     if scan.status == "AUTH_FAILED":
         raise CascadaAuthError(
@@ -265,8 +307,23 @@ async def _scan(batch_id: str, country: str, settings: BatchSettings) -> None:
         for entry in scan.above
     ]
 
-    await store.add_items(batch_id, measured)
+    not_judged = _not_judged(scan, country)
+    await store.add_items(batch_id, measured + not_judged)
     await store.update(batch_id, channels_above=len(measured))
+    if not_judged:
+        await store.log(
+            batch_id,
+            f"{len(not_judged)} channel(s) were not judged: "
+            + ", ".join(f"{item['service_id']} ({item['status']})" for item in not_judged),
+            "WARN",
+        )
+    for row in scan.ambiguous:
+        await store.log(
+            batch_id,
+            f"{row['service_id']} {row['channel_name']}: CASCADA lists more than one provider "
+            f"({', '.join(row['candidates'])}); measured with {row['chosen']}.",
+            "WARN",
+        )
     await store.log(
         batch_id,
         f"{scan.done} channel(s) scanned, {len(measured)} above "
@@ -282,6 +339,52 @@ async def _scan(batch_id: str, country: str, settings: BatchSettings) -> None:
             "be analysed: " + ", ".join(item["service_id"] for item in without_url),
             "WARN",
         )
+
+
+def _window_end(scan: cascada.Scan) -> dt.datetime:
+    """Where the stated window ends: the scan's own end, or the end of its last returned day."""
+    if scan.source != HISTORICAL:
+        return scan.window.end
+    last = scan.window_label.split(" → ")[-1].strip()
+    day = dt.date.fromisoformat(last)
+    return dt.datetime(day.year, day.month, day.day, 23, 59, 59, tzinfo=dt.UTC)
+
+
+def _describe(scan: cascada.Scan) -> str:
+    if scan.source == HISTORICAL:
+        return f"the {scan.window_label} UTC days"
+    return cascada_client.describe_window(scan.window)
+
+
+def _not_judged(scan: cascada.Scan, country: str) -> list[dict[str, Any]]:
+    """What a historical scan could not judge, as items that carry the reason."""
+    rows: list[dict[str, Any]] = [
+        {
+            "service_id": row["service_id"],
+            "channel_name": row["channel_name"],
+            "country": country,
+            "playback_url": scan.urls.get(row["service_id"], ""),
+            "average_pct": row.get("average_pct"),
+            "status": INSUFFICIENT_DATA,
+            "error": (
+                f"Insufficient data: {row['days_with_data']} of {row['days_expected']} day(s) "
+                "carry a value, below the minimum, so the channel was neither flagged nor passed."
+            ),
+        }
+        for row in scan.insufficient
+    ]
+    rows += [
+        {
+            "service_id": row["service_id"],
+            "channel_name": row["channel_name"],
+            "country": country,
+            "playback_url": scan.urls.get(row["service_id"], ""),
+            "status": NO_PROVIDER,
+            "error": row["reason"],
+        }
+        for row in scan.no_provider
+    ]
+    return rows
 
 
 async def _analyse(batch_id: str, settings: BatchSettings, deadline: dt.datetime) -> None:

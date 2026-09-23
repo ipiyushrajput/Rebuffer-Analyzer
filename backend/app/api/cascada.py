@@ -11,13 +11,13 @@ CASCADA surface can show one banner instead of failing in a different way per sc
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.cascada import client, errors, exports, service, store
+from app.cascada import client, errors, exports, historical, providers, service, store
 from app.cascada.auth import (
     ACCEPTED_COOKIES,
     CSRF_COOKIE,
@@ -192,6 +192,75 @@ async def download_channel_report(
     )
 
 
+# -- one channel's historical days -------------------------------------------
+
+
+async def _days_for_request(
+    service_id: str, channel_name: str, country: str, refresh: bool
+) -> store.ChannelWindow:
+    try:
+        return await historical.channel_days(
+            service_id=service_id, channel_name=channel_name, country=country, refresh=refresh
+        )
+    except CascadaAuthError as exc:
+        raise _auth_http(exc) from exc
+    except historical.ProviderNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CascadaError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/channel/historical")
+async def read_channel_historical(
+    service_id: str = Query(..., min_length=1, description="The channel's SVC_ID"),
+    channel_name: str = Query(..., min_length=1),
+    country: str = Query("", max_length=8),
+    refresh: bool = Query(False, description="Ignore the stored window and ask CASCADA again"),
+) -> dict[str, Any]:
+    """One channel's rebuffering ratio per day, over the last seven complete UTC days."""
+    entry = await _days_for_request(service_id, channel_name, country, refresh)
+    return entry.as_dict()
+
+
+@router.get("/channel/historical/report.{fmt}")
+async def download_channel_historical_report(
+    fmt: str,
+    service_id: str = Query(..., min_length=1),
+    channel_name: str = Query(..., min_length=1),
+    country: str = Query("", max_length=8),
+) -> Response:
+    """One channel's days, one row per day, as CSV or XLSX."""
+    if fmt not in ("csv", "xlsx"):
+        raise HTTPException(status_code=400, detail="Format must be csv or xlsx")
+    entry = await _days_for_request(service_id, channel_name, country, refresh=False)
+    filename = exports.channel_filename(service_id, fmt, prefix="rebuffering_historical")
+    if fmt == "csv":
+        return _attachment(exports.historical_csv(entry).encode("utf-8"), CSV_MEDIA, filename)
+    return _attachment(exports.historical_xlsx(entry), XLSX_MEDIA, filename)
+
+
+# -- the provider map --------------------------------------------------------
+
+
+@router.get("/providers")
+async def read_providers() -> dict[str, Any]:
+    """What the cached channel → provider map holds, without fetching it."""
+    held = providers.cached()
+    return {"loaded": held is not None, **(held.describe() if held else {})}
+
+
+@router.post("/providers/refresh")
+async def refresh_providers() -> dict[str, Any]:
+    """Read CASCADA's channel-group list again now, rather than when the TTL runs out."""
+    try:
+        refreshed = await providers.provider_map(await resolve_auth(), refresh=True)
+    except CascadaAuthError as exc:
+        raise _auth_http(exc) from exc
+    except CascadaError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"loaded": True, **refreshed.describe()}
+
+
 # -- one channel's errors ----------------------------------------------------
 
 
@@ -246,13 +315,15 @@ async def download_channel_errors_report(
 class ScanIn(BaseModel):
     country: str = Field(..., min_length=2, max_length=2)
     concurrency: int | None = Field(default=None, ge=1, le=16)
+    # Omitted by a client that predates the historical source, which is the realtime scan.
+    source: Literal["realtime", "historical"] = "realtime"
 
 
 @router.post("/scans", status_code=201)
 async def start_scan(body: ScanIn) -> dict[str, Any]:
     """Measure every channel in one country. The response is the scan's opening state."""
     try:
-        scan = await service.start_scan(body.country, body.concurrency)
+        scan = await service.start_scan(body.country, body.concurrency, source=body.source)
     except CascadaAuthError as exc:
         raise _auth_http(exc) from exc
     except cat.CatalogueError as exc:
@@ -304,15 +375,36 @@ async def download_country_report(scan_id: str, fmt: str) -> Response:
         # The catalogue's playback URL for each channel, so the report is enough on its own to
         # hand a channel to whoever has to analyse it.
         "urls": scan.urls,
+        "source": scan.source,
+        "window_label": scan.window_label,
     }
+    if scan.source == service.HISTORICAL:
+        # A historical report lists every channel it could not judge, with the reason.
+        kwargs["min_days"] = get_thresholds().cascada_historical_min_days
+        kwargs["not_judged"] = [
+            *(
+                [
+                    row["channel_name"],
+                    row["service_id"],
+                    "INSUFFICIENT_DATA",
+                    f"{row['days_with_data']} of {row['days_expected']} day(s) carry a value",
+                ]
+                for row in scan.insufficient
+            ),
+            *(
+                [row["channel_name"], row["service_id"], "NO_PROVIDER", row["reason"]]
+                for row in scan.no_provider
+            ),
+            *([f.channel_name, f.service_id, "FAILED", f.reason] for f in scan.failures),
+        ]
     if fmt == "csv":
         return _attachment(
             exports.country_csv(above, **kwargs).encode("utf-8"),
             CSV_MEDIA,
-            exports.country_filename(scan.country, "csv"),
+            exports.country_filename(scan.country, "csv", source=scan.source),
         )
     return _attachment(
         exports.country_xlsx(above, **kwargs),
         XLSX_MEDIA,
-        exports.country_filename(scan.country, "xlsx"),
+        exports.country_filename(scan.country, "xlsx", source=scan.source),
     )

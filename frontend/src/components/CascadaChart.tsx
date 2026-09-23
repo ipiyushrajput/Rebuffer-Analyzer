@@ -7,6 +7,10 @@
  *
  * The chart holds a week of per-minute data, so the series is handed to ECharts whole and
  * downsampled for drawing alone; the statistics and the downloads read the same raw points.
+ *
+ * The historical source is one value per UTC day, and draws on this same chart with
+ * `granularity="day"`: a marker per day, ticks on whole days, no zoom, and a day with no value
+ * drawn as a gap with a shaded "no data" band over it — never as a zero.
  */
 
 import ReactECharts from 'echarts-for-react'
@@ -49,6 +53,30 @@ export function aboveOnly(points: CascadaPoint[], threshold: number): [number, n
   ])
 }
 
+export type Granularity = 'minute' | 'day'
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** A UTC day as `YYYY-MM-DD`. */
+export function utcDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+/**
+ * The days with no value, as shaded bands a day wide.
+ *
+ * A null day is a gap in the line already; the band is what names it, so an empty stretch
+ * reads as "CASCADA has nothing for this day" and not as a line that stopped drawing.
+ */
+export function noDataBands(points: CascadaPoint[]): { xAxis: number; name?: string }[][] {
+  return points
+    .filter((point) => point.value === null)
+    .map((point) => {
+      const at = new Date(point.at).valueOf()
+      return [{ xAxis: at - DAY_MS / 2, name: 'no data' }, { xAxis: at + DAY_MS / 2 }]
+    })
+}
+
 export interface CascadaChartProps {
   origin: CascadaPoint[]
   comparison: CascadaPoint[]
@@ -60,6 +88,8 @@ export interface CascadaChartProps {
   yName: string
   /** How one value is written in the tooltip. */
   formatValue: (value: number) => string
+  /** 'day' for the historical source's one value per UTC day. */
+  granularity?: Granularity
 }
 
 const MINUTE_MS = 60 * 1000
@@ -86,6 +116,7 @@ export function tooltipLines({
   withComparison,
   threshold,
   formatValue,
+  granularity = 'minute',
 }: {
   at: number
   origin: Map<number, number | null>
@@ -93,13 +124,19 @@ export function tooltipLines({
   withComparison: boolean
   threshold: number | null
   formatValue: (value: number) => string
+  granularity?: Granularity
 }): string[] {
-  const minute = Math.round(at / MINUTE_MS) * MINUTE_MS
+  const step = granularity === 'day' ? DAY_MS : MINUTE_MS
+  const minute = Math.round(at / step) * step
+  const absent = granularity === 'day' ? 'no data' : 'no measurement'
   const written = (value: number | null | undefined) =>
-    value === null || value === undefined ? 'no measurement' : formatValue(value)
+    value === null || value === undefined ? absent : formatValue(value)
 
   const current = origin.get(minute)
-  const lines = [`${utcMinute(minute)} UTC`, `${THIS_WEEK}: ${written(current)}`]
+  const lines =
+    granularity === 'day'
+      ? [`${utcDay(minute)} UTC`, `Rebuffering ratio: ${written(current)}`]
+      : [`${utcMinute(minute)} UTC`, `${THIS_WEEK}: ${written(current)}`]
   if (withComparison) {
     const before = minute - WEEK_MS
     lines.push(`${PREVIOUS_WEEK} (${utcMinute(before)}): ${written(comparison.get(before))}`)
@@ -122,11 +159,18 @@ export function cascadaChartOption({
   thresholdLabel,
   yName,
   formatValue,
+  granularity = 'minute',
 }: CascadaChartProps): ChartOption {
-  const withComparison = showComparison && comparison.length > 0
+  const daily = granularity === 'day'
+  const withComparison = !daily && showComparison && comparison.length > 0
   const extent = drawnExtent(origin, comparison, withComparison)
-  // Both axes take the same range, which is what keeps them a week apart at every zoom.
-  const range = extent ? { min: extent[0], max: extent[1] } : {}
+  // Both axes take the same range, which is what keeps them a week apart at every zoom. A
+  // daily chart is padded half a day either side so the first and last markers are whole.
+  const range = extent
+    ? daily
+      ? { min: extent[0] - DAY_MS / 2, max: extent[1] + DAY_MS / 2, minInterval: DAY_MS }
+      : { min: extent[0], max: extent[1] }
+    : {}
   const axisBase = {
     type: 'time',
     ...range,
@@ -170,19 +214,31 @@ export function cascadaChartOption({
     })
   }
 
+  const gaps = daily ? noDataBands(origin) : []
   series.push({
-    name: THIS_WEEK,
+    name: daily ? 'Rebuffering ratio' : THIS_WEEK,
     type: 'line',
     xAxisIndex: 0,
-    showSymbol: false,
-    // The whole series is handed over; `lttb` thins it for drawing only.
-    sampling: 'lttb',
+    showSymbol: daily,
+    symbolSize: daily ? 7 : undefined,
+    // The whole series is handed over; `lttb` thins it for drawing only. Seven days need none.
+    sampling: daily ? undefined : 'lttb',
     lineStyle: { width: 1.5, color: BRAND.blue },
     itemStyle: { color: BRAND.blue },
     data: pairs(origin),
     z: 2,
     ...(threshold !== null
       ? { markLine: thresholdLine(threshold, thresholdLabel ?? `threshold ${threshold}`) }
+      : {}),
+    ...(gaps.length > 0
+      ? {
+          markArea: {
+            silent: true,
+            itemStyle: { color: 'rgba(152, 160, 180, 0.12)' },
+            label: { position: 'insideTop', color: COMPARISON_COLOR, fontSize: 10 },
+            data: gaps,
+          },
+        }
       : {}),
   })
 
@@ -201,7 +257,7 @@ export function cascadaChartOption({
       type: 'line',
       xAxisIndex: 0,
       showSymbol: true,
-      symbolSize: 3,
+      symbolSize: daily ? 9 : 3,
       lineStyle: { width: 1.5, color: BRAND.pink },
       itemStyle: { color: BRAND.pink },
       data: aboveOnly(origin, threshold),
@@ -211,7 +267,13 @@ export function cascadaChartOption({
 
   return baseOption({
     useUTC: true,
-    grid: { left: 58, right: 20, top: withComparison ? 58 : 34, bottom: 58, containLabel: true },
+    grid: {
+      left: 58,
+      right: 20,
+      top: withComparison ? 58 : 34,
+      bottom: daily ? 24 : 58,
+      containLabel: true,
+    },
     xAxis,
     yAxis: {
       type: 'value',
@@ -248,27 +310,39 @@ export function cascadaChartOption({
           withComparison,
           threshold,
           formatValue,
+          granularity,
         }).join('<br/>')
       },
     },
-    dataZoom: [
-      { type: 'inside', xAxisIndex: zoomed, throttle: 50 },
-      {
-        type: 'slider',
-        xAxisIndex: zoomed,
-        height: 18,
-        bottom: 12,
-        borderColor: '#E6E8F0',
-        labelFormatter: (value: number) => utcMinute(value),
-      },
-    ],
+    // Seven daily points need no zoom.
+    dataZoom: daily
+      ? []
+      : [
+          { type: 'inside', xAxisIndex: zoomed, throttle: 50 },
+          {
+            type: 'slider',
+            xAxisIndex: zoomed,
+            height: 18,
+            bottom: 12,
+            borderColor: '#E6E8F0',
+            labelFormatter: (value: number) => utcMinute(value),
+          },
+        ],
     series,
   })
 }
 
 export function CascadaChart(props: CascadaChartProps) {
-  const { origin, comparison, showComparison, threshold, thresholdLabel, yName, formatValue } =
-    props
+  const {
+    origin,
+    comparison,
+    showComparison,
+    threshold,
+    thresholdLabel,
+    yName,
+    formatValue,
+    granularity,
+  } = props
   const option = useMemo(
     () =>
       cascadaChartOption({
@@ -279,8 +353,18 @@ export function CascadaChart(props: CascadaChartProps) {
         thresholdLabel,
         yName,
         formatValue,
+        granularity,
       }),
-    [origin, comparison, showComparison, threshold, thresholdLabel, yName, formatValue],
+    [
+      origin,
+      comparison,
+      showComparison,
+      threshold,
+      thresholdLabel,
+      yName,
+      formatValue,
+      granularity,
+    ],
   )
 
   return (

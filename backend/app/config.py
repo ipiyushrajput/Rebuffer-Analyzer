@@ -207,6 +207,16 @@ class Thresholds(BaseModel):
     cascada_scan_concurrency: int = 4
     # How long a stored channel window is served before CASCADA is asked again.
     cascada_cache_ttl_minutes: int = 45
+    # Historical (daily) rebuffering. A channel's historical average counts only when this many
+    # of its 7 days carry a value; below it the channel is "insufficient data", neither flagged
+    # nor passed.
+    cascada_historical_min_days: int = 4
+    # Channels per historical POST. The request takes a list, so a country is a handful of
+    # calls; a batch that fails is retried channel by channel.
+    cascada_historical_batch_size: int = 25
+    # How long the channel → provider map read from CASCADA's channel-group list is kept. The
+    # list is ~20 MB and changes rarely.
+    cascada_provider_map_ttl_hours: int = 12
 
     incident_open_s: float = 10.0
     incident_clear_s: float = 60.0

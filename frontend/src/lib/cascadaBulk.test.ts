@@ -22,6 +22,8 @@ function row(patch: Partial<CascadaBulkRow> & { service_id: string }): CascadaBu
     truncated: false,
     fetched_at: '2026-09-17T05:13:00+00:00',
     cached: false,
+    source: 'realtime',
+    granularity: 'minute',
   }
 }
 

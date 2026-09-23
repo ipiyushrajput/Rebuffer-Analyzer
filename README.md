@@ -276,8 +276,8 @@ from `.env` into the repository.
 
 **Schema**: `channels`, `jobs`, `bulk_items`, `findings`, `incidents`, `samples_playlist`,
 `samples_segment`, `samples_player`, `virtual_buffer`, `playlist_snapshots`, `reports`,
-`settings`, `cascada_samples`, `cascada_error_samples`, `batches`, `batch_items`, `batch_logs`,
-`batch_schedules`,
+`settings`, `cascada_samples`, `cascada_daily_samples`, `cascada_error_samples`, `batches`,
+`batch_items`, `batch_logs`, `batch_schedules`,
 each sample table indexed on `(job_id, variant, ts)` and on `(job_id, ts)`.
 
 Every column a listing orders by is indexed, and no listing sorts the rows themselves. MySQL's
@@ -334,14 +334,17 @@ GET    /api/catalogue/channels?country=&env=&page=&today=    one page of the TV 
 GET|PUT|DELETE /api/cascada/session   ·  POST /api/cascada/session/validate
 GET    /api/cascada/channel?service_id=&channel_name=&country=&refresh=
 GET    /api/cascada/channel/report.{csv|xlsx}
+GET    /api/cascada/channel/historical?service_id=&channel_name=&country=&refresh=
+GET    /api/cascada/channel/historical/report.{csv|xlsx}
+GET    /api/cascada/providers   ·  POST /api/cascada/providers/refresh
 GET    /api/cascada/channel/errors?service_id=&channel_name=&country=&refresh=
 GET    /api/cascada/channel/errors/report.{csv|xlsx}
-POST   /api/cascada/scans   ·  GET|DELETE /api/cascada/scans/{id}
+POST   /api/cascada/scans {country, source: realtime|historical}  ·  GET|DELETE /api/cascada/scans/{id}
 GET    /api/cascada/scans/{id}/report.{csv|xlsx}
 
 GET|PUT /api/batch/settings   ·  GET|PUT /api/batch/schedules  ·  DELETE /api/batch/schedules/{country}
 GET    /api/batch/estimate?country=          channels and runtime, before a batch is started
-POST   /api/batch/batches   ·  GET /api/batch/batches  ·  GET|DELETE /api/batch/batches/{id}
+POST   /api/batch/batches {country, source}  ·  GET /api/batch/batches  ·  GET|DELETE /api/batch/batches/{id}
 POST   /api/batch/batches/{id}/rerun         GET /api/batch/batches/{id}/log?download=
 GET    /api/batch/batches/{id}/report.{csv|xlsx}      GET /api/batch/columns
 
@@ -462,6 +465,55 @@ in UTC, the clock the window is defined in.
 
 While CASCADA answers, a panel shows what it is fetching, for which channel, and the seconds
 waited so far, with the tiles and the chart held in place.
+
+### Historical rebuffering
+
+The same question from a second CASCADA source: `POST /api/data/v1/historical` with
+`period_type=Day`, one value per channel per UTC day. **Scan rebuffering (realtime)** and
+**Scan rebuffering (historical)** sit side by side; both feed the same selection, country
+report and Bulk hand-off, and every average is labelled with its source and dates —
+`Avg Rebuffering Ratio (historical, 2026-09-16 → 2026-09-22)`.
+
+**The window** is the seven most recent complete UTC days, today excluded. CASCADA answered a
+request with `from` = 2026-09-15 00:00 and `to` = 2026-09-22 00:00 with eight rows, 15 … 22,
+the last all null: both ends are inclusive days. So `to` is 00:00 UTC yesterday and `from` six
+days before it, and a row outside that range — today, incomplete — is counted and dropped. The
+dates shown are the dates CASCADA returned.
+
+**The provider.** The historical request names each channel by `provider_name`, which the
+catalogue does not carry. It comes from CASCADA's `GET /api/channelgroup/v1` list (≈20 MB,
+78 195 entries in a real answer), read once per scan or batch and kept for
+`cascada_provider_map_ttl_hours`, with **Refresh provider map** in Settings → CASCADA. Every
+entry is flat and a channel appears once per group and once per past name, switched off, so
+only entries whose `channel_group_name` is exactly "Master Group - Local Channel Included"
+**and** `on_service` is true are kept. The join is on `channel_id` = the catalogue's service
+ID, and CASCADA's own `channel_name` for that id is what the request sends. A real list leaves
+13 channels with two providers (all "SMTOWN", `NASB_Engineering` and `NEWID`): the first by
+name is used and every candidate is listed. A channel with no entry is "provider not found",
+skipped and listed. The body carries raw newlines in a few names and is parsed leniently.
+
+**The answer is columnar** and read by column name. Rows are grouped by `channel_id`, so one
+POST carries `cascada_historical_batch_size` channels (25); a failed batch is retried channel
+by channel. Only `origin` rows are averaged. The average is the mean of the days with a value;
+a null day is a gap labelled "no data". Fewer than `cascada_historical_min_days` (4) days with
+a value is **insufficient data** — neither flagged nor passed, listed on its own. The threshold
+is the realtime one, `cascada_rebuffering_threshold_pct`. The POST carries the session's
+`X-CSRFToken` plus `Referer` and `Origin`, which Django's CSRF check asks of a POST; a session
+pasted without its `csrftoken` is refused before any call. Results are cached in
+`cascada_daily_samples`, apart from the realtime record.
+
+The Rebuffering Data panel has a **Realtime / Historical** toggle that opens on the last scan's
+source; the historical view is the same chart with one marker per day, the threshold line,
+days above it in pink and a shaded "no data" band for an empty day, and its CSV/XLSX has one
+row per day. `python -m app.cli cascada-probe --country US` asks CASCADA, read-only and with
+the host's session, for the provider map summary, the dates each window returns and how many
+channels one POST carries.
+
+**The realtime window**, for comparison: `from` is 00:00 UTC seven days before today and `to`
+the current minute, so on 2026-09-23 08:30 it is 2026-09-16 00:00 → 2026-09-23 08:30, seven
+complete days plus today so far. `reference_time.start` in its answer is a week before `from`
+because `compare_with=1WEEK` adds the previous week. A `from` on a Monday (2026-09-14) comes
+from the CASCADA dashboard, whose weeks start on Monday, not from this analyzer.
 
 ### Automated Batch
 

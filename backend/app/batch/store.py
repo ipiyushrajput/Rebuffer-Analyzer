@@ -91,6 +91,9 @@ def batch_payload(row: Batch, items: list[BatchItem] | None = None) -> dict[str,
         "finished_at": finished.isoformat() if finished else None,
         "error": row.error,
         "settings": row.settings_snapshot or {},
+        # Recorded in the frozen settings when the batch started. A batch from before there
+        # was a choice read realtime, which is what it says.
+        "data_source": (row.settings_snapshot or {}).get("data_source", "realtime"),
     }
     if items is not None:
         payload["items"] = [item_payload(item) for item in items]
@@ -219,6 +222,7 @@ async def add_items(batch_id: str, items: list[dict[str, Any]]) -> None:
                     max_pct=item.get("max_pct"),
                     minutes_above=int(item.get("minutes_above") or 0),
                     status=item.get("status", "PENDING"),
+                    error=item.get("error"),
                 )
             )
 

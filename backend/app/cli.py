@@ -313,6 +313,91 @@ def _cmd_rules(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _probe(args: argparse.Namespace) -> dict[str, Any]:
+    """Ask CASCADA what the historical source depends on, and report what came back.
+
+    Read-only: one channel-group GET and a few historical POSTs, made with the session this
+    host already holds. Nothing is stored, and the session itself is never printed.
+    """
+    import datetime as dt
+
+    from app.cascada import historical, providers
+    from app.cascada.auth import resolve_auth
+    from app.cascada.service import country_channels
+    from app.config import get_settings
+    from app.net.fetcher import Fetcher
+
+    auth = await resolve_auth()
+    report: dict[str, Any] = {"session": auth.describe().as_dict()}
+    report["session"].pop("masked", None)
+
+    mapping = await providers.provider_map(auth, refresh=True)
+    report["provider_map"] = mapping.describe()
+
+    listed = await country_channels(args.country)
+    wanted: list[historical.HistoricalChannel] = []
+    for channel in listed:
+        chosen = mapping.resolve(channel.service_id).chosen
+        if chosen is not None:
+            wanted.append(
+                historical.HistoricalChannel(
+                    service_id=channel.service_id,
+                    provider_name=chosen.provider_name,
+                    cascada_name=chosen.channel_name or channel.name,
+                    catalogue_name=channel.name,
+                )
+            )
+        if len(wanted) >= args.sample:
+            break
+    report["catalogue"] = {"country": args.country, "listed": len(listed), "probed": len(wanted)}
+
+    settings = get_settings()
+    fetcher = Fetcher(timeout_s=max(settings.cascada_timeout_s, 120.0))
+    try:
+        today = dt.datetime.now(dt.UTC)
+        windows = {
+            "to_yesterday": historical.window_for(today),
+            "to_today": historical.window_for(today + dt.timedelta(days=1)),
+        }
+        report["windows"] = {}
+        for name, window in windows.items():
+            found = await historical.post_days(wanted[:1], window, auth, fetcher)
+            series = next(iter(found.values()), None)
+            report["windows"][name] = {
+                "requested": window.as_dict(),
+                "epochs": window.epochs(),
+                "returned_in_window": [d.isoformat() for d in series.returned] if series else [],
+                "rows_outside_window": series.outside if series else 0,
+                "days_with_data": series.days_with_data if series else 0,
+                "other_categories": sorted({o["category"] for o in series.other}) if series else [],
+            }
+        report["batching"] = {}
+        for size in (1, 10, 25, 50, 100):
+            if size > len(wanted):
+                break
+            started = dt.datetime.now(dt.UTC)
+            try:
+                found = await historical.post_days(
+                    wanted[:size], windows["to_yesterday"], auth, fetcher
+                )
+                outcome: dict[str, Any] = {
+                    "channels_sent": size,
+                    "channels_returned": len(found),
+                    "seconds": round((dt.datetime.now(dt.UTC) - started).total_seconds(), 1),
+                }
+            except Exception as exc:
+                outcome = {"channels_sent": size, "error": str(exc)}
+            report["batching"][str(size)] = outcome
+    finally:
+        await fetcher.aclose()
+    return report
+
+
+def _cmd_probe(args: argparse.Namespace) -> int:
+    print(json.dumps(asyncio.run(_probe(args)), indent=2, ensure_ascii=False, default=str))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rba",
@@ -346,6 +431,15 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--duration", type=parse_duration, default=45.0, help="e.g. 45s, 2m")
     diagnose.add_argument("--verbose", "-v", action="store_true")
     diagnose.set_defaults(func=_cmd_diagnose)
+
+    probe = sub.add_parser(
+        "cascada-probe",
+        help="Ask CASCADA what the historical source depends on: provider map, day window, "
+        "batch size (read-only; never prints the session)",
+    )
+    probe.add_argument("--country", default="US")
+    probe.add_argument("--sample", type=int, default=50, help="channels to probe with")
+    probe.set_defaults(func=_cmd_probe)
 
     rules = sub.add_parser("rules", help="Print the rule catalogue")
     rules.add_argument("--markdown", action="store_true", help="Render docs/RULES.md")

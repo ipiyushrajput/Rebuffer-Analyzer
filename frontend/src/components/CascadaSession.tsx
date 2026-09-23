@@ -207,3 +207,74 @@ export function CascadaSessionBanner({ detail }: { detail: string }) {
     </InlineAlert>
   )
 }
+
+/**
+ * The channel → provider map the historical source asks CASCADA with.
+ *
+ * It is read from CASCADA's channel-group list (about 20 MB) once and kept for
+ * `cascada_provider_map_ttl_hours`. A channel added to CASCADA since then is "provider not
+ * found" until the map is read again, which is what the refresh is for.
+ */
+export function ProviderMapPanel() {
+  const queryClient = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const held = useQuery({ queryKey: ['cascada-providers'], queryFn: endpoints.cascadaProviders })
+
+  const refresh = useMutation({
+    mutationFn: endpoints.refreshCascadaProviders,
+    onSuccess: (data) => {
+      setError(null)
+      queryClient.setQueryData(['cascada-providers'], data)
+    },
+    onError: (err: Error) => setError(message(err)),
+  })
+
+  const state = held.data
+  return (
+    <Card>
+      <CardHeader
+        title="Provider map"
+        subtitle="Historical rebuffering names each channel by its CASCADA provider. The map is read from CASCADA's channel list, kept on the analyzer, and refreshed on its TTL or here."
+        actions={
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            disabled={refresh.isPending}
+            onClick={() => refresh.mutate()}
+          >
+            {refresh.isPending ? 'Reading the channel list' : 'Refresh provider map'}
+          </button>
+        }
+      />
+      <div className="space-y-3 px-5 pb-5">
+        {error && <InlineAlert tone="error">{error}</InlineAlert>}
+        {state?.loaded ? (
+          <dl className="grid gap-3 sm:grid-cols-4">
+            <div>
+              <dt className="field-label">Read at</dt>
+              <dd className="font-mono text-small text-ink-soft">
+                {state.fetched_at?.replace('T', ' ').slice(0, 19)} UTC
+              </dd>
+            </div>
+            <div>
+              <dt className="field-label">Channels mapped</dt>
+              <dd className="font-mono text-small text-ink-soft">{state.channels}</dd>
+            </div>
+            <div>
+              <dt className="field-label">More than one provider</dt>
+              <dd className="font-mono text-small text-ink-soft">{state.ambiguous_channels}</dd>
+            </div>
+            <div>
+              <dt className="field-label">Group</dt>
+              <dd className="font-mono text-small text-ink-soft">{state.group}</dd>
+            </div>
+          </dl>
+        ) : (
+          <p className="text-small text-ink-muted">
+            Not read yet. The first historical scan reads it, or refresh it now.
+          </p>
+        )}
+      </div>
+    </Card>
+  )
+}

@@ -44,6 +44,11 @@ CORRELATION_COLUMNS = (
 # Statuses that mean the channel was analysed, so it belongs in the main table.
 ANALYSED = ("ANALYSED", "COMPLETED")
 
+# Statuses a historical scan gives a channel it could not judge. They are listed on their own,
+# because they were never selected: nothing was wrong with the analysis, there was none.
+NOT_JUDGED = ("INSUFFICIENT_DATA", "NO_PROVIDER")
+NOT_JUDGED_SHEET = "not_judged"
+
 
 def window_label(days: float) -> str:
     """How the fourth column names its window. Seven days reads as "7 days"."""
@@ -53,13 +58,21 @@ def window_label(days: float) -> str:
     return f"{days:.1f} days"
 
 
-def headings(window_days: float) -> tuple[str, ...]:
-    """The column order, with the window written into the fourth heading."""
+def headings(
+    window_days: float, *, source: str | None = None, dates: str | None = None
+) -> tuple[str, ...]:
+    """The column order, with the window written into the fourth heading.
+
+    Given the batch's source and dates, the heading names both — `Avg Rebuffering Ratio
+    (historical, 2026-09-16 → 2026-09-22)` — so no average is read without knowing what
+    produced it. Without them it names the span, as it always has.
+    """
+    label = f"{source}, {dates}" if source and dates else window_label(window_days)
     return (
         "Channel Name",
         "Service ID",
         "Country",
-        f"Avg Rebuffering Ratio ({window_label(window_days)})",
+        f"Avg Rebuffering Ratio ({label})",
         "Week [start date - end date]",
         "Analysis Summary",
     )
@@ -72,6 +85,24 @@ def _dates(window_from: str | None, window_to: str | None) -> str:
     start = dt.datetime.fromisoformat(window_from)
     end = dt.datetime.fromisoformat(window_to)
     return f"{start.strftime('%Y-%m-%d')} - {end.strftime('%Y-%m-%d')} UTC"
+
+
+def _arrow_dates(batch: dict[str, Any]) -> str:
+    """The window as `start → end`, dates only, for the fourth heading."""
+    if not batch.get("window_from") or not batch.get("window_to"):
+        return ""
+    start = dt.datetime.fromisoformat(str(batch["window_from"]))
+    end = dt.datetime.fromisoformat(str(batch["window_to"]))
+    return f"{start:%Y-%m-%d} → {end:%Y-%m-%d}"
+
+
+def batch_headings(batch: dict[str, Any]) -> tuple[str, ...]:
+    """The headings of this batch's report, naming its source and dates."""
+    return headings(
+        _window_days(batch),
+        source=batch.get("data_source") or "realtime",
+        dates=_arrow_dates(batch) or None,
+    )
 
 
 def _pct(value: float | None) -> str:
@@ -115,7 +146,22 @@ def _failed_rows(batch: dict[str, Any]) -> list[list[Any]]:
             item.get("error") or item.get("summary") or "",
         ]
         for item in batch.get("items", [])
-        if item["status"] not in ANALYSED
+        if item["status"] not in ANALYSED and item["status"] not in NOT_JUDGED
+    ]
+
+
+def _not_judged_rows(batch: dict[str, Any]) -> list[list[Any]]:
+    """Channels a historical scan measured too thinly, or could not ask CASCADA about."""
+    return [
+        [
+            item["channel_name"],
+            item["service_id"],
+            item["country"],
+            item["status"],
+            item.get("error") or item.get("summary") or "",
+        ]
+        for item in batch.get("items", [])
+        if item["status"] in NOT_JUDGED
     ]
 
 
@@ -134,7 +180,9 @@ def _correlation_rows(batch: dict[str, Any]) -> list[list[Any]]:
                     window.get("minutes", 0),
                     window.get("event_count", 0),
                     window.get("sentence", ""),
-                    item.get("aging_job_id") or "",
+                    (item.get("correlation") or {}).get("aging_job_id")
+                    or item.get("aging_job_id")
+                    or "",
                 ]
             )
     return rows
@@ -143,9 +191,19 @@ def _correlation_rows(batch: dict[str, Any]) -> list[list[Any]]:
 def _about(batch: dict[str, Any]) -> list[list[str]]:
     """What produced this report, so the numbers can be read a month later."""
     settings = batch.get("settings") or {}
+    source = batch.get("data_source") or "realtime"
+    dates = _arrow_dates(batch)
+    selected_by = (
+        f"historical daily average ({dates} UTC)"
+        if source == "historical"
+        else f"realtime per-minute average ({dates} UTC)"
+    )
     return [
         ["field", "value"],
         ["report", "Samsung TV Plus - automated batch"],
+        ["data_source", source],
+        ["selected_by", selected_by],
+        ["spike_correlation", _spike_note(batch)],
         ["country", batch.get("country", "")],
         ["batch_id", batch.get("id", "")],
         ["batch_type", batch.get("kind", "")],
@@ -170,12 +228,26 @@ def _about(batch: dict[str, Any]) -> list[list[str]]:
     ]
 
 
+def _spike_note(batch: dict[str, Any]) -> str:
+    """Which per-minute window the spike correlation read, stated once for the batch."""
+    windows = {
+        (c["spike_window"]["start"], c["spike_window"]["end"])
+        for c in (item.get("correlation") or {} for item in batch.get("items", []))
+        if c.get("spike_window")
+    }
+    if not windows:
+        return "no per-minute window was read"
+    start = min(w[0] for w in windows)
+    end = max(w[1] for w in windows)
+    return f"realtime per-minute ({start} → {end})"
+
+
 def csv_bytes(batch: dict[str, Any]) -> bytes:
     """The report as one CSV: the table first, then the failures and the context."""
     buffer = io.StringIO()
     writer = csv.writer(buffer)
 
-    writer.writerow(list(headings(_window_days(batch))))
+    writer.writerow(list(batch_headings(batch)))
     writer.writerows(_rows(batch))
 
     failed = _failed_rows(batch)
@@ -184,6 +256,13 @@ def csv_bytes(batch: dict[str, Any]) -> bytes:
         writer.writerow(["Channels selected but not analysed"])
         writer.writerow(list(FAILED_COLUMNS))
         writer.writerows(failed)
+
+    not_judged = _not_judged_rows(batch)
+    if not_judged:
+        writer.writerow([])
+        writer.writerow(["Channels not judged (insufficient data or no provider)"])
+        writer.writerow(list(FAILED_COLUMNS))
+        writer.writerows(not_judged)
 
     correlated = _correlation_rows(batch)
     if correlated:
@@ -204,7 +283,7 @@ def xlsx_bytes(batch: dict[str, Any]) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = REPORT_SHEET
-    sheet.append(list(headings(_window_days(batch))))
+    sheet.append(list(batch_headings(batch)))
     for row in _rows(batch):
         sheet.append(row)
     sheet.freeze_panes = "A2"
@@ -214,6 +293,14 @@ def xlsx_bytes(batch: dict[str, Any]) -> bytes:
         page = workbook.create_sheet(FAILED_SHEET)
         page.append(list(FAILED_COLUMNS))
         for row in failed:
+            page.append(row)
+        page.freeze_panes = "A2"
+
+    not_judged = _not_judged_rows(batch)
+    if not_judged:
+        page = workbook.create_sheet(NOT_JUDGED_SHEET)
+        page.append(list(FAILED_COLUMNS))
+        for row in not_judged:
             page.append(row)
         page.freeze_panes = "A2"
 

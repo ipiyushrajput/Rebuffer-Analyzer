@@ -199,6 +199,32 @@ export function BatchSettingsPanel() {
             </label>
             <p className="mt-1 font-mono text-[10px] text-ink-faint">aging_enabled</p>
           </Field>
+
+          <Field
+            label="Default data source for scheduled/automated batches"
+            htmlFor="batch-scheduled-source"
+            hint="A batch started by hand names its source on the button. Historical reads the last 7 complete UTC days, one value per day; realtime reads the per-minute window to now."
+          >
+            <select
+              id="batch-scheduled-source"
+              className={cx('input', offDefault('scheduled_data_source') && 'border-violet-300')}
+              value={draft.scheduled_data_source}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  scheduled_data_source: e.target.value as BatchSettings['scheduled_data_source'],
+                })
+              }
+            >
+              <option value="historical">historical</option>
+              <option value="realtime">realtime</option>
+            </select>
+            <p className="mt-1 font-mono text-[10px] text-ink-faint">
+              scheduled_data_source
+              {offDefault('scheduled_data_source') &&
+                ` · default ${String(data.defaults.scheduled_data_source)}`}
+            </p>
+          </Field>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 card-divider px-5 py-3">
