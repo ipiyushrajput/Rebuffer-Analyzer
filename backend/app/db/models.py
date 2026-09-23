@@ -466,6 +466,43 @@ class CascadaSample(Base):
     )
 
 
+class CascadaErrorSample(Base):
+    """One channel's CASCADA error window, kept for the same reason `CascadaSample` is.
+
+    A table of its own rather than a metric column on `cascada_samples`: that table's figures
+    are percentages by name and by meaning, and the batch pipeline reads it as the rebuffering
+    record. Errors are a count per minute. The summary columns are what the window measured;
+    the verdict against the error threshold is recomputed from `series` on every read, so a
+    threshold changed in Settings applies to a stored window at once.
+    """
+
+    __tablename__ = _t("cascada_error_samples")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    service_id: Mapped[str] = mapped_column(String(64), index=True)
+    channel_name: Mapped[str] = mapped_column(String(255))
+    country: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
+    window_from: Mapped[int] = mapped_column(BigInteger)
+    window_to: Mapped[int] = mapped_column(BigInteger)
+    fetched_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, index=True
+    )
+    # Errors per minute, as CASCADA reports them, and their sum over the window.
+    average_per_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_per_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    previous_week_average_per_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    minutes_counted: Mapped[int] = mapped_column(Integer, default=0)
+    truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Both series and the unit CASCADA stated, so the modal and the report need no second call.
+    series: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        Index("ix_cascada_error_window", "service_id", "window_from", "window_to", unique=True),
+    )
+
+
 class SettingRow(Base):
     __tablename__ = _t("settings")
 

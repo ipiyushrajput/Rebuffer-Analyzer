@@ -236,6 +236,41 @@ export interface CascadaChannel extends CascadaChannelRow {
   comparison: CascadaPoint[]
 }
 
+/**
+ * One channel's playback errors, as the Error Data modal reads it.
+ *
+ * `errors` is a count per minute summed over every device, not a percentage, so the fields
+ * are named for what they hold. `threshold_per_min` is null until one is set in Settings;
+ * with none set no minute is marked and `above_threshold` is always false.
+ */
+export interface CascadaErrorChannel {
+  metric: 'errors'
+  /** The unit CASCADA stated for `errors`, which is 'times'. */
+  unit: string
+  service_id: string
+  channel_name: string
+  country: string
+  average_per_min: number | null
+  max_per_min: number | null
+  max_at: string | null
+  total: number | null
+  minutes_counted: number
+  minutes_missing: number
+  previous_week_average_per_min: number | null
+  week_over_week_delta_per_min: number | null
+  week_over_week_change_pct: number | null
+  threshold_per_min: number | null
+  minutes_above: number
+  percent_time_above: number | null
+  above_threshold: boolean
+  truncated: boolean
+  fetched_at: string
+  cached: boolean
+  window: CascadaWindow
+  origin: CascadaPoint[]
+  comparison: CascadaPoint[]
+}
+
 export interface CascadaFailure {
   service_id: string
   channel_name: string
@@ -345,6 +380,10 @@ export const endpoints = {
     api.get<CascadaChannel>(`/cascada/channel?${cascadaChannelQuery(params)}`),
   cascadaChannelReportUrl: (params: CascadaChannelQuery, fmt: 'csv' | 'xlsx') =>
     api.url(`/cascada/channel/report.${fmt}?${cascadaChannelQuery(params)}`),
+  cascadaErrors: (params: CascadaChannelQuery & { refresh?: boolean }) =>
+    api.get<CascadaErrorChannel>(`/cascada/channel/errors?${cascadaChannelQuery(params)}`),
+  cascadaErrorsReportUrl: (params: CascadaChannelQuery, fmt: 'csv' | 'xlsx') =>
+    api.url(`/cascada/channel/errors/report.${fmt}?${cascadaChannelQuery(params)}`),
 
   startCascadaScan: (body: { country: string; concurrency?: number }) =>
     api.post<CascadaScan>('/cascada/scans', body),

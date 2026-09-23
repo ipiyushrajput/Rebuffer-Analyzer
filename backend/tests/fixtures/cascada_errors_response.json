@@ -1,0 +1,3636 @@
+{
+ "reference_time": {
+  "timezone": "UTC",
+  "start": "2026-09-14T00:00:00+00:00",
+  "end": "2026-09-21T05:59:00+00:00"
+ },
+ "unit": {
+  "attempts": "times",
+  "played_attempts": "%",
+  "stopped_play": "counts",
+  "initial_buffering": "seconds",
+  "rebuffering_ratio": "%",
+  "seek_rebuffering": "seconds",
+  "non_seek_rebuffering_ratio": "%",
+  "failed_attempts": "%",
+  "exited_attempts": "%",
+  "concurrent_users": "people",
+  "viewing_time": "seconds",
+  "errors": "times",
+  "error_100": "times",
+  "error_101": "times",
+  "error_102": "times",
+  "error_103": "times",
+  "error_104": "times",
+  "error_105": "times",
+  "error_106": "times",
+  "error_107": "times",
+  "error_108": "times",
+  "error_120": "times"
+ },
+ "download_url": [
+  "https://storage.example.invalid/cascada-errors-fixture.zip"
+ ],
+ "data": [
+  {
+   "target_time": "2026-09-14T00:00:00+00:00",
+   "date_category": "comparison",
+   "errors": 1467.0
+  },
+  {
+   "target_time": "2026-09-14T00:01:00+00:00",
+   "date_category": "comparison",
+   "errors": 1475.0
+  },
+  {
+   "target_time": "2026-09-14T00:02:00+00:00",
+   "date_category": "comparison",
+   "errors": 1486.0
+  },
+  {
+   "target_time": "2026-09-14T00:03:00+00:00",
+   "date_category": "comparison",
+   "errors": 1498.0
+  },
+  {
+   "target_time": "2026-09-14T00:04:00+00:00",
+   "date_category": "comparison",
+   "errors": 1507.0
+  },
+  {
+   "target_time": "2026-09-14T00:05:00+00:00",
+   "date_category": "comparison",
+   "errors": 1498.0
+  },
+  {
+   "target_time": "2026-09-14T00:06:00+00:00",
+   "date_category": "comparison",
+   "errors": 1502.0
+  },
+  {
+   "target_time": "2026-09-14T00:07:00+00:00",
+   "date_category": "comparison",
+   "errors": 1516.0
+  },
+  {
+   "target_time": "2026-09-14T00:08:00+00:00",
+   "date_category": "comparison",
+   "errors": 1516.0
+  },
+  {
+   "target_time": "2026-09-14T00:09:00+00:00",
+   "date_category": "comparison",
+   "errors": 1529.0
+  },
+  {
+   "target_time": "2026-09-14T00:10:00+00:00",
+   "date_category": "comparison",
+   "errors": 1539.0
+  },
+  {
+   "target_time": "2026-09-14T00:11:00+00:00",
+   "date_category": "comparison",
+   "errors": 1557.0
+  },
+  {
+   "target_time": "2026-09-14T00:12:00+00:00",
+   "date_category": "comparison",
+   "errors": 1566.0
+  },
+  {
+   "target_time": "2026-09-14T00:13:00+00:00",
+   "date_category": "comparison",
+   "errors": 1562.0
+  },
+  {
+   "target_time": "2026-09-14T00:14:00+00:00",
+   "date_category": "comparison",
+   "errors": 1554.0
+  },
+  {
+   "target_time": "2026-09-14T00:15:00+00:00",
+   "date_category": "comparison",
+   "errors": 1541.0
+  },
+  {
+   "target_time": "2026-09-14T00:16:00+00:00",
+   "date_category": "comparison",
+   "errors": 1550.0
+  },
+  {
+   "target_time": "2026-09-14T00:17:00+00:00",
+   "date_category": "comparison",
+   "errors": 1549.0
+  },
+  {
+   "target_time": "2026-09-14T00:18:00+00:00",
+   "date_category": "comparison",
+   "errors": 1559.0
+  },
+  {
+   "target_time": "2026-09-14T00:19:00+00:00",
+   "date_category": "comparison",
+   "errors": 1544.0
+  },
+  {
+   "target_time": "2026-09-14T00:20:00+00:00",
+   "date_category": "comparison",
+   "errors": 1554.0
+  },
+  {
+   "target_time": "2026-09-14T00:21:00+00:00",
+   "date_category": "comparison",
+   "errors": 1554.0
+  },
+  {
+   "target_time": "2026-09-14T00:22:00+00:00",
+   "date_category": "comparison",
+   "errors": 1567.0
+  },
+  {
+   "target_time": "2026-09-14T00:23:00+00:00",
+   "date_category": "comparison",
+   "errors": 1557.0
+  },
+  {
+   "target_time": "2026-09-14T00:24:00+00:00",
+   "date_category": "comparison",
+   "errors": 1556.0
+  },
+  {
+   "target_time": "2026-09-14T00:25:00+00:00",
+   "date_category": "comparison",
+   "errors": 1554.0
+  },
+  {
+   "target_time": "2026-09-14T00:26:00+00:00",
+   "date_category": "comparison",
+   "errors": 1549.0
+  },
+  {
+   "target_time": "2026-09-14T00:27:00+00:00",
+   "date_category": "comparison",
+   "errors": 1562.0
+  },
+  {
+   "target_time": "2026-09-14T00:28:00+00:00",
+   "date_category": "comparison",
+   "errors": 1557.0
+  },
+  {
+   "target_time": "2026-09-14T00:29:00+00:00",
+   "date_category": "comparison",
+   "errors": 1557.0
+  },
+  {
+   "target_time": "2026-09-14T00:30:00+00:00",
+   "date_category": "comparison",
+   "errors": 1583.0
+  },
+  {
+   "target_time": "2026-09-14T00:31:00+00:00",
+   "date_category": "comparison",
+   "errors": 1586.0
+  },
+  {
+   "target_time": "2026-09-14T00:32:00+00:00",
+   "date_category": "comparison",
+   "errors": 1565.0
+  },
+  {
+   "target_time": "2026-09-14T00:33:00+00:00",
+   "date_category": "comparison",
+   "errors": 1564.0
+  },
+  {
+   "target_time": "2026-09-14T00:34:00+00:00",
+   "date_category": "comparison",
+   "errors": 1574.0
+  },
+  {
+   "target_time": "2026-09-14T00:35:00+00:00",
+   "date_category": "comparison",
+   "errors": 1566.0
+  },
+  {
+   "target_time": "2026-09-14T00:36:00+00:00",
+   "date_category": "comparison",
+   "errors": 1571.0
+  },
+  {
+   "target_time": "2026-09-14T00:37:00+00:00",
+   "date_category": "comparison",
+   "errors": 1557.0
+  },
+  {
+   "target_time": "2026-09-14T00:38:00+00:00",
+   "date_category": "comparison",
+   "errors": 1571.0
+  },
+  {
+   "target_time": "2026-09-14T00:39:00+00:00",
+   "date_category": "comparison",
+   "errors": 1558.0
+  },
+  {
+   "target_time": "2026-09-14T00:40:00+00:00",
+   "date_category": "comparison",
+   "errors": 1576.0
+  },
+  {
+   "target_time": "2026-09-14T00:41:00+00:00",
+   "date_category": "comparison",
+   "errors": 1555.0
+  },
+  {
+   "target_time": "2026-09-14T00:42:00+00:00",
+   "date_category": "comparison",
+   "errors": 1562.0
+  },
+  {
+   "target_time": "2026-09-14T00:43:00+00:00",
+   "date_category": "comparison",
+   "errors": 1562.0
+  },
+  {
+   "target_time": "2026-09-14T00:44:00+00:00",
+   "date_category": "comparison",
+   "errors": 1560.0
+  },
+  {
+   "target_time": "2026-09-14T00:45:00+00:00",
+   "date_category": "comparison",
+   "errors": 1553.0
+  },
+  {
+   "target_time": "2026-09-14T00:46:00+00:00",
+   "date_category": "comparison",
+   "errors": 1558.0
+  },
+  {
+   "target_time": "2026-09-14T00:47:00+00:00",
+   "date_category": "comparison",
+   "errors": 1560.0
+  },
+  {
+   "target_time": "2026-09-14T00:48:00+00:00",
+   "date_category": "comparison",
+   "errors": 1557.0
+  },
+  {
+   "target_time": "2026-09-14T00:49:00+00:00",
+   "date_category": "comparison",
+   "errors": 1558.0
+  },
+  {
+   "target_time": "2026-09-14T00:50:00+00:00",
+   "date_category": "comparison",
+   "errors": 1568.0
+  },
+  {
+   "target_time": "2026-09-14T00:51:00+00:00",
+   "date_category": "comparison",
+   "errors": 1565.0
+  },
+  {
+   "target_time": "2026-09-14T00:52:00+00:00",
+   "date_category": "comparison",
+   "errors": 1561.0
+  },
+  {
+   "target_time": "2026-09-14T00:53:00+00:00",
+   "date_category": "comparison",
+   "errors": 1542.0
+  },
+  {
+   "target_time": "2026-09-14T00:54:00+00:00",
+   "date_category": "comparison",
+   "errors": 1536.0
+  },
+  {
+   "target_time": "2026-09-14T00:55:00+00:00",
+   "date_category": "comparison",
+   "errors": 1515.0
+  },
+  {
+   "target_time": "2026-09-14T00:56:00+00:00",
+   "date_category": "comparison",
+   "errors": 1525.0
+  },
+  {
+   "target_time": "2026-09-14T00:57:00+00:00",
+   "date_category": "comparison",
+   "errors": 1510.0
+  },
+  {
+   "target_time": "2026-09-14T00:58:00+00:00",
+   "date_category": "comparison",
+   "errors": 1531.0
+  },
+  {
+   "target_time": "2026-09-14T00:59:00+00:00",
+   "date_category": "comparison",
+   "errors": 1543.0
+  },
+  {
+   "target_time": "2026-09-14T01:00:00+00:00",
+   "date_category": "comparison",
+   "errors": 1527.0
+  },
+  {
+   "target_time": "2026-09-14T01:01:00+00:00",
+   "date_category": "comparison",
+   "errors": 1506.0
+  },
+  {
+   "target_time": "2026-09-14T01:02:00+00:00",
+   "date_category": "comparison",
+   "errors": 1547.0
+  },
+  {
+   "target_time": "2026-09-14T01:03:00+00:00",
+   "date_category": "comparison",
+   "errors": 1546.0
+  },
+  {
+   "target_time": "2026-09-14T01:04:00+00:00",
+   "date_category": "comparison",
+   "errors": 1541.0
+  },
+  {
+   "target_time": "2026-09-14T01:05:00+00:00",
+   "date_category": "comparison",
+   "errors": 1538.0
+  },
+  {
+   "target_time": "2026-09-14T01:06:00+00:00",
+   "date_category": "comparison",
+   "errors": 1537.0
+  },
+  {
+   "target_time": "2026-09-14T01:07:00+00:00",
+   "date_category": "comparison",
+   "errors": 1534.0
+  },
+  {
+   "target_time": "2026-09-14T01:08:00+00:00",
+   "date_category": "comparison",
+   "errors": 1540.0
+  },
+  {
+   "target_time": "2026-09-14T01:09:00+00:00",
+   "date_category": "comparison",
+   "errors": 1526.0
+  },
+  {
+   "target_time": "2026-09-14T01:10:00+00:00",
+   "date_category": "comparison",
+   "errors": 1526.0
+  },
+  {
+   "target_time": "2026-09-14T01:11:00+00:00",
+   "date_category": "comparison",
+   "errors": 1528.0
+  },
+  {
+   "target_time": "2026-09-14T01:12:00+00:00",
+   "date_category": "comparison",
+   "errors": 1522.0
+  },
+  {
+   "target_time": "2026-09-14T01:13:00+00:00",
+   "date_category": "comparison",
+   "errors": 1499.0
+  },
+  {
+   "target_time": "2026-09-14T01:14:00+00:00",
+   "date_category": "comparison",
+   "errors": 1490.0
+  },
+  {
+   "target_time": "2026-09-14T01:15:00+00:00",
+   "date_category": "comparison",
+   "errors": 1485.0
+  },
+  {
+   "target_time": "2026-09-14T01:16:00+00:00",
+   "date_category": "comparison",
+   "errors": 1466.0
+  },
+  {
+   "target_time": "2026-09-14T01:17:00+00:00",
+   "date_category": "comparison",
+   "errors": 1461.0
+  },
+  {
+   "target_time": "2026-09-14T01:18:00+00:00",
+   "date_category": "comparison",
+   "errors": 1458.0
+  },
+  {
+   "target_time": "2026-09-14T01:19:00+00:00",
+   "date_category": "comparison",
+   "errors": 1439.0
+  },
+  {
+   "target_time": "2026-09-14T01:20:00+00:00",
+   "date_category": "comparison",
+   "errors": 1434.0
+  },
+  {
+   "target_time": "2026-09-14T01:21:00+00:00",
+   "date_category": "comparison",
+   "errors": 1414.0
+  },
+  {
+   "target_time": "2026-09-14T01:22:00+00:00",
+   "date_category": "comparison",
+   "errors": 1419.0
+  },
+  {
+   "target_time": "2026-09-14T01:23:00+00:00",
+   "date_category": "comparison",
+   "errors": 1415.0
+  },
+  {
+   "target_time": "2026-09-14T01:24:00+00:00",
+   "date_category": "comparison",
+   "errors": 1431.0
+  },
+  {
+   "target_time": "2026-09-14T01:25:00+00:00",
+   "date_category": "comparison",
+   "errors": 1424.0
+  },
+  {
+   "target_time": "2026-09-14T01:26:00+00:00",
+   "date_category": "comparison",
+   "errors": 1432.0
+  },
+  {
+   "target_time": "2026-09-14T01:27:00+00:00",
+   "date_category": "comparison",
+   "errors": 1421.0
+  },
+  {
+   "target_time": "2026-09-14T01:28:00+00:00",
+   "date_category": "comparison",
+   "errors": 1421.0
+  },
+  {
+   "target_time": "2026-09-14T01:29:00+00:00",
+   "date_category": "comparison",
+   "errors": 1410.0
+  },
+  {
+   "target_time": "2026-09-14T01:30:00+00:00",
+   "date_category": "comparison",
+   "errors": 1407.0
+  },
+  {
+   "target_time": "2026-09-14T01:31:00+00:00",
+   "date_category": "comparison",
+   "errors": 1402.0
+  },
+  {
+   "target_time": "2026-09-14T01:32:00+00:00",
+   "date_category": "comparison",
+   "errors": 1378.0
+  },
+  {
+   "target_time": "2026-09-14T01:33:00+00:00",
+   "date_category": "comparison",
+   "errors": 1366.0
+  },
+  {
+   "target_time": "2026-09-14T01:34:00+00:00",
+   "date_category": "comparison",
+   "errors": 1379.0
+  },
+  {
+   "target_time": "2026-09-14T01:35:00+00:00",
+   "date_category": "comparison",
+   "errors": 1366.0
+  },
+  {
+   "target_time": "2026-09-14T01:36:00+00:00",
+   "date_category": "comparison",
+   "errors": 1376.0
+  },
+  {
+   "target_time": "2026-09-14T01:37:00+00:00",
+   "date_category": "comparison",
+   "errors": 1365.0
+  },
+  {
+   "target_time": "2026-09-14T01:38:00+00:00",
+   "date_category": "comparison",
+   "errors": 1371.0
+  },
+  {
+   "target_time": "2026-09-14T01:39:00+00:00",
+   "date_category": "comparison",
+   "errors": 1360.0
+  },
+  {
+   "target_time": "2026-09-14T01:40:00+00:00",
+   "date_category": "comparison",
+   "errors": 1354.0
+  },
+  {
+   "target_time": "2026-09-14T01:41:00+00:00",
+   "date_category": "comparison",
+   "errors": 1341.0
+  },
+  {
+   "target_time": "2026-09-14T01:42:00+00:00",
+   "date_category": "comparison",
+   "errors": 1338.0
+  },
+  {
+   "target_time": "2026-09-14T01:43:00+00:00",
+   "date_category": "comparison",
+   "errors": 1330.0
+  },
+  {
+   "target_time": "2026-09-14T01:44:00+00:00",
+   "date_category": "comparison",
+   "errors": 1347.0
+  },
+  {
+   "target_time": "2026-09-14T01:45:00+00:00",
+   "date_category": "comparison",
+   "errors": 1333.0
+  },
+  {
+   "target_time": "2026-09-14T01:46:00+00:00",
+   "date_category": "comparison",
+   "errors": 1322.0
+  },
+  {
+   "target_time": "2026-09-14T01:47:00+00:00",
+   "date_category": "comparison",
+   "errors": 1302.0
+  },
+  {
+   "target_time": "2026-09-14T01:48:00+00:00",
+   "date_category": "comparison",
+   "errors": 1295.0
+  },
+  {
+   "target_time": "2026-09-14T01:49:00+00:00",
+   "date_category": "comparison",
+   "errors": 1290.0
+  },
+  {
+   "target_time": "2026-09-14T01:50:00+00:00",
+   "date_category": "comparison",
+   "errors": 1306.0
+  },
+  {
+   "target_time": "2026-09-14T01:51:00+00:00",
+   "date_category": "comparison",
+   "errors": 1299.0
+  },
+  {
+   "target_time": "2026-09-14T01:52:00+00:00",
+   "date_category": "comparison",
+   "errors": 1312.0
+  },
+  {
+   "target_time": "2026-09-14T01:53:00+00:00",
+   "date_category": "comparison",
+   "errors": 1314.0
+  },
+  {
+   "target_time": "2026-09-14T01:54:00+00:00",
+   "date_category": "comparison",
+   "errors": 1306.0
+  },
+  {
+   "target_time": "2026-09-14T01:55:00+00:00",
+   "date_category": "comparison",
+   "errors": 1316.0
+  },
+  {
+   "target_time": "2026-09-14T01:56:00+00:00",
+   "date_category": "comparison",
+   "errors": 1319.0
+  },
+  {
+   "target_time": "2026-09-14T01:57:00+00:00",
+   "date_category": "comparison",
+   "errors": 1303.0
+  },
+  {
+   "target_time": "2026-09-14T01:58:00+00:00",
+   "date_category": "comparison",
+   "errors": 1298.0
+  },
+  {
+   "target_time": "2026-09-14T01:59:00+00:00",
+   "date_category": "comparison",
+   "errors": 1289.0
+  },
+  {
+   "target_time": "2026-09-14T02:00:00+00:00",
+   "date_category": "comparison",
+   "errors": 1298.0
+  },
+  {
+   "target_time": "2026-09-14T02:01:00+00:00",
+   "date_category": "comparison",
+   "errors": 1304.0
+  },
+  {
+   "target_time": "2026-09-14T02:02:00+00:00",
+   "date_category": "comparison",
+   "errors": 1300.0
+  },
+  {
+   "target_time": "2026-09-14T02:03:00+00:00",
+   "date_category": "comparison",
+   "errors": 1277.0
+  },
+  {
+   "target_time": "2026-09-14T02:04:00+00:00",
+   "date_category": "comparison",
+   "errors": 1263.0
+  },
+  {
+   "target_time": "2026-09-14T02:05:00+00:00",
+   "date_category": "comparison",
+   "errors": 1252.0
+  },
+  {
+   "target_time": "2026-09-14T02:06:00+00:00",
+   "date_category": "comparison",
+   "errors": 1248.0
+  },
+  {
+   "target_time": "2026-09-14T02:07:00+00:00",
+   "date_category": "comparison",
+   "errors": 1244.0
+  },
+  {
+   "target_time": "2026-09-14T02:08:00+00:00",
+   "date_category": "comparison",
+   "errors": 1241.0
+  },
+  {
+   "target_time": "2026-09-14T02:09:00+00:00",
+   "date_category": "comparison",
+   "errors": 1249.0
+  },
+  {
+   "target_time": "2026-09-14T02:10:00+00:00",
+   "date_category": "comparison",
+   "errors": 1255.0
+  },
+  {
+   "target_time": "2026-09-14T02:11:00+00:00",
+   "date_category": "comparison",
+   "errors": 1246.0
+  },
+  {
+   "target_time": "2026-09-14T02:12:00+00:00",
+   "date_category": "comparison",
+   "errors": 1238.0
+  },
+  {
+   "target_time": "2026-09-14T02:13:00+00:00",
+   "date_category": "comparison",
+   "errors": 1230.0
+  },
+  {
+   "target_time": "2026-09-14T02:14:00+00:00",
+   "date_category": "comparison",
+   "errors": 1218.0
+  },
+  {
+   "target_time": "2026-09-14T02:15:00+00:00",
+   "date_category": "comparison",
+   "errors": 1218.0
+  },
+  {
+   "target_time": "2026-09-14T02:16:00+00:00",
+   "date_category": "comparison",
+   "errors": 1220.0
+  },
+  {
+   "target_time": "2026-09-14T02:17:00+00:00",
+   "date_category": "comparison",
+   "errors": 1222.0
+  },
+  {
+   "target_time": "2026-09-14T02:18:00+00:00",
+   "date_category": "comparison",
+   "errors": 1227.0
+  },
+  {
+   "target_time": "2026-09-14T02:19:00+00:00",
+   "date_category": "comparison",
+   "errors": 1211.0
+  },
+  {
+   "target_time": "2026-09-14T02:20:00+00:00",
+   "date_category": "comparison",
+   "errors": 1208.0
+  },
+  {
+   "target_time": "2026-09-14T02:21:00+00:00",
+   "date_category": "comparison",
+   "errors": 1205.0
+  },
+  {
+   "target_time": "2026-09-14T02:22:00+00:00",
+   "date_category": "comparison",
+   "errors": 1197.0
+  },
+  {
+   "target_time": "2026-09-14T02:23:00+00:00",
+   "date_category": "comparison",
+   "errors": 1192.0
+  },
+  {
+   "target_time": "2026-09-14T02:24:00+00:00",
+   "date_category": "comparison",
+   "errors": 1204.0
+  },
+  {
+   "target_time": "2026-09-14T02:25:00+00:00",
+   "date_category": "comparison",
+   "errors": 1196.0
+  },
+  {
+   "target_time": "2026-09-14T02:26:00+00:00",
+   "date_category": "comparison",
+   "errors": 1202.0
+  },
+  {
+   "target_time": "2026-09-14T02:27:00+00:00",
+   "date_category": "comparison",
+   "errors": 1182.0
+  },
+  {
+   "target_time": "2026-09-14T02:28:00+00:00",
+   "date_category": "comparison",
+   "errors": 1181.0
+  },
+  {
+   "target_time": "2026-09-14T02:29:00+00:00",
+   "date_category": "comparison",
+   "errors": 1172.0
+  },
+  {
+   "target_time": "2026-09-14T02:30:00+00:00",
+   "date_category": "comparison",
+   "errors": 1170.0
+  },
+  {
+   "target_time": "2026-09-14T02:31:00+00:00",
+   "date_category": "comparison",
+   "errors": 1144.0
+  },
+  {
+   "target_time": "2026-09-14T02:32:00+00:00",
+   "date_category": "comparison",
+   "errors": 1146.0
+  },
+  {
+   "target_time": "2026-09-14T02:33:00+00:00",
+   "date_category": "comparison",
+   "errors": 1147.0
+  },
+  {
+   "target_time": "2026-09-14T02:34:00+00:00",
+   "date_category": "comparison",
+   "errors": 1141.0
+  },
+  {
+   "target_time": "2026-09-14T02:35:00+00:00",
+   "date_category": "comparison",
+   "errors": 1143.0
+  },
+  {
+   "target_time": "2026-09-14T02:36:00+00:00",
+   "date_category": "comparison",
+   "errors": 1160.0
+  },
+  {
+   "target_time": "2026-09-14T02:37:00+00:00",
+   "date_category": "comparison",
+   "errors": 1158.0
+  },
+  {
+   "target_time": "2026-09-14T02:38:00+00:00",
+   "date_category": "comparison",
+   "errors": 1151.0
+  },
+  {
+   "target_time": "2026-09-14T02:39:00+00:00",
+   "date_category": "comparison",
+   "errors": 1134.0
+  },
+  {
+   "target_time": "2026-09-14T02:40:00+00:00",
+   "date_category": "comparison",
+   "errors": 1130.0
+  },
+  {
+   "target_time": "2026-09-14T02:41:00+00:00",
+   "date_category": "comparison",
+   "errors": 1104.0
+  },
+  {
+   "target_time": "2026-09-14T02:42:00+00:00",
+   "date_category": "comparison",
+   "errors": 1127.0
+  },
+  {
+   "target_time": "2026-09-14T02:43:00+00:00",
+   "date_category": "comparison",
+   "errors": 1126.0
+  },
+  {
+   "target_time": "2026-09-14T02:44:00+00:00",
+   "date_category": "comparison",
+   "errors": 1136.0
+  },
+  {
+   "target_time": "2026-09-14T02:45:00+00:00",
+   "date_category": "comparison",
+   "errors": 1121.0
+  },
+  {
+   "target_time": "2026-09-14T02:46:00+00:00",
+   "date_category": "comparison",
+   "errors": 1123.0
+  },
+  {
+   "target_time": "2026-09-14T02:47:00+00:00",
+   "date_category": "comparison",
+   "errors": 1118.0
+  },
+  {
+   "target_time": "2026-09-14T02:48:00+00:00",
+   "date_category": "comparison",
+   "errors": 1121.0
+  },
+  {
+   "target_time": "2026-09-14T02:49:00+00:00",
+   "date_category": "comparison",
+   "errors": 1123.0
+  },
+  {
+   "target_time": "2026-09-14T02:50:00+00:00",
+   "date_category": "comparison",
+   "errors": 1130.0
+  },
+  {
+   "target_time": "2026-09-14T02:51:00+00:00",
+   "date_category": "comparison",
+   "errors": 1125.0
+  },
+  {
+   "target_time": "2026-09-14T02:52:00+00:00",
+   "date_category": "comparison",
+   "errors": 1116.0
+  },
+  {
+   "target_time": "2026-09-14T02:53:00+00:00",
+   "date_category": "comparison",
+   "errors": 1102.0
+  },
+  {
+   "target_time": "2026-09-14T02:54:00+00:00",
+   "date_category": "comparison",
+   "errors": 1114.0
+  },
+  {
+   "target_time": "2026-09-14T02:55:00+00:00",
+   "date_category": "comparison",
+   "errors": 1107.0
+  },
+  {
+   "target_time": "2026-09-14T02:56:00+00:00",
+   "date_category": "comparison",
+   "errors": 1108.0
+  },
+  {
+   "target_time": "2026-09-14T02:57:00+00:00",
+   "date_category": "comparison",
+   "errors": 1112.0
+  },
+  {
+   "target_time": "2026-09-14T02:58:00+00:00",
+   "date_category": "comparison",
+   "errors": 1126.0
+  },
+  {
+   "target_time": "2026-09-14T02:59:00+00:00",
+   "date_category": "comparison",
+   "errors": 1122.0
+  },
+  {
+   "target_time": "2026-09-14T03:00:00+00:00",
+   "date_category": "comparison",
+   "errors": 1126.0
+  },
+  {
+   "target_time": "2026-09-14T03:01:00+00:00",
+   "date_category": "comparison",
+   "errors": 1127.0
+  },
+  {
+   "target_time": "2026-09-14T03:02:00+00:00",
+   "date_category": "comparison",
+   "errors": 1122.0
+  },
+  {
+   "target_time": "2026-09-14T03:03:00+00:00",
+   "date_category": "comparison",
+   "errors": 1108.0
+  },
+  {
+   "target_time": "2026-09-14T03:04:00+00:00",
+   "date_category": "comparison",
+   "errors": 1125.0
+  },
+  {
+   "target_time": "2026-09-14T03:05:00+00:00",
+   "date_category": "comparison",
+   "errors": 1115.0
+  },
+  {
+   "target_time": "2026-09-14T03:06:00+00:00",
+   "date_category": "comparison",
+   "errors": 1109.0
+  },
+  {
+   "target_time": "2026-09-14T03:07:00+00:00",
+   "date_category": "comparison",
+   "errors": 1090.0
+  },
+  {
+   "target_time": "2026-09-14T03:08:00+00:00",
+   "date_category": "comparison",
+   "errors": 1103.0
+  },
+  {
+   "target_time": "2026-09-14T03:09:00+00:00",
+   "date_category": "comparison",
+   "errors": 1107.0
+  },
+  {
+   "target_time": "2026-09-14T03:10:00+00:00",
+   "date_category": "comparison",
+   "errors": 1116.0
+  },
+  {
+   "target_time": "2026-09-14T03:11:00+00:00",
+   "date_category": "comparison",
+   "errors": 1120.0
+  },
+  {
+   "target_time": "2026-09-14T03:12:00+00:00",
+   "date_category": "comparison",
+   "errors": 1109.0
+  },
+  {
+   "target_time": "2026-09-14T03:13:00+00:00",
+   "date_category": "comparison",
+   "errors": 1101.0
+  },
+  {
+   "target_time": "2026-09-14T03:14:00+00:00",
+   "date_category": "comparison",
+   "errors": 1100.0
+  },
+  {
+   "target_time": "2026-09-14T03:15:00+00:00",
+   "date_category": "comparison",
+   "errors": 1097.0
+  },
+  {
+   "target_time": "2026-09-14T03:16:00+00:00",
+   "date_category": "comparison",
+   "errors": 1097.0
+  },
+  {
+   "target_time": "2026-09-14T03:17:00+00:00",
+   "date_category": "comparison",
+   "errors": 1087.0
+  },
+  {
+   "target_time": "2026-09-14T03:18:00+00:00",
+   "date_category": "comparison",
+   "errors": 1096.0
+  },
+  {
+   "target_time": "2026-09-14T03:19:00+00:00",
+   "date_category": "comparison",
+   "errors": 1082.0
+  },
+  {
+   "target_time": "2026-09-14T03:20:00+00:00",
+   "date_category": "comparison",
+   "errors": 1074.0
+  },
+  {
+   "target_time": "2026-09-14T03:21:00+00:00",
+   "date_category": "comparison",
+   "errors": 1064.0
+  },
+  {
+   "target_time": "2026-09-14T03:22:00+00:00",
+   "date_category": "comparison",
+   "errors": 1062.0
+  },
+  {
+   "target_time": "2026-09-14T03:23:00+00:00",
+   "date_category": "comparison",
+   "errors": 1052.0
+  },
+  {
+   "target_time": "2026-09-14T03:24:00+00:00",
+   "date_category": "comparison",
+   "errors": 1047.0
+  },
+  {
+   "target_time": "2026-09-14T03:25:00+00:00",
+   "date_category": "comparison",
+   "errors": 1034.0
+  },
+  {
+   "target_time": "2026-09-14T03:26:00+00:00",
+   "date_category": "comparison",
+   "errors": 1015.0
+  },
+  {
+   "target_time": "2026-09-14T03:27:00+00:00",
+   "date_category": "comparison",
+   "errors": 1009.0
+  },
+  {
+   "target_time": "2026-09-14T03:28:00+00:00",
+   "date_category": "comparison",
+   "errors": 1006.0
+  },
+  {
+   "target_time": "2026-09-14T03:29:00+00:00",
+   "date_category": "comparison",
+   "errors": 1000.0
+  },
+  {
+   "target_time": "2026-09-14T03:30:00+00:00",
+   "date_category": "comparison",
+   "errors": 988.0
+  },
+  {
+   "target_time": "2026-09-14T03:31:00+00:00",
+   "date_category": "comparison",
+   "errors": 966.0
+  },
+  {
+   "target_time": "2026-09-14T03:32:00+00:00",
+   "date_category": "comparison",
+   "errors": 988.0
+  },
+  {
+   "target_time": "2026-09-14T03:33:00+00:00",
+   "date_category": "comparison",
+   "errors": 986.0
+  },
+  {
+   "target_time": "2026-09-14T03:34:00+00:00",
+   "date_category": "comparison",
+   "errors": 971.0
+  },
+  {
+   "target_time": "2026-09-14T03:35:00+00:00",
+   "date_category": "comparison",
+   "errors": 967.0
+  },
+  {
+   "target_time": "2026-09-14T03:36:00+00:00",
+   "date_category": "comparison",
+   "errors": 972.0
+  },
+  {
+   "target_time": "2026-09-14T03:37:00+00:00",
+   "date_category": "comparison",
+   "errors": 968.0
+  },
+  {
+   "target_time": "2026-09-14T03:38:00+00:00",
+   "date_category": "comparison",
+   "errors": 969.0
+  },
+  {
+   "target_time": "2026-09-14T03:39:00+00:00",
+   "date_category": "comparison",
+   "errors": 952.0
+  },
+  {
+   "target_time": "2026-09-14T03:40:00+00:00",
+   "date_category": "comparison",
+   "errors": 942.0
+  },
+  {
+   "target_time": "2026-09-14T03:41:00+00:00",
+   "date_category": "comparison",
+   "errors": 929.0
+  },
+  {
+   "target_time": "2026-09-14T03:42:00+00:00",
+   "date_category": "comparison",
+   "errors": 928.0
+  },
+  {
+   "target_time": "2026-09-14T03:43:00+00:00",
+   "date_category": "comparison",
+   "errors": 914.0
+  },
+  {
+   "target_time": "2026-09-14T03:44:00+00:00",
+   "date_category": "comparison",
+   "errors": 902.0
+  },
+  {
+   "target_time": "2026-09-14T03:45:00+00:00",
+   "date_category": "comparison",
+   "errors": 885.0
+  },
+  {
+   "target_time": "2026-09-14T03:46:00+00:00",
+   "date_category": "comparison",
+   "errors": 880.0
+  },
+  {
+   "target_time": "2026-09-14T03:47:00+00:00",
+   "date_category": "comparison",
+   "errors": 866.0
+  },
+  {
+   "target_time": "2026-09-14T03:48:00+00:00",
+   "date_category": "comparison",
+   "errors": 868.0
+  },
+  {
+   "target_time": "2026-09-14T03:49:00+00:00",
+   "date_category": "comparison",
+   "errors": 861.0
+  },
+  {
+   "target_time": "2026-09-14T03:50:00+00:00",
+   "date_category": "comparison",
+   "errors": 846.0
+  },
+  {
+   "target_time": "2026-09-14T03:51:00+00:00",
+   "date_category": "comparison",
+   "errors": 826.0
+  },
+  {
+   "target_time": "2026-09-14T03:52:00+00:00",
+   "date_category": "comparison",
+   "errors": 815.0
+  },
+  {
+   "target_time": "2026-09-14T03:53:00+00:00",
+   "date_category": "comparison",
+   "errors": 806.0
+  },
+  {
+   "target_time": "2026-09-14T03:54:00+00:00",
+   "date_category": "comparison",
+   "errors": 818.0
+  },
+  {
+   "target_time": "2026-09-14T03:55:00+00:00",
+   "date_category": "comparison",
+   "errors": 814.0
+  },
+  {
+   "target_time": "2026-09-14T03:56:00+00:00",
+   "date_category": "comparison",
+   "errors": 830.0
+  },
+  {
+   "target_time": "2026-09-14T03:57:00+00:00",
+   "date_category": "comparison",
+   "errors": 832.0
+  },
+  {
+   "target_time": "2026-09-14T03:58:00+00:00",
+   "date_category": "comparison",
+   "errors": 826.0
+  },
+  {
+   "target_time": "2026-09-14T03:59:00+00:00",
+   "date_category": "comparison",
+   "errors": 808.0
+  },
+  {
+   "target_time": "2026-09-14T04:00:00+00:00",
+   "date_category": "comparison",
+   "errors": 819.0
+  },
+  {
+   "target_time": "2026-09-14T04:01:00+00:00",
+   "date_category": "comparison",
+   "errors": 817.0
+  },
+  {
+   "target_time": "2026-09-14T04:02:00+00:00",
+   "date_category": "comparison",
+   "errors": 814.0
+  },
+  {
+   "target_time": "2026-09-14T04:03:00+00:00",
+   "date_category": "comparison",
+   "errors": 800.0
+  },
+  {
+   "target_time": "2026-09-14T04:04:00+00:00",
+   "date_category": "comparison",
+   "errors": 798.0
+  },
+  {
+   "target_time": "2026-09-14T04:05:00+00:00",
+   "date_category": "comparison",
+   "errors": 785.0
+  },
+  {
+   "target_time": "2026-09-14T04:06:00+00:00",
+   "date_category": "comparison",
+   "errors": 780.0
+  },
+  {
+   "target_time": "2026-09-14T04:07:00+00:00",
+   "date_category": "comparison",
+   "errors": 772.0
+  },
+  {
+   "target_time": "2026-09-14T04:08:00+00:00",
+   "date_category": "comparison",
+   "errors": 754.0
+  },
+  {
+   "target_time": "2026-09-14T04:09:00+00:00",
+   "date_category": "comparison",
+   "errors": 739.0
+  },
+  {
+   "target_time": "2026-09-14T04:10:00+00:00",
+   "date_category": "comparison",
+   "errors": 743.0
+  },
+  {
+   "target_time": "2026-09-14T04:11:00+00:00",
+   "date_category": "comparison",
+   "errors": 739.0
+  },
+  {
+   "target_time": "2026-09-14T04:12:00+00:00",
+   "date_category": "comparison",
+   "errors": 738.0
+  },
+  {
+   "target_time": "2026-09-14T04:13:00+00:00",
+   "date_category": "comparison",
+   "errors": 735.0
+  },
+  {
+   "target_time": "2026-09-14T04:14:00+00:00",
+   "date_category": "comparison",
+   "errors": 753.0
+  },
+  {
+   "target_time": "2026-09-14T04:15:00+00:00",
+   "date_category": "comparison",
+   "errors": 752.0
+  },
+  {
+   "target_time": "2026-09-14T04:16:00+00:00",
+   "date_category": "comparison",
+   "errors": 756.0
+  },
+  {
+   "target_time": "2026-09-14T04:17:00+00:00",
+   "date_category": "comparison",
+   "errors": 745.0
+  },
+  {
+   "target_time": "2026-09-14T04:18:00+00:00",
+   "date_category": "comparison",
+   "errors": 748.0
+  },
+  {
+   "target_time": "2026-09-14T04:19:00+00:00",
+   "date_category": "comparison",
+   "errors": 751.0
+  },
+  {
+   "target_time": "2026-09-14T04:20:00+00:00",
+   "date_category": "comparison",
+   "errors": 751.0
+  },
+  {
+   "target_time": "2026-09-14T04:21:00+00:00",
+   "date_category": "comparison",
+   "errors": 747.0
+  },
+  {
+   "target_time": "2026-09-14T04:22:00+00:00",
+   "date_category": "comparison",
+   "errors": 774.0
+  },
+  {
+   "target_time": "2026-09-14T04:23:00+00:00",
+   "date_category": "comparison",
+   "errors": 765.0
+  },
+  {
+   "target_time": "2026-09-14T04:24:00+00:00",
+   "date_category": "comparison",
+   "errors": 751.0
+  },
+  {
+   "target_time": "2026-09-14T04:25:00+00:00",
+   "date_category": "comparison",
+   "errors": 740.0
+  },
+  {
+   "target_time": "2026-09-14T04:26:00+00:00",
+   "date_category": "comparison",
+   "errors": 743.0
+  },
+  {
+   "target_time": "2026-09-14T04:27:00+00:00",
+   "date_category": "comparison",
+   "errors": 732.0
+  },
+  {
+   "target_time": "2026-09-14T04:28:00+00:00",
+   "date_category": "comparison",
+   "errors": 731.0
+  },
+  {
+   "target_time": "2026-09-14T04:29:00+00:00",
+   "date_category": "comparison",
+   "errors": 727.0
+  },
+  {
+   "target_time": "2026-09-14T04:30:00+00:00",
+   "date_category": "comparison",
+   "errors": 720.0
+  },
+  {
+   "target_time": "2026-09-14T04:31:00+00:00",
+   "date_category": "comparison",
+   "errors": 710.0
+  },
+  {
+   "target_time": "2026-09-14T04:32:00+00:00",
+   "date_category": "comparison",
+   "errors": 712.0
+  },
+  {
+   "target_time": "2026-09-14T04:33:00+00:00",
+   "date_category": "comparison",
+   "errors": 714.0
+  },
+  {
+   "target_time": "2026-09-14T04:34:00+00:00",
+   "date_category": "comparison",
+   "errors": 711.0
+  },
+  {
+   "target_time": "2026-09-14T04:35:00+00:00",
+   "date_category": "comparison",
+   "errors": 694.0
+  },
+  {
+   "target_time": "2026-09-14T04:36:00+00:00",
+   "date_category": "comparison",
+   "errors": 705.0
+  },
+  {
+   "target_time": "2026-09-14T04:37:00+00:00",
+   "date_category": "comparison",
+   "errors": 698.0
+  },
+  {
+   "target_time": "2026-09-14T04:38:00+00:00",
+   "date_category": "comparison",
+   "errors": 702.0
+  },
+  {
+   "target_time": "2026-09-14T04:39:00+00:00",
+   "date_category": "comparison",
+   "errors": 708.0
+  },
+  {
+   "target_time": "2026-09-14T04:40:00+00:00",
+   "date_category": "comparison",
+   "errors": 700.0
+  },
+  {
+   "target_time": "2026-09-14T04:41:00+00:00",
+   "date_category": "comparison",
+   "errors": 687.0
+  },
+  {
+   "target_time": "2026-09-14T04:42:00+00:00",
+   "date_category": "comparison",
+   "errors": 696.0
+  },
+  {
+   "target_time": "2026-09-14T04:43:00+00:00",
+   "date_category": "comparison",
+   "errors": 690.0
+  },
+  {
+   "target_time": "2026-09-14T04:44:00+00:00",
+   "date_category": "comparison",
+   "errors": 680.0
+  },
+  {
+   "target_time": "2026-09-14T04:45:00+00:00",
+   "date_category": "comparison",
+   "errors": 665.0
+  },
+  {
+   "target_time": "2026-09-14T04:46:00+00:00",
+   "date_category": "comparison",
+   "errors": 654.0
+  },
+  {
+   "target_time": "2026-09-14T04:47:00+00:00",
+   "date_category": "comparison",
+   "errors": 665.0
+  },
+  {
+   "target_time": "2026-09-14T04:48:00+00:00",
+   "date_category": "comparison",
+   "errors": 656.0
+  },
+  {
+   "target_time": "2026-09-14T04:49:00+00:00",
+   "date_category": "comparison",
+   "errors": 637.0
+  },
+  {
+   "target_time": "2026-09-14T04:50:00+00:00",
+   "date_category": "comparison",
+   "errors": 640.0
+  },
+  {
+   "target_time": "2026-09-14T04:51:00+00:00",
+   "date_category": "comparison",
+   "errors": 647.0
+  },
+  {
+   "target_time": "2026-09-14T04:52:00+00:00",
+   "date_category": "comparison",
+   "errors": 650.0
+  },
+  {
+   "target_time": "2026-09-14T04:53:00+00:00",
+   "date_category": "comparison",
+   "errors": 634.0
+  },
+  {
+   "target_time": "2026-09-14T04:54:00+00:00",
+   "date_category": "comparison",
+   "errors": 634.0
+  },
+  {
+   "target_time": "2026-09-14T04:55:00+00:00",
+   "date_category": "comparison",
+   "errors": 625.0
+  },
+  {
+   "target_time": "2026-09-14T04:56:00+00:00",
+   "date_category": "comparison",
+   "errors": 623.0
+  },
+  {
+   "target_time": "2026-09-14T04:57:00+00:00",
+   "date_category": "comparison",
+   "errors": 625.0
+  },
+  {
+   "target_time": "2026-09-14T04:58:00+00:00",
+   "date_category": "comparison",
+   "errors": 624.0
+  },
+  {
+   "target_time": "2026-09-14T04:59:00+00:00",
+   "date_category": "comparison",
+   "errors": 627.0
+  },
+  {
+   "target_time": "2026-09-14T05:00:00+00:00",
+   "date_category": "comparison",
+   "errors": 632.0
+  },
+  {
+   "target_time": "2026-09-14T05:01:00+00:00",
+   "date_category": "comparison",
+   "errors": 629.0
+  },
+  {
+   "target_time": "2026-09-14T05:02:00+00:00",
+   "date_category": "comparison",
+   "errors": 629.0
+  },
+  {
+   "target_time": "2026-09-14T05:03:00+00:00",
+   "date_category": "comparison",
+   "errors": 613.0
+  },
+  {
+   "target_time": "2026-09-14T05:04:00+00:00",
+   "date_category": "comparison",
+   "errors": 614.0
+  },
+  {
+   "target_time": "2026-09-14T05:05:00+00:00",
+   "date_category": "comparison",
+   "errors": 614.0
+  },
+  {
+   "target_time": "2026-09-14T05:06:00+00:00",
+   "date_category": "comparison",
+   "errors": 617.0
+  },
+  {
+   "target_time": "2026-09-14T05:07:00+00:00",
+   "date_category": "comparison",
+   "errors": 610.0
+  },
+  {
+   "target_time": "2026-09-14T05:08:00+00:00",
+   "date_category": "comparison",
+   "errors": 612.0
+  },
+  {
+   "target_time": "2026-09-14T05:09:00+00:00",
+   "date_category": "comparison",
+   "errors": 614.0
+  },
+  {
+   "target_time": "2026-09-14T05:10:00+00:00",
+   "date_category": "comparison",
+   "errors": 628.0
+  },
+  {
+   "target_time": "2026-09-14T05:11:00+00:00",
+   "date_category": "comparison",
+   "errors": 625.0
+  },
+  {
+   "target_time": "2026-09-14T05:12:00+00:00",
+   "date_category": "comparison",
+   "errors": 615.0
+  },
+  {
+   "target_time": "2026-09-14T05:13:00+00:00",
+   "date_category": "comparison",
+   "errors": 616.0
+  },
+  {
+   "target_time": "2026-09-14T05:14:00+00:00",
+   "date_category": "comparison",
+   "errors": 614.0
+  },
+  {
+   "target_time": "2026-09-14T05:15:00+00:00",
+   "date_category": "comparison",
+   "errors": 607.0
+  },
+  {
+   "target_time": "2026-09-14T05:16:00+00:00",
+   "date_category": "comparison",
+   "errors": 604.0
+  },
+  {
+   "target_time": "2026-09-14T05:17:00+00:00",
+   "date_category": "comparison",
+   "errors": 587.0
+  },
+  {
+   "target_time": "2026-09-14T05:18:00+00:00",
+   "date_category": "comparison",
+   "errors": 585.0
+  },
+  {
+   "target_time": "2026-09-14T05:19:00+00:00",
+   "date_category": "comparison",
+   "errors": 584.0
+  },
+  {
+   "target_time": "2026-09-14T05:20:00+00:00",
+   "date_category": "comparison",
+   "errors": 590.0
+  },
+  {
+   "target_time": "2026-09-14T05:21:00+00:00",
+   "date_category": "comparison",
+   "errors": 569.0
+  },
+  {
+   "target_time": "2026-09-14T05:22:00+00:00",
+   "date_category": "comparison",
+   "errors": 562.0
+  },
+  {
+   "target_time": "2026-09-14T05:23:00+00:00",
+   "date_category": "comparison",
+   "errors": 555.0
+  },
+  {
+   "target_time": "2026-09-14T05:24:00+00:00",
+   "date_category": "comparison",
+   "errors": 570.0
+  },
+  {
+   "target_time": "2026-09-14T05:25:00+00:00",
+   "date_category": "comparison",
+   "errors": 570.0
+  },
+  {
+   "target_time": "2026-09-14T05:26:00+00:00",
+   "date_category": "comparison",
+   "errors": 562.0
+  },
+  {
+   "target_time": "2026-09-14T05:27:00+00:00",
+   "date_category": "comparison",
+   "errors": 550.0
+  },
+  {
+   "target_time": "2026-09-14T05:28:00+00:00",
+   "date_category": "comparison",
+   "errors": 550.0
+  },
+  {
+   "target_time": "2026-09-14T05:29:00+00:00",
+   "date_category": "comparison",
+   "errors": 548.0
+  },
+  {
+   "target_time": "2026-09-14T05:30:00+00:00",
+   "date_category": "comparison",
+   "errors": 545.0
+  },
+  {
+   "target_time": "2026-09-14T05:31:00+00:00",
+   "date_category": "comparison",
+   "errors": 557.0
+  },
+  {
+   "target_time": "2026-09-14T05:32:00+00:00",
+   "date_category": "comparison",
+   "errors": 556.0
+  },
+  {
+   "target_time": "2026-09-14T05:33:00+00:00",
+   "date_category": "comparison",
+   "errors": 565.0
+  },
+  {
+   "target_time": "2026-09-14T05:34:00+00:00",
+   "date_category": "comparison",
+   "errors": 562.0
+  },
+  {
+   "target_time": "2026-09-14T05:35:00+00:00",
+   "date_category": "comparison",
+   "errors": 555.0
+  },
+  {
+   "target_time": "2026-09-14T05:36:00+00:00",
+   "date_category": "comparison",
+   "errors": 552.0
+  },
+  {
+   "target_time": "2026-09-14T05:37:00+00:00",
+   "date_category": "comparison",
+   "errors": 548.0
+  },
+  {
+   "target_time": "2026-09-14T05:38:00+00:00",
+   "date_category": "comparison",
+   "errors": 556.0
+  },
+  {
+   "target_time": "2026-09-14T05:39:00+00:00",
+   "date_category": "comparison",
+   "errors": 535.0
+  },
+  {
+   "target_time": "2026-09-14T05:40:00+00:00",
+   "date_category": "comparison",
+   "errors": 525.0
+  },
+  {
+   "target_time": "2026-09-14T05:41:00+00:00",
+   "date_category": "comparison",
+   "errors": 521.0
+  },
+  {
+   "target_time": "2026-09-14T05:42:00+00:00",
+   "date_category": "comparison",
+   "errors": 519.0
+  },
+  {
+   "target_time": "2026-09-14T05:43:00+00:00",
+   "date_category": "comparison",
+   "errors": 500.0
+  },
+  {
+   "target_time": "2026-09-14T05:44:00+00:00",
+   "date_category": "comparison",
+   "errors": 494.0
+  },
+  {
+   "target_time": "2026-09-14T05:45:00+00:00",
+   "date_category": "comparison",
+   "errors": 492.0
+  },
+  {
+   "target_time": "2026-09-14T05:46:00+00:00",
+   "date_category": "comparison",
+   "errors": 501.0
+  },
+  {
+   "target_time": "2026-09-14T05:47:00+00:00",
+   "date_category": "comparison",
+   "errors": 494.0
+  },
+  {
+   "target_time": "2026-09-14T05:48:00+00:00",
+   "date_category": "comparison",
+   "errors": 502.0
+  },
+  {
+   "target_time": "2026-09-14T05:49:00+00:00",
+   "date_category": "comparison",
+   "errors": 503.0
+  },
+  {
+   "target_time": "2026-09-14T05:50:00+00:00",
+   "date_category": "comparison",
+   "errors": 499.0
+  },
+  {
+   "target_time": "2026-09-14T05:51:00+00:00",
+   "date_category": "comparison",
+   "errors": 491.0
+  },
+  {
+   "target_time": "2026-09-14T05:52:00+00:00",
+   "date_category": "comparison",
+   "errors": 488.0
+  },
+  {
+   "target_time": "2026-09-14T05:53:00+00:00",
+   "date_category": "comparison",
+   "errors": 490.0
+  },
+  {
+   "target_time": "2026-09-14T05:54:00+00:00",
+   "date_category": "comparison",
+   "errors": 479.0
+  },
+  {
+   "target_time": "2026-09-14T05:55:00+00:00",
+   "date_category": "comparison",
+   "errors": 472.0
+  },
+  {
+   "target_time": "2026-09-14T05:56:00+00:00",
+   "date_category": "comparison",
+   "errors": 482.0
+  },
+  {
+   "target_time": "2026-09-14T05:57:00+00:00",
+   "date_category": "comparison",
+   "errors": 483.0
+  },
+  {
+   "target_time": "2026-09-14T05:58:00+00:00",
+   "date_category": "comparison",
+   "errors": 498.0
+  },
+  {
+   "target_time": "2026-09-14T05:59:00+00:00",
+   "date_category": "comparison",
+   "errors": 496.0
+  },
+  {
+   "target_time": "2026-09-21T00:00:00+00:00",
+   "date_category": "origin",
+   "errors": 881.0
+  },
+  {
+   "target_time": "2026-09-21T00:01:00+00:00",
+   "date_category": "origin",
+   "errors": 878.0
+  },
+  {
+   "target_time": "2026-09-21T00:02:00+00:00",
+   "date_category": "origin",
+   "errors": 866.0
+  },
+  {
+   "target_time": "2026-09-21T00:03:00+00:00",
+   "date_category": "origin",
+   "errors": 850.0
+  },
+  {
+   "target_time": "2026-09-21T00:04:00+00:00",
+   "date_category": "origin",
+   "errors": 869.0
+  },
+  {
+   "target_time": "2026-09-21T00:05:00+00:00",
+   "date_category": "origin",
+   "errors": 862.0
+  },
+  {
+   "target_time": "2026-09-21T00:06:00+00:00",
+   "date_category": "origin",
+   "errors": 882.0
+  },
+  {
+   "target_time": "2026-09-21T00:07:00+00:00",
+   "date_category": "origin",
+   "errors": 899.0
+  },
+  {
+   "target_time": "2026-09-21T00:08:00+00:00",
+   "date_category": "origin",
+   "errors": 913.0
+  },
+  {
+   "target_time": "2026-09-21T00:09:00+00:00",
+   "date_category": "origin",
+   "errors": 909.0
+  },
+  {
+   "target_time": "2026-09-21T00:10:00+00:00",
+   "date_category": "origin",
+   "errors": 913.0
+  },
+  {
+   "target_time": "2026-09-21T00:11:00+00:00",
+   "date_category": "origin",
+   "errors": 896.0
+  },
+  {
+   "target_time": "2026-09-21T00:12:00+00:00",
+   "date_category": "origin",
+   "errors": 897.0
+  },
+  {
+   "target_time": "2026-09-21T00:13:00+00:00",
+   "date_category": "origin",
+   "errors": 894.0
+  },
+  {
+   "target_time": "2026-09-21T00:14:00+00:00",
+   "date_category": "origin",
+   "errors": 890.0
+  },
+  {
+   "target_time": "2026-09-21T00:15:00+00:00",
+   "date_category": "origin",
+   "errors": 878.0
+  },
+  {
+   "target_time": "2026-09-21T00:16:00+00:00",
+   "date_category": "origin",
+   "errors": 885.0
+  },
+  {
+   "target_time": "2026-09-21T00:17:00+00:00",
+   "date_category": "origin",
+   "errors": 881.0
+  },
+  {
+   "target_time": "2026-09-21T00:18:00+00:00",
+   "date_category": "origin",
+   "errors": 889.0
+  },
+  {
+   "target_time": "2026-09-21T00:19:00+00:00",
+   "date_category": "origin",
+   "errors": 910.0
+  },
+  {
+   "target_time": "2026-09-21T00:20:00+00:00",
+   "date_category": "origin",
+   "errors": 912.0
+  },
+  {
+   "target_time": "2026-09-21T00:21:00+00:00",
+   "date_category": "origin",
+   "errors": 923.0
+  },
+  {
+   "target_time": "2026-09-21T00:22:00+00:00",
+   "date_category": "origin",
+   "errors": 933.0
+  },
+  {
+   "target_time": "2026-09-21T00:23:00+00:00",
+   "date_category": "origin",
+   "errors": 920.0
+  },
+  {
+   "target_time": "2026-09-21T00:24:00+00:00",
+   "date_category": "origin",
+   "errors": 921.0
+  },
+  {
+   "target_time": "2026-09-21T00:25:00+00:00",
+   "date_category": "origin",
+   "errors": 915.0
+  },
+  {
+   "target_time": "2026-09-21T00:26:00+00:00",
+   "date_category": "origin",
+   "errors": 918.0
+  },
+  {
+   "target_time": "2026-09-21T00:27:00+00:00",
+   "date_category": "origin",
+   "errors": 916.0
+  },
+  {
+   "target_time": "2026-09-21T00:28:00+00:00",
+   "date_category": "origin",
+   "errors": 916.0
+  },
+  {
+   "target_time": "2026-09-21T00:29:00+00:00",
+   "date_category": "origin",
+   "errors": 917.0
+  },
+  {
+   "target_time": "2026-09-21T00:30:00+00:00",
+   "date_category": "origin",
+   "errors": 934.0
+  },
+  {
+   "target_time": "2026-09-21T00:31:00+00:00",
+   "date_category": "origin",
+   "errors": 920.0
+  },
+  {
+   "target_time": "2026-09-21T00:32:00+00:00",
+   "date_category": "origin",
+   "errors": 925.0
+  },
+  {
+   "target_time": "2026-09-21T00:33:00+00:00",
+   "date_category": "origin",
+   "errors": 921.0
+  },
+  {
+   "target_time": "2026-09-21T00:34:00+00:00",
+   "date_category": "origin",
+   "errors": 921.0
+  },
+  {
+   "target_time": "2026-09-21T00:35:00+00:00",
+   "date_category": "origin",
+   "errors": 921.0
+  },
+  {
+   "target_time": "2026-09-21T00:36:00+00:00",
+   "date_category": "origin",
+   "errors": 917.0
+  },
+  {
+   "target_time": "2026-09-21T00:37:00+00:00",
+   "date_category": "origin",
+   "errors": 901.0
+  },
+  {
+   "target_time": "2026-09-21T00:38:00+00:00",
+   "date_category": "origin",
+   "errors": 901.0
+  },
+  {
+   "target_time": "2026-09-21T00:39:00+00:00",
+   "date_category": "origin",
+   "errors": 892.0
+  },
+  {
+   "target_time": "2026-09-21T00:40:00+00:00",
+   "date_category": "origin",
+   "errors": 881.0
+  },
+  {
+   "target_time": "2026-09-21T00:41:00+00:00",
+   "date_category": "origin",
+   "errors": 887.0
+  },
+  {
+   "target_time": "2026-09-21T00:42:00+00:00",
+   "date_category": "origin",
+   "errors": 896.0
+  },
+  {
+   "target_time": "2026-09-21T00:43:00+00:00",
+   "date_category": "origin",
+   "errors": 877.0
+  },
+  {
+   "target_time": "2026-09-21T00:44:00+00:00",
+   "date_category": "origin",
+   "errors": 881.0
+  },
+  {
+   "target_time": "2026-09-21T00:45:00+00:00",
+   "date_category": "origin",
+   "errors": 885.0
+  },
+  {
+   "target_time": "2026-09-21T00:46:00+00:00",
+   "date_category": "origin",
+   "errors": 887.0
+  },
+  {
+   "target_time": "2026-09-21T00:47:00+00:00",
+   "date_category": "origin",
+   "errors": 884.0
+  },
+  {
+   "target_time": "2026-09-21T00:48:00+00:00",
+   "date_category": "origin",
+   "errors": 895.0
+  },
+  {
+   "target_time": "2026-09-21T00:49:00+00:00",
+   "date_category": "origin",
+   "errors": 869.0
+  },
+  {
+   "target_time": "2026-09-21T00:50:00+00:00",
+   "date_category": "origin",
+   "errors": 882.0
+  },
+  {
+   "target_time": "2026-09-21T00:51:00+00:00",
+   "date_category": "origin",
+   "errors": 880.0
+  },
+  {
+   "target_time": "2026-09-21T00:52:00+00:00",
+   "date_category": "origin",
+   "errors": 888.0
+  },
+  {
+   "target_time": "2026-09-21T00:53:00+00:00",
+   "date_category": "origin",
+   "errors": 893.0
+  },
+  {
+   "target_time": "2026-09-21T00:54:00+00:00",
+   "date_category": "origin",
+   "errors": 918.0
+  },
+  {
+   "target_time": "2026-09-21T00:55:00+00:00",
+   "date_category": "origin",
+   "errors": 945.0
+  },
+  {
+   "target_time": "2026-09-21T00:56:00+00:00",
+   "date_category": "origin",
+   "errors": 961.0
+  },
+  {
+   "target_time": "2026-09-21T00:57:00+00:00",
+   "date_category": "origin",
+   "errors": 951.0
+  },
+  {
+   "target_time": "2026-09-21T00:58:00+00:00",
+   "date_category": "origin",
+   "errors": 947.0
+  },
+  {
+   "target_time": "2026-09-21T00:59:00+00:00",
+   "date_category": "origin",
+   "errors": 936.0
+  },
+  {
+   "target_time": "2026-09-21T01:00:00+00:00",
+   "date_category": "origin",
+   "errors": 928.0
+  },
+  {
+   "target_time": "2026-09-21T01:01:00+00:00",
+   "date_category": "origin",
+   "errors": 929.0
+  },
+  {
+   "target_time": "2026-09-21T01:02:00+00:00",
+   "date_category": "origin",
+   "errors": 939.0
+  },
+  {
+   "target_time": "2026-09-21T01:03:00+00:00",
+   "date_category": "origin",
+   "errors": 947.0
+  },
+  {
+   "target_time": "2026-09-21T01:04:00+00:00",
+   "date_category": "origin",
+   "errors": 944.0
+  },
+  {
+   "target_time": "2026-09-21T01:05:00+00:00",
+   "date_category": "origin",
+   "errors": 940.0
+  },
+  {
+   "target_time": "2026-09-21T01:06:00+00:00",
+   "date_category": "origin",
+   "errors": 937.0
+  },
+  {
+   "target_time": "2026-09-21T01:07:00+00:00",
+   "date_category": "origin",
+   "errors": 915.0
+  },
+  {
+   "target_time": "2026-09-21T01:08:00+00:00",
+   "date_category": "origin",
+   "errors": 920.0
+  },
+  {
+   "target_time": "2026-09-21T01:09:00+00:00",
+   "date_category": "origin",
+   "errors": 922.0
+  },
+  {
+   "target_time": "2026-09-21T01:10:00+00:00",
+   "date_category": "origin",
+   "errors": 930.0
+  },
+  {
+   "target_time": "2026-09-21T01:11:00+00:00",
+   "date_category": "origin",
+   "errors": 932.0
+  },
+  {
+   "target_time": "2026-09-21T01:12:00+00:00",
+   "date_category": "origin",
+   "errors": 937.0
+  },
+  {
+   "target_time": "2026-09-21T01:13:00+00:00",
+   "date_category": "origin",
+   "errors": 945.0
+  },
+  {
+   "target_time": "2026-09-21T01:14:00+00:00",
+   "date_category": "origin",
+   "errors": 949.0
+  },
+  {
+   "target_time": "2026-09-21T01:15:00+00:00",
+   "date_category": "origin",
+   "errors": 937.0
+  },
+  {
+   "target_time": "2026-09-21T01:16:00+00:00",
+   "date_category": "origin",
+   "errors": 937.0
+  },
+  {
+   "target_time": "2026-09-21T01:17:00+00:00",
+   "date_category": "origin",
+   "errors": 929.0
+  },
+  {
+   "target_time": "2026-09-21T01:18:00+00:00",
+   "date_category": "origin",
+   "errors": 924.0
+  },
+  {
+   "target_time": "2026-09-21T01:19:00+00:00",
+   "date_category": "origin",
+   "errors": 916.0
+  },
+  {
+   "target_time": "2026-09-21T01:20:00+00:00",
+   "date_category": "origin",
+   "errors": 921.0
+  },
+  {
+   "target_time": "2026-09-21T01:21:00+00:00",
+   "date_category": "origin",
+   "errors": 918.0
+  },
+  {
+   "target_time": "2026-09-21T01:22:00+00:00",
+   "date_category": "origin",
+   "errors": 924.0
+  },
+  {
+   "target_time": "2026-09-21T01:23:00+00:00",
+   "date_category": "origin",
+   "errors": 919.0
+  },
+  {
+   "target_time": "2026-09-21T01:24:00+00:00",
+   "date_category": "origin",
+   "errors": 912.0
+  },
+  {
+   "target_time": "2026-09-21T01:25:00+00:00",
+   "date_category": "origin",
+   "errors": 891.0
+  },
+  {
+   "target_time": "2026-09-21T01:26:00+00:00",
+   "date_category": "origin",
+   "errors": 883.0
+  },
+  {
+   "target_time": "2026-09-21T01:27:00+00:00",
+   "date_category": "origin",
+   "errors": 886.0
+  },
+  {
+   "target_time": "2026-09-21T01:28:00+00:00",
+   "date_category": "origin",
+   "errors": 875.0
+  },
+  {
+   "target_time": "2026-09-21T01:29:00+00:00",
+   "date_category": "origin",
+   "errors": 881.0
+  },
+  {
+   "target_time": "2026-09-21T01:30:00+00:00",
+   "date_category": "origin",
+   "errors": 885.0
+  },
+  {
+   "target_time": "2026-09-21T01:31:00+00:00",
+   "date_category": "origin",
+   "errors": 878.0
+  },
+  {
+   "target_time": "2026-09-21T01:32:00+00:00",
+   "date_category": "origin",
+   "errors": 873.0
+  },
+  {
+   "target_time": "2026-09-21T01:33:00+00:00",
+   "date_category": "origin",
+   "errors": 866.0
+  },
+  {
+   "target_time": "2026-09-21T01:34:00+00:00",
+   "date_category": "origin",
+   "errors": 859.0
+  },
+  {
+   "target_time": "2026-09-21T01:35:00+00:00",
+   "date_category": "origin",
+   "errors": 862.0
+  },
+  {
+   "target_time": "2026-09-21T01:36:00+00:00",
+   "date_category": "origin",
+   "errors": 861.0
+  },
+  {
+   "target_time": "2026-09-21T01:37:00+00:00",
+   "date_category": "origin",
+   "errors": 862.0
+  },
+  {
+   "target_time": "2026-09-21T01:38:00+00:00",
+   "date_category": "origin",
+   "errors": 860.0
+  },
+  {
+   "target_time": "2026-09-21T01:39:00+00:00",
+   "date_category": "origin",
+   "errors": 858.0
+  },
+  {
+   "target_time": "2026-09-21T01:40:00+00:00",
+   "date_category": "origin",
+   "errors": 868.0
+  },
+  {
+   "target_time": "2026-09-21T01:41:00+00:00",
+   "date_category": "origin",
+   "errors": 866.0
+  },
+  {
+   "target_time": "2026-09-21T01:42:00+00:00",
+   "date_category": "origin",
+   "errors": 862.0
+  },
+  {
+   "target_time": "2026-09-21T01:43:00+00:00",
+   "date_category": "origin",
+   "errors": 857.0
+  },
+  {
+   "target_time": "2026-09-21T01:44:00+00:00",
+   "date_category": "origin",
+   "errors": 857.0
+  },
+  {
+   "target_time": "2026-09-21T01:45:00+00:00",
+   "date_category": "origin",
+   "errors": 851.0
+  },
+  {
+   "target_time": "2026-09-21T01:46:00+00:00",
+   "date_category": "origin",
+   "errors": 848.0
+  },
+  {
+   "target_time": "2026-09-21T01:47:00+00:00",
+   "date_category": "origin",
+   "errors": 857.0
+  },
+  {
+   "target_time": "2026-09-21T01:48:00+00:00",
+   "date_category": "origin",
+   "errors": 852.0
+  },
+  {
+   "target_time": "2026-09-21T01:49:00+00:00",
+   "date_category": "origin",
+   "errors": 856.0
+  },
+  {
+   "target_time": "2026-09-21T01:50:00+00:00",
+   "date_category": "origin",
+   "errors": 857.0
+  },
+  {
+   "target_time": "2026-09-21T01:51:00+00:00",
+   "date_category": "origin",
+   "errors": 850.0
+  },
+  {
+   "target_time": "2026-09-21T01:52:00+00:00",
+   "date_category": "origin",
+   "errors": 829.0
+  },
+  {
+   "target_time": "2026-09-21T01:53:00+00:00",
+   "date_category": "origin",
+   "errors": 827.0
+  },
+  {
+   "target_time": "2026-09-21T01:54:00+00:00",
+   "date_category": "origin",
+   "errors": 824.0
+  },
+  {
+   "target_time": "2026-09-21T01:55:00+00:00",
+   "date_category": "origin",
+   "errors": 818.0
+  },
+  {
+   "target_time": "2026-09-21T01:56:00+00:00",
+   "date_category": "origin",
+   "errors": 820.0
+  },
+  {
+   "target_time": "2026-09-21T01:57:00+00:00",
+   "date_category": "origin",
+   "errors": 818.0
+  },
+  {
+   "target_time": "2026-09-21T01:58:00+00:00",
+   "date_category": "origin",
+   "errors": 826.0
+  },
+  {
+   "target_time": "2026-09-21T01:59:00+00:00",
+   "date_category": "origin",
+   "errors": 815.0
+  },
+  {
+   "target_time": "2026-09-21T02:00:00+00:00",
+   "date_category": "origin",
+   "errors": 817.0
+  },
+  {
+   "target_time": "2026-09-21T02:01:00+00:00",
+   "date_category": "origin",
+   "errors": 810.0
+  },
+  {
+   "target_time": "2026-09-21T02:02:00+00:00",
+   "date_category": "origin",
+   "errors": 809.0
+  },
+  {
+   "target_time": "2026-09-21T02:03:00+00:00",
+   "date_category": "origin",
+   "errors": 793.0
+  },
+  {
+   "target_time": "2026-09-21T02:04:00+00:00",
+   "date_category": "origin",
+   "errors": 802.0
+  },
+  {
+   "target_time": "2026-09-21T02:05:00+00:00",
+   "date_category": "origin",
+   "errors": 790.0
+  },
+  {
+   "target_time": "2026-09-21T02:06:00+00:00",
+   "date_category": "origin",
+   "errors": 783.0
+  },
+  {
+   "target_time": "2026-09-21T02:07:00+00:00",
+   "date_category": "origin",
+   "errors": 786.0
+  },
+  {
+   "target_time": "2026-09-21T02:08:00+00:00",
+   "date_category": "origin",
+   "errors": 779.0
+  },
+  {
+   "target_time": "2026-09-21T02:09:00+00:00",
+   "date_category": "origin",
+   "errors": 765.0
+  },
+  {
+   "target_time": "2026-09-21T02:10:00+00:00",
+   "date_category": "origin",
+   "errors": 754.0
+  },
+  {
+   "target_time": "2026-09-21T02:11:00+00:00",
+   "date_category": "origin",
+   "errors": 744.0
+  },
+  {
+   "target_time": "2026-09-21T02:12:00+00:00",
+   "date_category": "origin",
+   "errors": 745.0
+  },
+  {
+   "target_time": "2026-09-21T02:13:00+00:00",
+   "date_category": "origin",
+   "errors": 741.0
+  },
+  {
+   "target_time": "2026-09-21T02:14:00+00:00",
+   "date_category": "origin",
+   "errors": 743.0
+  },
+  {
+   "target_time": "2026-09-21T02:15:00+00:00",
+   "date_category": "origin",
+   "errors": 738.0
+  },
+  {
+   "target_time": "2026-09-21T02:16:00+00:00",
+   "date_category": "origin",
+   "errors": 744.0
+  },
+  {
+   "target_time": "2026-09-21T02:17:00+00:00",
+   "date_category": "origin",
+   "errors": 721.0
+  },
+  {
+   "target_time": "2026-09-21T02:18:00+00:00",
+   "date_category": "origin",
+   "errors": 724.0
+  },
+  {
+   "target_time": "2026-09-21T02:19:00+00:00",
+   "date_category": "origin",
+   "errors": 707.0
+  },
+  {
+   "target_time": "2026-09-21T02:20:00+00:00",
+   "date_category": "origin",
+   "errors": 698.0
+  },
+  {
+   "target_time": "2026-09-21T02:21:00+00:00",
+   "date_category": "origin",
+   "errors": 693.0
+  },
+  {
+   "target_time": "2026-09-21T02:22:00+00:00",
+   "date_category": "origin",
+   "errors": 711.0
+  },
+  {
+   "target_time": "2026-09-21T02:23:00+00:00",
+   "date_category": "origin",
+   "errors": 704.0
+  },
+  {
+   "target_time": "2026-09-21T02:24:00+00:00",
+   "date_category": "origin",
+   "errors": 714.0
+  },
+  {
+   "target_time": "2026-09-21T02:25:00+00:00",
+   "date_category": "origin",
+   "errors": 702.0
+  },
+  {
+   "target_time": "2026-09-21T02:26:00+00:00",
+   "date_category": "origin",
+   "errors": 710.0
+  },
+  {
+   "target_time": "2026-09-21T02:27:00+00:00",
+   "date_category": "origin",
+   "errors": 698.0
+  },
+  {
+   "target_time": "2026-09-21T02:28:00+00:00",
+   "date_category": "origin",
+   "errors": 685.0
+  },
+  {
+   "target_time": "2026-09-21T02:29:00+00:00",
+   "date_category": "origin",
+   "errors": 673.0
+  },
+  {
+   "target_time": "2026-09-21T02:30:00+00:00",
+   "date_category": "origin",
+   "errors": 675.0
+  },
+  {
+   "target_time": "2026-09-21T02:31:00+00:00",
+   "date_category": "origin",
+   "errors": 677.0
+  },
+  {
+   "target_time": "2026-09-21T02:32:00+00:00",
+   "date_category": "origin",
+   "errors": 677.0
+  },
+  {
+   "target_time": "2026-09-21T02:33:00+00:00",
+   "date_category": "origin",
+   "errors": 678.0
+  },
+  {
+   "target_time": "2026-09-21T02:34:00+00:00",
+   "date_category": "origin",
+   "errors": 679.0
+  },
+  {
+   "target_time": "2026-09-21T02:35:00+00:00",
+   "date_category": "origin",
+   "errors": 681.0
+  },
+  {
+   "target_time": "2026-09-21T02:36:00+00:00",
+   "date_category": "origin",
+   "errors": 687.0
+  },
+  {
+   "target_time": "2026-09-21T02:37:00+00:00",
+   "date_category": "origin",
+   "errors": 675.0
+  },
+  {
+   "target_time": "2026-09-21T02:38:00+00:00",
+   "date_category": "origin",
+   "errors": 683.0
+  },
+  {
+   "target_time": "2026-09-21T02:39:00+00:00",
+   "date_category": "origin",
+   "errors": 681.0
+  },
+  {
+   "target_time": "2026-09-21T02:40:00+00:00",
+   "date_category": "origin",
+   "errors": 677.0
+  },
+  {
+   "target_time": "2026-09-21T02:41:00+00:00",
+   "date_category": "origin",
+   "errors": 668.0
+  },
+  {
+   "target_time": "2026-09-21T02:42:00+00:00",
+   "date_category": "origin",
+   "errors": 683.0
+  },
+  {
+   "target_time": "2026-09-21T02:43:00+00:00",
+   "date_category": "origin",
+   "errors": 674.0
+  },
+  {
+   "target_time": "2026-09-21T02:44:00+00:00",
+   "date_category": "origin",
+   "errors": 666.0
+  },
+  {
+   "target_time": "2026-09-21T02:45:00+00:00",
+   "date_category": "origin",
+   "errors": 661.0
+  },
+  {
+   "target_time": "2026-09-21T02:46:00+00:00",
+   "date_category": "origin",
+   "errors": 664.0
+  },
+  {
+   "target_time": "2026-09-21T02:47:00+00:00",
+   "date_category": "origin",
+   "errors": 679.0
+  },
+  {
+   "target_time": "2026-09-21T02:48:00+00:00",
+   "date_category": "origin",
+   "errors": 677.0
+  },
+  {
+   "target_time": "2026-09-21T02:49:00+00:00",
+   "date_category": "origin",
+   "errors": 678.0
+  },
+  {
+   "target_time": "2026-09-21T02:50:00+00:00",
+   "date_category": "origin",
+   "errors": 683.0
+  },
+  {
+   "target_time": "2026-09-21T02:51:00+00:00",
+   "date_category": "origin",
+   "errors": 675.0
+  },
+  {
+   "target_time": "2026-09-21T02:52:00+00:00",
+   "date_category": "origin",
+   "errors": 676.0
+  },
+  {
+   "target_time": "2026-09-21T02:53:00+00:00",
+   "date_category": "origin",
+   "errors": 660.0
+  },
+  {
+   "target_time": "2026-09-21T02:54:00+00:00",
+   "date_category": "origin",
+   "errors": 654.0
+  },
+  {
+   "target_time": "2026-09-21T02:55:00+00:00",
+   "date_category": "origin",
+   "errors": 658.0
+  },
+  {
+   "target_time": "2026-09-21T02:56:00+00:00",
+   "date_category": "origin",
+   "errors": 655.0
+  },
+  {
+   "target_time": "2026-09-21T02:57:00+00:00",
+   "date_category": "origin",
+   "errors": 648.0
+  },
+  {
+   "target_time": "2026-09-21T02:58:00+00:00",
+   "date_category": "origin",
+   "errors": 653.0
+  },
+  {
+   "target_time": "2026-09-21T02:59:00+00:00",
+   "date_category": "origin",
+   "errors": 650.0
+  },
+  {
+   "target_time": "2026-09-21T03:00:00+00:00",
+   "date_category": "origin",
+   "errors": 647.0
+  },
+  {
+   "target_time": "2026-09-21T03:01:00+00:00",
+   "date_category": "origin",
+   "errors": 651.0
+  },
+  {
+   "target_time": "2026-09-21T03:02:00+00:00",
+   "date_category": "origin",
+   "errors": 659.0
+  },
+  {
+   "target_time": "2026-09-21T03:03:00+00:00",
+   "date_category": "origin",
+   "errors": 646.0
+  },
+  {
+   "target_time": "2026-09-21T03:04:00+00:00",
+   "date_category": "origin",
+   "errors": 666.0
+  },
+  {
+   "target_time": "2026-09-21T03:05:00+00:00",
+   "date_category": "origin",
+   "errors": 653.0
+  },
+  {
+   "target_time": "2026-09-21T03:06:00+00:00",
+   "date_category": "origin",
+   "errors": 659.0
+  },
+  {
+   "target_time": "2026-09-21T03:07:00+00:00",
+   "date_category": "origin",
+   "errors": 662.0
+  },
+  {
+   "target_time": "2026-09-21T03:08:00+00:00",
+   "date_category": "origin",
+   "errors": 655.0
+  },
+  {
+   "target_time": "2026-09-21T03:09:00+00:00",
+   "date_category": "origin",
+   "errors": 650.0
+  },
+  {
+   "target_time": "2026-09-21T03:10:00+00:00",
+   "date_category": "origin",
+   "errors": 650.0
+  },
+  {
+   "target_time": "2026-09-21T03:11:00+00:00",
+   "date_category": "origin",
+   "errors": 644.0
+  },
+  {
+   "target_time": "2026-09-21T03:12:00+00:00",
+   "date_category": "origin",
+   "errors": 638.0
+  },
+  {
+   "target_time": "2026-09-21T03:13:00+00:00",
+   "date_category": "origin",
+   "errors": 632.0
+  },
+  {
+   "target_time": "2026-09-21T03:14:00+00:00",
+   "date_category": "origin",
+   "errors": 645.0
+  },
+  {
+   "target_time": "2026-09-21T03:15:00+00:00",
+   "date_category": "origin",
+   "errors": 645.0
+  },
+  {
+   "target_time": "2026-09-21T03:16:00+00:00",
+   "date_category": "origin",
+   "errors": 636.0
+  },
+  {
+   "target_time": "2026-09-21T03:17:00+00:00",
+   "date_category": "origin",
+   "errors": 616.0
+  },
+  {
+   "target_time": "2026-09-21T03:18:00+00:00",
+   "date_category": "origin",
+   "errors": 623.0
+  },
+  {
+   "target_time": "2026-09-21T03:19:00+00:00",
+   "date_category": "origin",
+   "errors": 616.0
+  },
+  {
+   "target_time": "2026-09-21T03:20:00+00:00",
+   "date_category": "origin",
+   "errors": 617.0
+  },
+  {
+   "target_time": "2026-09-21T03:21:00+00:00",
+   "date_category": "origin",
+   "errors": 617.0
+  },
+  {
+   "target_time": "2026-09-21T03:22:00+00:00",
+   "date_category": "origin",
+   "errors": 611.0
+  },
+  {
+   "target_time": "2026-09-21T03:23:00+00:00",
+   "date_category": "origin",
+   "errors": 611.0
+  },
+  {
+   "target_time": "2026-09-21T03:24:00+00:00",
+   "date_category": "origin",
+   "errors": 611.0
+  },
+  {
+   "target_time": "2026-09-21T03:25:00+00:00",
+   "date_category": "origin",
+   "errors": 606.0
+  },
+  {
+   "target_time": "2026-09-21T03:26:00+00:00",
+   "date_category": "origin",
+   "errors": 606.0
+  },
+  {
+   "target_time": "2026-09-21T03:27:00+00:00",
+   "date_category": "origin",
+   "errors": 602.0
+  },
+  {
+   "target_time": "2026-09-21T03:28:00+00:00",
+   "date_category": "origin",
+   "errors": 600.0
+  },
+  {
+   "target_time": "2026-09-21T03:29:00+00:00",
+   "date_category": "origin",
+   "errors": 594.0
+  },
+  {
+   "target_time": "2026-09-21T03:30:00+00:00",
+   "date_category": "origin",
+   "errors": 607.0
+  },
+  {
+   "target_time": "2026-09-21T03:31:00+00:00",
+   "date_category": "origin",
+   "errors": 595.0
+  },
+  {
+   "target_time": "2026-09-21T03:32:00+00:00",
+   "date_category": "origin",
+   "errors": 588.0
+  },
+  {
+   "target_time": "2026-09-21T03:33:00+00:00",
+   "date_category": "origin",
+   "errors": 580.0
+  },
+  {
+   "target_time": "2026-09-21T03:34:00+00:00",
+   "date_category": "origin",
+   "errors": 565.0
+  },
+  {
+   "target_time": "2026-09-21T03:35:00+00:00",
+   "date_category": "origin",
+   "errors": 559.0
+  },
+  {
+   "target_time": "2026-09-21T03:36:00+00:00",
+   "date_category": "origin",
+   "errors": 561.0
+  },
+  {
+   "target_time": "2026-09-21T03:37:00+00:00",
+   "date_category": "origin",
+   "errors": 552.0
+  },
+  {
+   "target_time": "2026-09-21T03:38:00+00:00",
+   "date_category": "origin",
+   "errors": 556.0
+  },
+  {
+   "target_time": "2026-09-21T03:39:00+00:00",
+   "date_category": "origin",
+   "errors": 549.0
+  },
+  {
+   "target_time": "2026-09-21T03:40:00+00:00",
+   "date_category": "origin",
+   "errors": 548.0
+  },
+  {
+   "target_time": "2026-09-21T03:41:00+00:00",
+   "date_category": "origin",
+   "errors": 540.0
+  },
+  {
+   "target_time": "2026-09-21T03:42:00+00:00",
+   "date_category": "origin",
+   "errors": 538.0
+  },
+  {
+   "target_time": "2026-09-21T03:43:00+00:00",
+   "date_category": "origin",
+   "errors": 536.0
+  },
+  {
+   "target_time": "2026-09-21T03:44:00+00:00",
+   "date_category": "origin",
+   "errors": 530.0
+  },
+  {
+   "target_time": "2026-09-21T03:45:00+00:00",
+   "date_category": "origin",
+   "errors": 518.0
+  },
+  {
+   "target_time": "2026-09-21T03:46:00+00:00",
+   "date_category": "origin",
+   "errors": 522.0
+  },
+  {
+   "target_time": "2026-09-21T03:47:00+00:00",
+   "date_category": "origin",
+   "errors": 521.0
+  },
+  {
+   "target_time": "2026-09-21T03:48:00+00:00",
+   "date_category": "origin",
+   "errors": 513.0
+  },
+  {
+   "target_time": "2026-09-21T03:49:00+00:00",
+   "date_category": "origin",
+   "errors": 511.0
+  },
+  {
+   "target_time": "2026-09-21T03:50:00+00:00",
+   "date_category": "origin",
+   "errors": 522.0
+  },
+  {
+   "target_time": "2026-09-21T03:51:00+00:00",
+   "date_category": "origin",
+   "errors": 503.0
+  },
+  {
+   "target_time": "2026-09-21T03:52:00+00:00",
+   "date_category": "origin",
+   "errors": 511.0
+  },
+  {
+   "target_time": "2026-09-21T03:53:00+00:00",
+   "date_category": "origin",
+   "errors": 511.0
+  },
+  {
+   "target_time": "2026-09-21T03:54:00+00:00",
+   "date_category": "origin",
+   "errors": 510.0
+  },
+  {
+   "target_time": "2026-09-21T03:55:00+00:00",
+   "date_category": "origin",
+   "errors": 495.0
+  },
+  {
+   "target_time": "2026-09-21T03:56:00+00:00",
+   "date_category": "origin",
+   "errors": 495.0
+  },
+  {
+   "target_time": "2026-09-21T03:57:00+00:00",
+   "date_category": "origin",
+   "errors": 496.0
+  },
+  {
+   "target_time": "2026-09-21T03:58:00+00:00",
+   "date_category": "origin",
+   "errors": 500.0
+  },
+  {
+   "target_time": "2026-09-21T03:59:00+00:00",
+   "date_category": "origin",
+   "errors": 498.0
+  },
+  {
+   "target_time": "2026-09-21T04:00:00+00:00",
+   "date_category": "origin",
+   "errors": 496.0
+  },
+  {
+   "target_time": "2026-09-21T04:01:00+00:00",
+   "date_category": "origin",
+   "errors": 489.0
+  },
+  {
+   "target_time": "2026-09-21T04:02:00+00:00",
+   "date_category": "origin",
+   "errors": 505.0
+  },
+  {
+   "target_time": "2026-09-21T04:03:00+00:00",
+   "date_category": "origin",
+   "errors": 513.0
+  },
+  {
+   "target_time": "2026-09-21T04:04:00+00:00",
+   "date_category": "origin",
+   "errors": 508.0
+  },
+  {
+   "target_time": "2026-09-21T04:05:00+00:00",
+   "date_category": "origin",
+   "errors": 508.0
+  },
+  {
+   "target_time": "2026-09-21T04:06:00+00:00",
+   "date_category": "origin",
+   "errors": 504.0
+  },
+  {
+   "target_time": "2026-09-21T04:07:00+00:00",
+   "date_category": "origin",
+   "errors": 499.0
+  },
+  {
+   "target_time": "2026-09-21T04:08:00+00:00",
+   "date_category": "origin",
+   "errors": 502.0
+  },
+  {
+   "target_time": "2026-09-21T04:09:00+00:00",
+   "date_category": "origin",
+   "errors": 490.0
+  },
+  {
+   "target_time": "2026-09-21T04:10:00+00:00",
+   "date_category": "origin",
+   "errors": 495.0
+  },
+  {
+   "target_time": "2026-09-21T04:11:00+00:00",
+   "date_category": "origin",
+   "errors": 491.0
+  },
+  {
+   "target_time": "2026-09-21T04:12:00+00:00",
+   "date_category": "origin",
+   "errors": 492.0
+  },
+  {
+   "target_time": "2026-09-21T04:13:00+00:00",
+   "date_category": "origin",
+   "errors": 499.0
+  },
+  {
+   "target_time": "2026-09-21T04:14:00+00:00",
+   "date_category": "origin",
+   "errors": 508.0
+  },
+  {
+   "target_time": "2026-09-21T04:15:00+00:00",
+   "date_category": "origin",
+   "errors": 512.0
+  },
+  {
+   "target_time": "2026-09-21T04:16:00+00:00",
+   "date_category": "origin",
+   "errors": 510.0
+  },
+  {
+   "target_time": "2026-09-21T04:17:00+00:00",
+   "date_category": "origin",
+   "errors": 509.0
+  },
+  {
+   "target_time": "2026-09-21T04:18:00+00:00",
+   "date_category": "origin",
+   "errors": 508.0
+  },
+  {
+   "target_time": "2026-09-21T04:19:00+00:00",
+   "date_category": "origin",
+   "errors": 510.0
+  },
+  {
+   "target_time": "2026-09-21T04:20:00+00:00",
+   "date_category": "origin",
+   "errors": 496.0
+  },
+  {
+   "target_time": "2026-09-21T04:21:00+00:00",
+   "date_category": "origin",
+   "errors": 492.0
+  },
+  {
+   "target_time": "2026-09-21T04:22:00+00:00",
+   "date_category": "origin",
+   "errors": 499.0
+  },
+  {
+   "target_time": "2026-09-21T04:23:00+00:00",
+   "date_category": "origin",
+   "errors": 498.0
+  },
+  {
+   "target_time": "2026-09-21T04:24:00+00:00",
+   "date_category": "origin",
+   "errors": 497.0
+  },
+  {
+   "target_time": "2026-09-21T04:25:00+00:00",
+   "date_category": "origin",
+   "errors": 492.0
+  },
+  {
+   "target_time": "2026-09-21T04:26:00+00:00",
+   "date_category": "origin",
+   "errors": 494.0
+  },
+  {
+   "target_time": "2026-09-21T04:27:00+00:00",
+   "date_category": "origin",
+   "errors": 487.0
+  },
+  {
+   "target_time": "2026-09-21T04:28:00+00:00",
+   "date_category": "origin",
+   "errors": 477.0
+  },
+  {
+   "target_time": "2026-09-21T04:29:00+00:00",
+   "date_category": "origin",
+   "errors": 475.0
+  },
+  {
+   "target_time": "2026-09-21T04:30:00+00:00",
+   "date_category": "origin",
+   "errors": 466.0
+  },
+  {
+   "target_time": "2026-09-21T04:31:00+00:00",
+   "date_category": "origin",
+   "errors": 457.0
+  },
+  {
+   "target_time": "2026-09-21T04:32:00+00:00",
+   "date_category": "origin",
+   "errors": 445.0
+  },
+  {
+   "target_time": "2026-09-21T04:33:00+00:00",
+   "date_category": "origin",
+   "errors": 442.0
+  },
+  {
+   "target_time": "2026-09-21T04:34:00+00:00",
+   "date_category": "origin",
+   "errors": 442.0
+  },
+  {
+   "target_time": "2026-09-21T04:35:00+00:00",
+   "date_category": "origin",
+   "errors": 437.0
+  },
+  {
+   "target_time": "2026-09-21T04:36:00+00:00",
+   "date_category": "origin",
+   "errors": 438.0
+  },
+  {
+   "target_time": "2026-09-21T04:37:00+00:00",
+   "date_category": "origin",
+   "errors": 431.0
+  },
+  {
+   "target_time": "2026-09-21T04:38:00+00:00",
+   "date_category": "origin",
+   "errors": 429.0
+  },
+  {
+   "target_time": "2026-09-21T04:39:00+00:00",
+   "date_category": "origin",
+   "errors": 427.0
+  },
+  {
+   "target_time": "2026-09-21T04:40:00+00:00",
+   "date_category": "origin",
+   "errors": 429.0
+  },
+  {
+   "target_time": "2026-09-21T04:41:00+00:00",
+   "date_category": "origin",
+   "errors": 424.0
+  },
+  {
+   "target_time": "2026-09-21T04:42:00+00:00",
+   "date_category": "origin",
+   "errors": 425.0
+  },
+  {
+   "target_time": "2026-09-21T04:43:00+00:00",
+   "date_category": "origin",
+   "errors": 412.0
+  },
+  {
+   "target_time": "2026-09-21T04:44:00+00:00",
+   "date_category": "origin",
+   "errors": 400.0
+  },
+  {
+   "target_time": "2026-09-21T04:45:00+00:00",
+   "date_category": "origin",
+   "errors": 386.0
+  },
+  {
+   "target_time": "2026-09-21T04:46:00+00:00",
+   "date_category": "origin",
+   "errors": 391.0
+  },
+  {
+   "target_time": "2026-09-21T04:47:00+00:00",
+   "date_category": "origin",
+   "errors": 387.0
+  },
+  {
+   "target_time": "2026-09-21T04:48:00+00:00",
+   "date_category": "origin",
+   "errors": 390.0
+  },
+  {
+   "target_time": "2026-09-21T04:49:00+00:00",
+   "date_category": "origin",
+   "errors": 378.0
+  },
+  {
+   "target_time": "2026-09-21T04:50:00+00:00",
+   "date_category": "origin",
+   "errors": 386.0
+  },
+  {
+   "target_time": "2026-09-21T04:51:00+00:00",
+   "date_category": "origin",
+   "errors": 387.0
+  },
+  {
+   "target_time": "2026-09-21T04:52:00+00:00",
+   "date_category": "origin",
+   "errors": 374.0
+  },
+  {
+   "target_time": "2026-09-21T04:53:00+00:00",
+   "date_category": "origin",
+   "errors": 374.0
+  },
+  {
+   "target_time": "2026-09-21T04:54:00+00:00",
+   "date_category": "origin",
+   "errors": 374.0
+  },
+  {
+   "target_time": "2026-09-21T04:55:00+00:00",
+   "date_category": "origin",
+   "errors": 369.0
+  },
+  {
+   "target_time": "2026-09-21T04:56:00+00:00",
+   "date_category": "origin",
+   "errors": 368.0
+  },
+  {
+   "target_time": "2026-09-21T04:57:00+00:00",
+   "date_category": "origin",
+   "errors": 359.0
+  },
+  {
+   "target_time": "2026-09-21T04:58:00+00:00",
+   "date_category": "origin",
+   "errors": 363.0
+  },
+  {
+   "target_time": "2026-09-21T04:59:00+00:00",
+   "date_category": "origin",
+   "errors": 362.0
+  },
+  {
+   "target_time": "2026-09-21T05:00:00+00:00",
+   "date_category": "origin",
+   "errors": 361.0
+  },
+  {
+   "target_time": "2026-09-21T05:01:00+00:00",
+   "date_category": "origin",
+   "errors": 362.0
+  },
+  {
+   "target_time": "2026-09-21T05:02:00+00:00",
+   "date_category": "origin",
+   "errors": 359.0
+  },
+  {
+   "target_time": "2026-09-21T05:03:00+00:00",
+   "date_category": "origin",
+   "errors": 353.0
+  },
+  {
+   "target_time": "2026-09-21T05:04:00+00:00",
+   "date_category": "origin",
+   "errors": 349.0
+  },
+  {
+   "target_time": "2026-09-21T05:05:00+00:00",
+   "date_category": "origin",
+   "errors": 348.0
+  },
+  {
+   "target_time": "2026-09-21T05:06:00+00:00",
+   "date_category": "origin",
+   "errors": 349.0
+  },
+  {
+   "target_time": "2026-09-21T05:07:00+00:00",
+   "date_category": "origin",
+   "errors": 345.0
+  },
+  {
+   "target_time": "2026-09-21T05:08:00+00:00",
+   "date_category": "origin",
+   "errors": 350.0
+  },
+  {
+   "target_time": "2026-09-21T05:09:00+00:00",
+   "date_category": "origin",
+   "errors": 343.0
+  },
+  {
+   "target_time": "2026-09-21T05:10:00+00:00",
+   "date_category": "origin",
+   "errors": 343.0
+  },
+  {
+   "target_time": "2026-09-21T05:11:00+00:00",
+   "date_category": "origin",
+   "errors": 340.0
+  },
+  {
+   "target_time": "2026-09-21T05:12:00+00:00",
+   "date_category": "origin",
+   "errors": 342.0
+  },
+  {
+   "target_time": "2026-09-21T05:13:00+00:00",
+   "date_category": "origin",
+   "errors": 339.0
+  },
+  {
+   "target_time": "2026-09-21T05:14:00+00:00",
+   "date_category": "origin",
+   "errors": 339.0
+  },
+  {
+   "target_time": "2026-09-21T05:15:00+00:00",
+   "date_category": "origin",
+   "errors": 332.0
+  },
+  {
+   "target_time": "2026-09-21T05:16:00+00:00",
+   "date_category": "origin",
+   "errors": 328.0
+  },
+  {
+   "target_time": "2026-09-21T05:17:00+00:00",
+   "date_category": "origin",
+   "errors": 327.0
+  },
+  {
+   "target_time": "2026-09-21T05:18:00+00:00",
+   "date_category": "origin",
+   "errors": 332.0
+  },
+  {
+   "target_time": "2026-09-21T05:19:00+00:00",
+   "date_category": "origin",
+   "errors": 330.0
+  },
+  {
+   "target_time": "2026-09-21T05:20:00+00:00",
+   "date_category": "origin",
+   "errors": 330.0
+  },
+  {
+   "target_time": "2026-09-21T05:21:00+00:00",
+   "date_category": "origin",
+   "errors": 332.0
+  },
+  {
+   "target_time": "2026-09-21T05:22:00+00:00",
+   "date_category": "origin",
+   "errors": 337.0
+  },
+  {
+   "target_time": "2026-09-21T05:23:00+00:00",
+   "date_category": "origin",
+   "errors": 338.0
+  },
+  {
+   "target_time": "2026-09-21T05:24:00+00:00",
+   "date_category": "origin",
+   "errors": 334.0
+  },
+  {
+   "target_time": "2026-09-21T05:25:00+00:00",
+   "date_category": "origin",
+   "errors": 333.0
+  },
+  {
+   "target_time": "2026-09-21T05:26:00+00:00",
+   "date_category": "origin",
+   "errors": 335.0
+  },
+  {
+   "target_time": "2026-09-21T05:27:00+00:00",
+   "date_category": "origin",
+   "errors": 349.0
+  },
+  {
+   "target_time": "2026-09-21T05:28:00+00:00",
+   "date_category": "origin",
+   "errors": 362.0
+  },
+  {
+   "target_time": "2026-09-21T05:29:00+00:00",
+   "date_category": "origin",
+   "errors": 355.0
+  },
+  {
+   "target_time": "2026-09-21T05:30:00+00:00",
+   "date_category": "origin",
+   "errors": 349.0
+  },
+  {
+   "target_time": "2026-09-21T05:31:00+00:00",
+   "date_category": "origin",
+   "errors": 345.0
+  },
+  {
+   "target_time": "2026-09-21T05:32:00+00:00",
+   "date_category": "origin",
+   "errors": 348.0
+  },
+  {
+   "target_time": "2026-09-21T05:33:00+00:00",
+   "date_category": "origin",
+   "errors": 344.0
+  },
+  {
+   "target_time": "2026-09-21T05:34:00+00:00",
+   "date_category": "origin",
+   "errors": 346.0
+  },
+  {
+   "target_time": "2026-09-21T05:35:00+00:00",
+   "date_category": "origin",
+   "errors": 339.0
+  },
+  {
+   "target_time": "2026-09-21T05:36:00+00:00",
+   "date_category": "origin",
+   "errors": 334.0
+  },
+  {
+   "target_time": "2026-09-21T05:37:00+00:00",
+   "date_category": "origin",
+   "errors": 330.0
+  },
+  {
+   "target_time": "2026-09-21T05:38:00+00:00",
+   "date_category": "origin",
+   "errors": 330.0
+  },
+  {
+   "target_time": "2026-09-21T05:39:00+00:00",
+   "date_category": "origin",
+   "errors": 329.0
+  },
+  {
+   "target_time": "2026-09-21T05:40:00+00:00",
+   "date_category": "origin",
+   "errors": 329.0
+  },
+  {
+   "target_time": "2026-09-21T05:41:00+00:00",
+   "date_category": "origin",
+   "errors": 327.0
+  },
+  {
+   "target_time": "2026-09-21T05:42:00+00:00",
+   "date_category": "origin",
+   "errors": 322.0
+  },
+  {
+   "target_time": "2026-09-21T05:43:00+00:00",
+   "date_category": "origin",
+   "errors": 321.0
+  },
+  {
+   "target_time": "2026-09-21T05:44:00+00:00",
+   "date_category": "origin",
+   "errors": 319.0
+  },
+  {
+   "target_time": "2026-09-21T05:45:00+00:00",
+   "date_category": "origin",
+   "errors": 319.0
+  },
+  {
+   "target_time": "2026-09-21T05:46:00+00:00",
+   "date_category": "origin",
+   "errors": 312.0
+  },
+  {
+   "target_time": "2026-09-21T05:47:00+00:00",
+   "date_category": "origin",
+   "errors": 306.0
+  },
+  {
+   "target_time": "2026-09-21T05:48:00+00:00",
+   "date_category": "origin",
+   "errors": 297.0
+  },
+  {
+   "target_time": "2026-09-21T05:49:00+00:00",
+   "date_category": "origin",
+   "errors": 297.0
+  },
+  {
+   "target_time": "2026-09-21T05:50:00+00:00",
+   "date_category": "origin",
+   "errors": 301.0
+  },
+  {
+   "target_time": "2026-09-21T05:51:00+00:00",
+   "date_category": "origin",
+   "errors": 290.0
+  },
+  {
+   "target_time": "2026-09-21T05:52:00+00:00",
+   "date_category": "origin",
+   "errors": 292.0
+  },
+  {
+   "target_time": "2026-09-21T05:53:00+00:00",
+   "date_category": "origin",
+   "errors": 276.0
+  },
+  {
+   "target_time": "2026-09-21T05:54:00+00:00",
+   "date_category": "origin",
+   "errors": 289.0
+  },
+  {
+   "target_time": "2026-09-21T05:55:00+00:00",
+   "date_category": "origin",
+   "errors": 287.0
+  },
+  {
+   "target_time": "2026-09-21T05:56:00+00:00",
+   "date_category": "origin",
+   "errors": 288.0
+  },
+  {
+   "target_time": "2026-09-21T05:57:00+00:00",
+   "date_category": "origin",
+   "errors": 274.0
+  },
+  {
+   "target_time": "2026-09-21T05:58:00+00:00",
+   "date_category": "origin",
+   "errors": 265.0
+  },
+  {
+   "target_time": "2026-09-21T05:59:00+00:00",
+   "date_category": "origin",
+   "errors": 261.0
+  }
+ ]
+}

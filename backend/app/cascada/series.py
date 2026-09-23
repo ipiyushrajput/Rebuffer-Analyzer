@@ -14,6 +14,12 @@ into a figure labelled as this week's.
 rebuffering. It is not the fraction that `Thresholds.rebuffer_ratio_threshold` holds, where
 0.25 means 25%. The comparison therefore goes through `is_above` against
 `cascada_rebuffering_threshold_pct`, and that is the only place the operator is applied.
+
+The same endpoint answers for other metrics, and the response shape does not change — only the
+key each row carries its value under. `Metric` names that key. The two are not always spelled
+alike: a call asking for `target_metrics[]=error_count` is answered with rows keyed `errors`,
+so a metric lists every key its value can arrive under, and a response carrying none of them
+is an error rather than a week of gaps.
 """
 
 from __future__ import annotations
@@ -31,6 +37,39 @@ METRIC = "rebuffering_ratio"
 EXPECTED_UNIT = "%"
 
 SECONDS_PER_MINUTE = 60
+
+
+@dataclass(frozen=True, slots=True)
+class Metric:
+    """One CASCADA metric: what the call asks for and where the answer puts it."""
+
+    id: str
+    label: str
+    # The value sent as `target_metrics[]`.
+    request_key: str
+    # Every row key the value can come back under, in the order they are tried.
+    response_keys: tuple[str, ...]
+    # What the value is measured in when the response does not say.
+    unit: str
+
+
+REBUFFERING = Metric(
+    id="rebuffering",
+    label="rebuffering",
+    request_key=METRIC,
+    response_keys=(METRIC,),
+    unit=EXPECTED_UNIT,
+)
+
+# Asked for as `error_count`, answered as `errors`, in `times`: a count of playback errors in
+# the minute, summed over every device that reported one.
+ERRORS = Metric(
+    id="errors",
+    label="error",
+    request_key="error_count",
+    response_keys=("errors", "error_count"),
+    unit="times",
+)
 
 
 class CascadaParseError(ValueError):
@@ -151,7 +190,15 @@ class ChannelSeries:
         }
 
 
-def parse(payload: Any, *, requested: Window) -> ChannelSeries:
+def _value_key(rows: list[Any], metric: Metric) -> str | None:
+    """The key this response carries the metric under, or None when no row carries it."""
+    for key in metric.response_keys:
+        if any(isinstance(row, dict) and key in row for row in rows):
+            return key
+    return None
+
+
+def parse(payload: Any, *, requested: Window, metric: Metric = REBUFFERING) -> ChannelSeries:
     """Split one CASCADA response into its current and previous-week series."""
     if not isinstance(payload, dict):
         raise CascadaParseError(
@@ -166,6 +213,17 @@ def parse(payload: Any, *, requested: Window) -> ChannelSeries:
             f"{', '.join(sorted(str(k) for k in payload)) or 'none'}."
         )
 
+    key = _value_key(rows, metric)
+    if key is None and rows:
+        # Rows that carry no value under any expected key would read as a window of gaps,
+        # which states that CASCADA measured nothing. It measured something else.
+        seen = sorted({str(k) for row in rows if isinstance(row, dict) for k in row})
+        raise CascadaParseError(
+            f"CASCADA returned {len(rows)} row(s) and none carries "
+            f"{' or '.join(f'`{k}`' for k in metric.response_keys)}. "
+            f"Row keys present: {', '.join(seen) or 'none'}."
+        )
+
     origin: list[Point] = []
     comparison: list[Point] = []
     categories: dict[str, int] = {}
@@ -178,7 +236,7 @@ def parse(payload: Any, *, requested: Window) -> ChannelSeries:
         at = _parse_time(row.get("target_time"))
         if at is None:
             continue
-        point = Point(at=at, value=_parse_value(row.get(METRIC)))
+        point = Point(at=at, value=_parse_value(row.get(key) if key else None))
         if category == ORIGIN:
             origin.append(point)
         elif category == COMPARISON:
@@ -187,10 +245,10 @@ def parse(payload: Any, *, requested: Window) -> ChannelSeries:
     origin.sort(key=lambda p: p.at)
     comparison.sort(key=lambda p: p.at)
 
-    unit = EXPECTED_UNIT
+    unit = metric.unit
     units = payload.get("unit")
-    if isinstance(units, dict) and isinstance(units.get(METRIC), str):
-        unit = units[METRIC]
+    if isinstance(units, dict) and key and isinstance(units.get(key), str):
+        unit = units[key]
 
     reference = None
     block = payload.get("reference_time")

@@ -196,6 +196,10 @@ class Thresholds(BaseModel):
     # 25%. The two are a hundredfold apart, so the field metric carries its own threshold and
     # the comparison lives in one place, `app.cascada.series.is_above`.
     cascada_rebuffering_threshold_pct: float = 0.25
+    # CASCADA error data: `errors` per minute, a count summed over every device, so it scales
+    # with the audience and one number cannot mean the same thing for every channel. 0 draws
+    # no threshold and states no above/below verdict; a team that has a number sets it here.
+    cascada_error_threshold_per_min: float = 0.0
     # The current window. CASCADA answers with this window tagged `origin` and the week before
     # it tagged `comparison`, which is what makes the week-over-week overlay possible.
     cascada_window_days: int = 7

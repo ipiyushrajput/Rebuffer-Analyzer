@@ -136,9 +136,10 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
   {
     id: 'cascada',
     title: 'CASCADA',
-    note: 'The field rebuffering metric: what counts as a rebuffering channel, the window measured, and how hard a country scan pushes.',
+    note: 'The field metrics: what counts as a rebuffering channel, the error count a channel is marked against (0 draws no error threshold), the window measured, and how hard a country scan pushes.',
     keys: [
       'cascada_rebuffering_threshold_pct',
+      'cascada_error_threshold_per_min',
       'cascada_window_days',
       'cascada_scan_concurrency',
       'cascada_cache_ttl_minutes',
