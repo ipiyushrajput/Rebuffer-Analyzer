@@ -218,6 +218,20 @@ export interface CascadaWindow {
   days: number
 }
 
+/**
+ * Where a rebuffering average came from. Realtime is one value per minute over the rolling
+ * window; historical is one value per UTC day over the last seven complete days.
+ */
+export type DataSource = 'realtime' | 'historical'
+
+/** A run of whole UTC days as the historical source states it. */
+export interface CascadaDays {
+  first_day: string
+  last_day: string
+  days: number
+  label: string
+}
+
 /** One channel as the listing and the country report state it. */
 export interface CascadaChannelRow extends CascadaStats {
   service_id: string
@@ -227,6 +241,19 @@ export interface CascadaChannelRow extends CascadaStats {
   truncated: boolean
   fetched_at: string
   cached: boolean
+  source: DataSource
+  /** 'minute' for realtime; 'day' for historical, where `minutes_*` count days. */
+  granularity: 'minute' | 'day'
+  // Historical only.
+  days_with_data?: number
+  days_expected?: number
+  days_above?: number
+  min_days?: number
+  insufficient?: boolean
+  requested_days?: CascadaDays
+  returned_days?: CascadaDays
+  provider_name?: string
+  cascada_channel_name?: string
 }
 
 /** One channel with both series, as the Rebuffering Data modal reads it. */
@@ -277,9 +304,25 @@ export interface CascadaFailure {
   reason: string
 }
 
+/** A channel a historical scan measured with too few days to judge. */
+export interface CascadaInsufficient {
+  service_id: string
+  channel_name: string
+  days_with_data: number
+  days_expected: number
+  average_pct: number | null
+}
+
 export interface CascadaScan {
   scan_id: string
   country: string
+  source: DataSource
+  /** The dates the averages cover, stated next to every average. */
+  window_label: string
+  insufficient: CascadaInsufficient[]
+  insufficient_count: number
+  no_provider: { service_id: string; channel_name: string; reason: string }[]
+  ambiguous: { service_id: string; channel_name: string; chosen: string; candidates: string[] }[]
   status: string
   done: number
   total: number
@@ -295,6 +338,17 @@ export interface CascadaScan {
   complete: boolean
   started_at: string
   finished_at: string | null
+}
+
+/** What the cached channel → provider map holds. */
+export interface CascadaProviders {
+  loaded: boolean
+  fetched_at?: string
+  group?: string
+  rows_read?: number
+  rows_kept?: number
+  channels?: number
+  ambiguous_channels?: number
 }
 
 export interface CascadaChannelQuery {
@@ -380,12 +434,18 @@ export const endpoints = {
     api.get<CascadaChannel>(`/cascada/channel?${cascadaChannelQuery(params)}`),
   cascadaChannelReportUrl: (params: CascadaChannelQuery, fmt: 'csv' | 'xlsx') =>
     api.url(`/cascada/channel/report.${fmt}?${cascadaChannelQuery(params)}`),
+  cascadaHistorical: (params: CascadaChannelQuery & { refresh?: boolean }) =>
+    api.get<CascadaChannel>(`/cascada/channel/historical?${cascadaChannelQuery(params)}`),
+  cascadaHistoricalReportUrl: (params: CascadaChannelQuery, fmt: 'csv' | 'xlsx') =>
+    api.url(`/cascada/channel/historical/report.${fmt}?${cascadaChannelQuery(params)}`),
+  cascadaProviders: () => api.get<CascadaProviders>('/cascada/providers'),
+  refreshCascadaProviders: () => api.post<CascadaProviders>('/cascada/providers/refresh'),
   cascadaErrors: (params: CascadaChannelQuery & { refresh?: boolean }) =>
     api.get<CascadaErrorChannel>(`/cascada/channel/errors?${cascadaChannelQuery(params)}`),
   cascadaErrorsReportUrl: (params: CascadaChannelQuery, fmt: 'csv' | 'xlsx') =>
     api.url(`/cascada/channel/errors/report.${fmt}?${cascadaChannelQuery(params)}`),
 
-  startCascadaScan: (body: { country: string; concurrency?: number }) =>
+  startCascadaScan: (body: { country: string; concurrency?: number; source?: DataSource }) =>
     api.post<CascadaScan>('/cascada/scans', body),
   readCascadaScan: (id: string) => api.get<CascadaScan>(`/cascada/scans/${id}`),
   cancelCascadaScan: (id: string) => api.del<CascadaScan>(`/cascada/scans/${id}`),
@@ -409,7 +469,8 @@ export const endpoints = {
 
   batchEstimate: (country: string) =>
     api.get<BatchEstimate>(`/batch/estimate?country=${encodeURIComponent(country)}`),
-  startBatch: (country: string) => api.post<Batch>('/batch/batches', { country }),
+  startBatch: (country: string, source: DataSource) =>
+    api.post<Batch>('/batch/batches', { country, source }),
   listBatches: () => api.get<{ batches: Batch[]; count: number }>('/batch/batches'),
   readBatch: (id: string) => api.get<Batch>(`/batch/batches/${id}`),
   cancelBatch: (id: string) => api.del<Batch>(`/batch/batches/${id}`),
@@ -485,6 +546,8 @@ export interface BatchSettings {
   correlation_tolerance_s: number
   spike_min_minutes: number
   retention_per_country: number
+  /** Where a scheduled batch reads rebuffering from. A batch started by hand names its own. */
+  scheduled_data_source: DataSource
 }
 
 export interface BatchItem {
@@ -524,6 +587,8 @@ export interface Batch {
   finished_at: string | null
   error: string | null
   settings: Record<string, unknown>
+  /** Which CASCADA source selected this batch's channels. */
+  data_source: DataSource
   items?: BatchItem[]
 }
 

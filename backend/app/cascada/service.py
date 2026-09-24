@@ -11,6 +11,14 @@ A scan is hundreds of CASCADA calls, so it runs as a background task behind a se
 progress, cancellation and a list of the channels that failed. A channel that fails is named,
 never dropped: an operator has to be able to see that a country report is missing six
 channels and which six.
+
+A scan has a **source**. `realtime` is the per-minute scan this module has always run, and its
+code path is unchanged. `historical` reads one value per UTC day for the last seven complete
+days (`app.cascada.historical`), a batch of channels per call, and produces the same
+`ChannelWindow` results, so the above-threshold selection, the country report and the Bulk
+hand-off are the ones realtime uses. What only historical has is listed beside the results:
+channels with no provider in CASCADA's channel list, channels whose provider was ambiguous,
+and channels with too few days of data to judge.
 """
 
 from __future__ import annotations
@@ -22,7 +30,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.cascada import client, store
+from app.cascada import client, historical, providers, store
 from app.cascada.auth import CascadaAuth, CascadaAuthError, mark_stored_session, resolve_auth
 from app.cascada.series import Window, summarise
 from app.cascada.store import ChannelWindow
@@ -37,6 +45,10 @@ ENVIRONMENT = "PRD"
 
 # A country with more pages than this is not walked further; no TV Plus country is close.
 MAX_PAGES = 100
+
+REALTIME = "realtime"
+HISTORICAL = historical.SOURCE
+SOURCES = (REALTIME, HISTORICAL)
 
 
 class CascadaScanError(Exception):
@@ -156,6 +168,35 @@ class Scan:
     error: str | None = None
     started_at: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
     finished_at: dt.datetime | None = None
+    # Which CASCADA source this scan reads. Everything below is filled by a historical scan.
+    source: str = REALTIME
+    # Channels judged neither above nor below: too few days of data.
+    insufficient: list[dict[str, Any]] = field(default_factory=list)
+    # Channels the provider map has no on-service entry for, skipped.
+    no_provider: list[dict[str, Any]] = field(default_factory=list)
+    # Channels with several providers after filtering; measured with the one chosen.
+    ambiguous: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def window_label(self) -> str:
+        """The dates the averages cover, as every surface states them next to a number.
+
+        Historical: the first and last day CASCADA returned inside the requested seven, so a
+        label never names a day that carries no row. Realtime: the rolling window itself.
+        """
+        if self.source == HISTORICAL:
+            returned = [
+                w.details["returned_days"]
+                for w in self.results.values()
+                if w.details.get("returned_dates")
+            ]
+            if returned:
+                first = min(r["first_day"] for r in returned)
+                last = max(r["last_day"] for r in returned)
+                return f"{first} → {last}"
+            return historical.window_of(self.window).label()
+        start, end = self.window.start, self.window.end
+        return f"{start:%Y-%m-%d %H:%M} → {end:%Y-%m-%d %H:%M} UTC"
 
     @property
     def above(self) -> list[ChannelWindow]:
@@ -191,6 +232,12 @@ class Scan:
             "measured_count": len(self.results),
             "below_count": len(self.results) - len(above),
             "failures": [f.as_dict() for f in self.failures],
+            "source": self.source,
+            "window_label": self.window_label,
+            "insufficient": self.insufficient,
+            "insufficient_count": len(self.insufficient),
+            "no_provider": self.no_provider,
+            "ambiguous": self.ambiguous,
             "error": self.error,
             "complete": self.complete,
             "started_at": self.started_at.isoformat(),
@@ -216,8 +263,10 @@ def latest_scan(country: str) -> Scan | None:
     return None
 
 
-async def start_scan(country: str, concurrency: int | None = None) -> Scan:
-    """Walk one country, measuring every channel it lists."""
+async def start_scan(country: str, concurrency: int | None = None, source: str = REALTIME) -> Scan:
+    """Walk one country, measuring every channel it lists, from one CASCADA source."""
+    if source not in SOURCES:
+        raise CascadaScanError(f"Unknown data source {source!r}; expected one of {SOURCES}.")
     code = cat.country(country).code  # Raises CatalogueError on a country that is not served.
     thresholds = get_thresholds()
     auth = await resolve_auth()
@@ -234,7 +283,12 @@ async def start_scan(country: str, concurrency: int | None = None) -> Scan:
     scan = Scan(
         id=uuid.uuid4().hex,
         country=code,
-        window=client.window_for(thresholds),
+        source=source,
+        window=(
+            historical.window_for().as_window()
+            if source == HISTORICAL
+            else client.window_for(thresholds)
+        ),
         total=len(channels),
         threshold_pct=thresholds.cascada_rebuffering_threshold_pct,
         urls={channel.service_id: channel.playback_url for channel in channels},
@@ -254,6 +308,9 @@ async def _run_scan(
     auth: CascadaAuth,
     concurrency: int | None,
 ) -> None:
+    if scan.source == HISTORICAL:
+        await _run_historical_scan(scan, channels, thresholds, auth, concurrency)
+        return
     settings = get_settings()
     limit = max(1, concurrency or thresholds.cascada_scan_concurrency)
     semaphore = asyncio.Semaphore(limit)
@@ -315,6 +372,162 @@ async def _run_scan(
     finally:
         scan.finished_at = dt.datetime.now(dt.UTC)
         await fetcher.aclose()
+
+
+async def _run_historical_scan(
+    scan: Scan,
+    channels: list[cat.Channel],
+    thresholds: Thresholds,
+    auth: CascadaAuth,
+    concurrency: int | None,
+) -> None:
+    """The historical scan: resolve each channel's provider, then ask a batch at a time.
+
+    The provider map is read once for the scan. A channel it has no entry for is listed and
+    skipped; one it has several for is measured with the one chosen and listed. Channels whose
+    days are already stored inside the TTL are not asked again.
+    """
+    settings = get_settings()
+    window = historical.window_of(scan.window)
+    semaphore = asyncio.Semaphore(max(1, concurrency or thresholds.cascada_scan_concurrency))
+    fetcher = Fetcher(
+        timeout_s=settings.cascada_timeout_s,
+        per_host_connections=settings.rba_per_host_connections,
+    )
+
+    try:
+        mapping = await providers.provider_map(auth)
+        cached = await historical.read_country(scan.country, window, thresholds)
+
+        wanted: list[historical.HistoricalChannel] = []
+        seen: set[str] = set()
+        for channel in channels:
+            # A channel the catalogue lists twice is asked for once and judged once.
+            if channel.service_id in seen:
+                scan.done += 1
+                continue
+            seen.add(channel.service_id)
+            held = cached.get(channel.service_id)
+            if held is not None:
+                _file(scan, held)
+                scan.done += 1
+                continue
+            resolution = mapping.resolve(channel.service_id)
+            if resolution.chosen is None:
+                scan.no_provider.append(
+                    {
+                        "service_id": channel.service_id,
+                        "channel_name": channel.name,
+                        "reason": (
+                            "Provider not found: no on-service entry in CASCADA's channel list "
+                            f"for '{mapping.group}'."
+                        ),
+                    }
+                )
+                scan.done += 1
+                continue
+            if resolution.status == "ambiguous":
+                logger.warning(
+                    "provider for %s is ambiguous; using %s of %s",
+                    channel.service_id,
+                    resolution.chosen.provider_name,
+                    [c.provider_name for c in resolution.candidates],
+                )
+                scan.ambiguous.append(
+                    {
+                        "service_id": channel.service_id,
+                        "channel_name": channel.name,
+                        "chosen": resolution.chosen.provider_name,
+                        "candidates": [c.provider_name for c in resolution.candidates],
+                    }
+                )
+            if resolution.chosen.channel_name and resolution.chosen.channel_name != channel.name:
+                logger.info(
+                    "CASCADA names %s %r where the catalogue says %r",
+                    channel.service_id,
+                    resolution.chosen.channel_name,
+                    channel.name,
+                )
+            wanted.append(
+                historical.HistoricalChannel(
+                    service_id=channel.service_id,
+                    provider_name=resolution.chosen.provider_name,
+                    cascada_name=resolution.chosen.channel_name or channel.name,
+                    catalogue_name=channel.name,
+                    country=channel.country or scan.country,
+                )
+            )
+
+        size = max(1, thresholds.cascada_historical_batch_size)
+        batches = [wanted[i : i + size] for i in range(0, len(wanted), size)]
+
+        async def measure(batch: list[historical.HistoricalChannel]) -> None:
+            async with semaphore:
+                try:
+                    results, failures = await historical.fetch_days(batch, window, auth, fetcher)
+                except asyncio.CancelledError:
+                    raise
+                except CascadaAuthError as exc:
+                    scan.error = str(exc)
+                    scan.status = "AUTH_FAILED"
+                    raise
+                except Exception as exc:
+                    results = {}
+                    failures = {c.service_id: str(exc) or type(exc).__name__ for c in batch}
+                for channel in batch:
+                    if channel.service_id in results:
+                        entry = historical.to_window(
+                            series=results[channel.service_id],
+                            window=window,
+                            channel=channel,
+                            thresholds=thresholds,
+                        )
+                        await historical.write(entry)
+                        _file(scan, entry)
+                    else:
+                        scan.failures.append(
+                            Failure(
+                                service_id=channel.service_id,
+                                channel_name=channel.catalogue_name,
+                                reason=failures.get(channel.service_id, "No row was returned."),
+                            )
+                        )
+                    scan.done += 1
+
+        await asyncio.gather(*(measure(batch) for batch in batches))
+        scan.status = "COMPLETED"
+    except asyncio.CancelledError:
+        scan.status = "CANCELLED"
+        raise
+    except CascadaAuthError as exc:
+        scan.error = scan.error or str(exc)
+        scan.status = "AUTH_FAILED"
+        # A session without its csrftoken still serves realtime, so it is not marked invalid.
+        if not isinstance(exc, historical.CsrfTokenMissing):
+            await mark_stored_session(valid=False, detail=scan.error)
+    except Exception as exc:
+        scan.status = "FAILED"
+        scan.error = f"{type(exc).__name__}: {exc}"
+        logger.exception("the CASCADA historical scan of %s failed", scan.country)
+    finally:
+        scan.finished_at = dt.datetime.now(dt.UTC)
+        await fetcher.aclose()
+
+
+def _file(scan: Scan, entry: ChannelWindow) -> None:
+    """Put one measured channel where it belongs: judged, or too thin to judge."""
+    if entry.details.get("insufficient"):
+        scan.insufficient.append(
+            {
+                "service_id": entry.service_id,
+                "channel_name": entry.channel_name,
+                "days_with_data": entry.details.get("days_with_data", 0),
+                "days_expected": entry.details.get("days_expected", 0),
+                "average_pct": entry.stats.average_pct,
+            }
+        )
+        return
+    scan.results[entry.service_id] = entry
 
 
 async def cancel_scan(scan_id: str) -> Scan | None:

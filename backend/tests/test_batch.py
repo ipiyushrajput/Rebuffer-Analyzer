@@ -8,6 +8,7 @@ channels get into it at all.
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import io
 from typing import Any
@@ -193,7 +194,12 @@ def test_the_report_opens_with_its_header_row_then_one_row_per_channel() -> None
     ).decode()
     lines = rows.splitlines()
 
-    assert lines[0] == ",".join(exports.headings(7))
+    # The fourth heading names the source and the dates, so no average is read without them.
+    assert next(csv.reader([lines[0]])) == [
+        *exports.headings(7)[:3],
+        "Avg Rebuffering Ratio (realtime, 2026-09-11 → 2026-09-18)",
+        *exports.headings(7)[4:],
+    ]
     assert lines[1].startswith("Worst,GB1,GB,2.4000,")
     assert "2026-09-11 - 2026-09-18 UTC" in lines[1]
     assert lines[1].endswith("a summary")
@@ -290,7 +296,7 @@ def test_the_workbook_puts_each_section_on_its_own_sheet() -> None:
     assert exports.FAILED_SHEET in workbook.sheetnames
     assert exports.ABOUT_SHEET in workbook.sheetnames
     assert [str(cell.value) for cell in next(sheet.iter_rows(max_row=1))] == list(
-        exports.headings(7)
+        exports.headings(7, source="realtime", dates="2026-09-11 → 2026-09-18")
     )
     assert sheet.freeze_panes == "A2"
 

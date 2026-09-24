@@ -10,7 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { endpoints } from '../api/client'
 import { BatchSettingsPanel } from '../components/BatchSettingsPanel'
-import { CascadaSession } from '../components/CascadaSession'
+import { CascadaSession, ProviderMapPanel } from '../components/CascadaSession'
 import { DrmSettingsPanel } from '../components/DrmSettingsPanel'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import {
@@ -143,6 +143,9 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
       'cascada_window_days',
       'cascada_scan_concurrency',
       'cascada_cache_ttl_minutes',
+      'cascada_historical_min_days',
+      'cascada_historical_batch_size',
+      'cascada_provider_map_ttl_hours',
     ],
   },
 ]
@@ -401,7 +404,12 @@ export function SettingsTab() {
 
         {/* The session is not a threshold: it is stored and validated on its own, outside
             the save bar, because pasting one has to take effect immediately. */}
-        {tab === 'cascada' && <CascadaSession />}
+        {tab === 'cascada' && (
+          <div className="space-y-4">
+            <CascadaSession />
+            <ProviderMapPanel />
+          </div>
+        )}
 
         {error && <InlineAlert tone="error">{error}</InlineAlert>}
       </PageBody>

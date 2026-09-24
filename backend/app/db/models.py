@@ -466,6 +466,37 @@ class CascadaSample(Base):
     )
 
 
+class CascadaDailySample(Base):
+    """One channel's historical (per-day) rebuffering window.
+
+    Its own table, so a realtime window and a historical one for the same channel can never
+    overwrite each other: `cascada_samples` holds the per-minute realtime record the batch
+    pipeline reads, and this one holds one value per UTC day. The window columns are the first
+    and last day's 00:00 UTC, both days included.
+    """
+
+    __tablename__ = _t("cascada_daily_samples")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    service_id: Mapped[str] = mapped_column(String(64), index=True)
+    channel_name: Mapped[str] = mapped_column(String(255))
+    country: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
+    window_from: Mapped[int] = mapped_column(BigInteger)
+    window_to: Mapped[int] = mapped_column(BigInteger)
+    fetched_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, index=True
+    )
+    # Percentages, as CASCADA reports them, over the days that carried a value.
+    average_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    days_with_data: Mapped[int] = mapped_column(Integer, default=0)
+    # The days, the provider the call was made with and CASCADA's name for the channel.
+    series: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        Index("ix_cascada_daily_window", "service_id", "window_from", "window_to", unique=True),
+    )
+
+
 class CascadaErrorSample(Base):
     """One channel's CASCADA error window, kept for the same reason `CascadaSample` is.
 

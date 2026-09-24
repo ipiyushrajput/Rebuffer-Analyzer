@@ -47,6 +47,28 @@ COUNTRY_COLUMNS = (
     "previous_week_avg_pct",
 )
 
+# A historical scan measures days, so the two count columns say days. The order is the same,
+# so a spreadsheet built on one report reads the other.
+HISTORICAL_COUNTRY_COLUMNS = (
+    "channel_name",
+    "channel_id",
+    "country",
+    "playback_url",
+    "avg_rebuffering_ratio_pct",
+    "max_rebuffering_ratio_pct",
+    "max_day_utc",
+    "days_above_threshold",
+    "days_with_data",
+    "percent_days_above_threshold",
+    "previous_week_avg_pct",
+)
+
+# Channels a historical scan could not judge, listed after the table and never dropped.
+NOT_JUDGED_COLUMNS = ("channel_name", "channel_id", "status", "reason")
+NOT_JUDGED_SHEET = "not_judged"
+
+HISTORICAL_CHANNEL_COLUMNS = ("day_utc", "rebuffering_ratio_pct", "above_threshold")
+
 ABOUT_SHEET = "about"
 
 
@@ -76,7 +98,7 @@ def _country_row(entry: ChannelWindow, playback_url: str) -> list[Any]:
         playback_url,
         _pct(stats.average_pct),
         _pct(stats.max_pct),
-        stats.max_at.isoformat() if stats.max_at else "",
+        _max_at(entry),
         stats.minutes_above,
         stats.minutes_counted,
         _pct(stats.percent_time_above),
@@ -84,21 +106,46 @@ def _country_row(entry: ChannelWindow, playback_url: str) -> list[Any]:
     ]
 
 
+def _max_at(entry: ChannelWindow) -> str:
+    """When the maximum was: a minute for realtime, a day for historical."""
+    moment = entry.stats.max_at
+    if moment is None:
+        return ""
+    return moment.date().isoformat() if entry.granularity == "day" else moment.isoformat()
+
+
 def _country_about(
-    *, country: str, window: Window, threshold_pct: float, rows: int, partial: bool, scanned: str
+    *,
+    country: str,
+    window: Window,
+    threshold_pct: float,
+    rows: int,
+    partial: bool,
+    scanned: str,
+    source: str = "realtime",
+    window_label: str = "",
+    min_days: int | None = None,
 ) -> list[list[str]]:
     """What the table above was measured against, as label/value pairs."""
     about = [
         ["field", "value"],
         ["report", "Samsung TV Plus — CASCADA rebuffering report"],
         ["country", country],
-        ["window_utc", describe_window(window)],
+        ["source", _source_note(source)],
+        ["window_utc", window_label if source == "historical" else describe_window(window)],
         ["threshold_pct", f"{threshold_pct:.4f}"],
         ["selection", "Channels whose average over the window is above the threshold"],
         ["channels_listed", str(rows)],
         ["scan", scanned],
         ["scope", _scope_note()],
     ]
+    if source == "historical" and min_days is not None:
+        about.append(
+            [
+                "minimum_days_with_data",
+                f"{min_days} of 7; a channel with fewer is listed as insufficient data",
+            ]
+        )
     if partial:
         about.append(
             [
@@ -110,6 +157,16 @@ def _country_about(
     return about
 
 
+def _source_note(source: str) -> str:
+    if source == "historical":
+        return "historical — one value per UTC day, the last 7 complete days"
+    return "realtime — one value per minute"
+
+
+def _columns(source: str) -> tuple[str, ...]:
+    return HISTORICAL_COUNTRY_COLUMNS if source == "historical" else COUNTRY_COLUMNS
+
+
 def country_csv(
     entries: list[ChannelWindow],
     *,
@@ -119,14 +176,24 @@ def country_csv(
     partial: bool,
     scanned: str,
     urls: dict[str, str] | None = None,
+    source: str = "realtime",
+    window_label: str = "",
+    not_judged: list[list[str]] | None = None,
+    min_days: int | None = None,
 ) -> str:
     """One country's rebuffering channels, worst first, as a table with its header on row 1."""
     playback = urls or {}
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(list(COUNTRY_COLUMNS))
+    writer.writerow(list(_columns(source)))
     for entry in entries:
         writer.writerow(_country_row(entry, playback.get(entry.service_id, "")))
+
+    if not_judged:
+        writer.writerow([])
+        writer.writerow(["Channels not judged"])
+        writer.writerow(list(NOT_JUDGED_COLUMNS))
+        writer.writerows(not_judged)
 
     # The context follows the data, so row 1 is still the header a spreadsheet reads.
     writer.writerow([])
@@ -138,6 +205,9 @@ def country_csv(
             rows=len(entries),
             partial=partial,
             scanned=scanned,
+            source=source,
+            window_label=window_label,
+            min_days=min_days,
         )
     )
     return buffer.getvalue()
@@ -152,6 +222,10 @@ def country_xlsx(
     partial: bool,
     scanned: str,
     urls: dict[str, str] | None = None,
+    source: str = "realtime",
+    window_label: str = "",
+    not_judged: list[list[str]] | None = None,
+    min_days: int | None = None,
 ) -> bytes:
     from openpyxl import Workbook
 
@@ -159,11 +233,18 @@ def country_xlsx(
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "rebuffering"
-    sheet.append(list(COUNTRY_COLUMNS))
+    sheet.append(list(_columns(source)))
     for entry in entries:
         sheet.append(_country_row(entry, playback.get(entry.service_id, "")))
     # The header stays visible while a long country is scrolled.
     sheet.freeze_panes = "A2"
+
+    if not_judged:
+        skipped = workbook.create_sheet(NOT_JUDGED_SHEET)
+        skipped.append(list(NOT_JUDGED_COLUMNS))
+        for line in not_judged:
+            skipped.append(line)
+        skipped.freeze_panes = "A2"
 
     about = workbook.create_sheet(ABOUT_SHEET)
     for line in _country_about(
@@ -173,6 +254,9 @@ def country_xlsx(
         rows=len(entries),
         partial=partial,
         scanned=scanned,
+        source=source,
+        window_label=window_label,
+        min_days=min_days,
     ):
         about.append(line)
 
@@ -251,6 +335,83 @@ def channel_xlsx(entry: ChannelWindow) -> bytes:
     for line in _channel_about(entry):
         about.append(line)
 
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+# -- one channel's historical days -------------------------------------------
+
+
+def _day_row(entry: ChannelWindow, point: Any) -> list[Any]:
+    above = (
+        "" if point.value is None else ("yes" if point.value > entry.stats.threshold_pct else "no")
+    )
+    return [point.at.date().isoformat(), _pct(point.value), above]
+
+
+def _historical_about(entry: ChannelWindow) -> list[list[str]]:
+    stats, details = entry.stats, entry.details
+    returned = details.get("returned_days") or {}
+    about = [
+        ["field", "value"],
+        ["report", "Samsung TV Plus — CASCADA historical rebuffering report"],
+        ["source", _source_note("historical")],
+        ["channel", entry.channel_name],
+        ["service_id", entry.service_id],
+        ["country", entry.country],
+        ["cascada_channel_name", str(details.get("cascada_channel_name", ""))],
+        ["provider_name", str(details.get("provider_name", ""))],
+        ["window_utc", str(returned.get("label", ""))],
+        ["threshold_pct", f"{stats.threshold_pct:.4f}"],
+        ["average_pct", _pct(stats.average_pct)],
+        ["maximum_pct", _pct(stats.max_pct)],
+        ["maximum_day_utc", _max_at(entry)],
+        ["days_above_threshold", str(stats.minutes_above)],
+        [
+            "days_with_data",
+            f"{details.get('days_with_data', 0)} of {details.get('days_expected', 7)}",
+        ],
+        [
+            "minimum_days_with_data",
+            f"{details.get('min_days', '')}"
+            + (
+                "; below it, so this channel is insufficient data"
+                if details.get("insufficient")
+                else ""
+            ),
+        ],
+        ["measured_at_utc", entry.fetched_at.isoformat()],
+        ["scope", _scope_note()],
+    ]
+    return about
+
+
+def historical_csv(entry: ChannelWindow) -> str:
+    """One channel: one row per day, a day with no data left empty, then the context."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(list(HISTORICAL_CHANNEL_COLUMNS))
+    for point in entry.origin:
+        writer.writerow(_day_row(entry, point))
+    writer.writerow([])
+    writer.writerows(_historical_about(entry))
+    return buffer.getvalue()
+
+
+def historical_xlsx(entry: ChannelWindow) -> bytes:
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    days = workbook.active
+    days.title = "days"
+    days.append(list(HISTORICAL_CHANNEL_COLUMNS))
+    for point in entry.origin:
+        days.append([point.at.date().isoformat(), point.value, _day_row(entry, point)[2] or None])
+    days.freeze_panes = "A2"
+    about = workbook.create_sheet(ABOUT_SHEET)
+    for line in _historical_about(entry):
+        about.append(line)
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
@@ -360,9 +521,12 @@ def errors_xlsx(entry: ErrorWindow) -> bytes:
 # -- filenames ---------------------------------------------------------------
 
 
-def country_filename(country: str, fmt: str, now: dt.datetime | None = None) -> str:
+def country_filename(
+    country: str, fmt: str, now: dt.datetime | None = None, *, source: str = "realtime"
+) -> str:
     stamp = (now or dt.datetime.now(dt.UTC)).strftime("%Y%m%d")
-    return f"rebuffering_report_{country.upper()}_{stamp}.{fmt}"
+    kind = "historical_" if source == "historical" else ""
+    return f"rebuffering_report_{kind}{country.upper()}_{stamp}.{fmt}"
 
 
 def channel_filename(

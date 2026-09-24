@@ -9,7 +9,7 @@ the same batch.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
@@ -116,13 +116,15 @@ async def estimate(country: str = Query(..., min_length=2, max_length=2)) -> dic
 
 class BatchIn(BaseModel):
     country: str = Field(..., min_length=2, max_length=2)
+    # The button that was pressed. A caller that omits it starts a realtime batch.
+    source: Literal["realtime", "historical"] = "realtime"
 
 
 @router.post("/batches", status_code=201)
 async def create_batch(body: BatchIn) -> dict[str, Any]:
     """Start a batch. A country that already has one running is refused with that one's id."""
     try:
-        return await runner.start(body.country, kind=store.MANUAL)
+        return await runner.start(body.country, kind=store.MANUAL, source=body.source)
     except cat.CatalogueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except runner.BatchError as exc:
@@ -135,12 +137,14 @@ async def create_batch(body: BatchIn) -> dict[str, Any]:
 
 @router.post("/batches/{batch_id}/rerun", status_code=201)
 async def rerun_batch(batch_id: str) -> dict[str, Any]:
-    """Run the same country again, with today's settings."""
+    """Run the same country again, from the same source, with today's settings."""
     current = await store.read(batch_id)
     if current is None:
         raise HTTPException(status_code=404, detail="That batch does not exist.")
     try:
-        return await runner.start(current["country"], kind=store.MANUAL)
+        return await runner.start(
+            current["country"], kind=store.MANUAL, source=current.get("data_source", "realtime")
+        )
     except runner.BatchError as exc:
         existing = await store.running_for(current["country"])
         raise HTTPException(

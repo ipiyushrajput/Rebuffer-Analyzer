@@ -58,6 +58,9 @@ def build(
     """One channel's summary cell."""
     if status == "NO_URL":
         return NO_URL
+    if status in ("INSUFFICIENT_DATA", "NO_PROVIDER"):
+        # Judged by nobody: the reason is the whole statement.
+        return error or NOT_ANALYSED
     if status == "FAILED":
         return f"The analysis failed: {error or 'no reason was recorded'}."
     if status == "SKIPPED":
@@ -81,6 +84,12 @@ def build(
 
     if opened:
         parts.append(f"{len(opened)} incident(s) opened during the run.")
+
+    coverage = (correlation or {}).get("coverage") or ""
+    if coverage.startswith("Not correlated"):
+        parts.append(coverage)
+    if (correlation or {}).get("error"):
+        parts.append(str((correlation or {})["error"]))
 
     windows = (correlation or {}).get("windows") or []
     if windows:

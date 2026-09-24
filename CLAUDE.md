@@ -78,7 +78,8 @@ backend/app/
   bulk/       csv/xlsx/json parsing with column alias mapping
   db/         SQLAlchemy models, repository, session factory
   tvplus/     the live channel catalogue: country table, dbconnect mapping, row parser
-  cascada/    the field rebuffering metric: auth, client, series, store, scan, exports
+  cascada/    the field metrics: auth, client, series, store, scan, exports, errors,
+              historical (the daily source), providers (channel → provider map), sources
   batch/      the automated pipeline: settings, store, runner, scheduler, aging,
               correlate, summary, reporting, exports
 frontend/src/
@@ -232,6 +233,22 @@ frontend/src/
   the batch pipeline reads as the rebuffering record. Both CASCADA charts draw the comparison
   week seven days late with a second, top axis naming its dates over the same range, and the
   tooltip reads the raw minute under the pointer, never the `lttb` point kept for drawing.
+- **Rebuffering has two CASCADA sources and every average names its own.** `realtime` is the
+  per-minute window to now (`client.window_for`, unchanged); `historical` is one value per UTC
+  day for the last seven complete days, today excluded (`app/cascada/historical.py`, POST,
+  `to` = 00:00 UTC yesterday, both ends inclusive). The switch lives in
+  `sources.get_channel_rebuffering` and `service.start_scan(source=)` only, and both produce a
+  `ChannelWindow`, so selection, reports and the Bulk hand-off are shared. The historical
+  request needs each channel's `provider_name`, read from CASCADA's channel-group list:
+  entries with the exact group "Master Group - Local Channel Included" **and** `on_service`
+  true, joined on `channel_id`, never a name; an ambiguous id takes the first provider by name
+  and is listed, a missing one is "provider not found" and listed. Fewer than
+  `cascada_historical_min_days` days of data is insufficient data — never flagged, never
+  passed. Historical windows live in `cascada_daily_samples`. A batch records its source in
+  `settings_snapshot["data_source"]`; scheduled runs default to `scheduled_data_source`
+  (historical). A batch's spike correlation reads the aging runs the **previous** batch
+  started, because those watched the week this batch measured, from realtime per-minute data
+  read at report time; an aging run that started before that window is stated, not correlated.
 - **A batch calls the engines, it does not reimplement them.** `app/batch/` composes what
   already exists: `app.cascada.service` for the country listing, the scan and the averaging,
   `app.analysis` through `job_manager.submit()` for every analysis and aging run. A second

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import select
@@ -40,6 +40,12 @@ class ChannelWindow:
     truncated: bool
     # Empty when the window was fetched in this request; set when it was read from the store.
     cached: bool = False
+    # Which CASCADA source measured this window. A realtime window is per minute; a historical
+    # one carries one point per UTC day in `origin`, and its `Stats.minutes_*` fields count
+    # days. `details` holds what only a historical window has (days with data, the provider).
+    source: str = "realtime"
+    granularity: str = "minute"
+    details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def age_minutes(self) -> float:
@@ -55,6 +61,9 @@ class ChannelWindow:
             "truncated": self.truncated,
             "fetched_at": self.fetched_at.isoformat(),
             "cached": self.cached,
+            "source": self.source,
+            "granularity": self.granularity,
+            **self.details,
         }
 
     def as_dict(self) -> dict[str, Any]:

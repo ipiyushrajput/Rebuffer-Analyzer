@@ -18,6 +18,7 @@ import {
   endpoints,
   type Batch,
   type BatchEstimate,
+  type DataSource,
   type CatalogueChannel,
   type CataloguePage,
 } from '../api/client'
@@ -109,6 +110,8 @@ export function AutomatedBatchTab() {
   const [country, setCountry] = useState('GB')
   const [search, setSearch] = useState<Search | null>(null)
   const [confirming, setConfirming] = useState<BatchEstimate | null>(null)
+  // The button that was pressed, carried through the confirmation to the start.
+  const [source, setSource] = useState<DataSource>('historical')
   const [openId, setOpenId] = useState<string | null>(null)
   const [logFor, setLogFor] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -162,7 +165,7 @@ export function AutomatedBatchTab() {
   })
 
   const start = useMutation({
-    mutationFn: () => endpoints.startBatch(country),
+    mutationFn: () => endpoints.startBatch(country, source),
     onSuccess: (batch) => {
       setError(null)
       setConfirming(null)
@@ -278,19 +281,34 @@ export function AutomatedBatchTab() {
                 {load.isPending && !page ? 'Searching' : 'Search'}
               </button>
 
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={estimate.isPending || start.isPending}
-                onClick={() => (existing ? setScreen('playground') : estimate.mutate())}
-              >
-                <IconBulk size={15} />
-                {existing
-                  ? 'Open the running batch'
-                  : estimate.isPending
-                    ? 'Checking'
-                    : 'Start Batch'}
-              </button>
+              {existing ? (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => setScreen('playground')}
+                >
+                  <IconBulk size={15} />
+                  Open the running batch
+                </button>
+              ) : (
+                (['realtime', 'historical'] as const).map((choice) => (
+                  <button
+                    key={choice}
+                    type="button"
+                    className="btn-primary"
+                    disabled={estimate.isPending || start.isPending}
+                    onClick={() => {
+                      setSource(choice)
+                      estimate.mutate()
+                    }}
+                  >
+                    <IconBulk size={15} />
+                    {estimate.isPending && source === choice
+                      ? 'Checking'
+                      : `Start batch (${choice})`}
+                  </button>
+                ))
+              )}
             </div>
 
             {existing && (
@@ -312,7 +330,7 @@ export function AutomatedBatchTab() {
           {confirming && (
             <Card>
               <CardHeader
-                title={`Start a batch for ${confirming.country}?`}
+                title={`Start a ${source} batch for ${confirming.country}?`}
                 subtitle="This runs on the analyzer. You can close this tab; the batch carries on."
               />
               <div className="space-y-3 px-5 pb-5">
@@ -335,7 +353,11 @@ export function AutomatedBatchTab() {
                   </div>
                   <div>
                     <dt className="field-label">Rebuffering window</dt>
-                    <dd className="font-mono text-body text-ink">{confirming.window_days} days</dd>
+                    <dd className="font-mono text-body text-ink">
+                      {source === 'historical'
+                        ? '7 complete UTC days, one value per day'
+                        : `${confirming.window_days} days to now, per minute`}
+                    </dd>
                   </div>
                 </dl>
 
@@ -467,6 +489,7 @@ export function AutomatedBatchTab() {
                     <tr>
                       <th>Country</th>
                       <th>Type</th>
+                      <th>Source</th>
                       <th>Window covered</th>
                       <th>Run</th>
                       <th>Status</th>
@@ -488,6 +511,15 @@ export function AutomatedBatchTab() {
                               className={batch.kind === 'scheduled' ? 'chip-violet' : 'chip-neutral'}
                             >
                               {batch.kind}
+                            </span>
+                          </td>
+                          <td>
+                            <span
+                              className={
+                                batch.data_source === 'historical' ? 'chip-blue' : 'chip-neutral'
+                              }
+                            >
+                              {batch.data_source}
                             </span>
                           </td>
                           <td className="font-mono text-micro text-ink-muted">
@@ -590,10 +622,10 @@ export function AutomatedBatchTab() {
           {openId && detail.data && (
             <Card>
               <CardHeader
-                title={`${detail.data.country} · ${detail.data.kind} · ${detail.data.status.replace(/_/g, ' ')}`}
+                title={`${detail.data.country} · ${detail.data.kind} · ${detail.data.data_source} · ${detail.data.status.replace(/_/g, ' ')}`}
                 subtitle={
                   detail.data.error ??
-                  `${detail.data.channels_above} channel(s) above threshold of ${detail.data.channels_scanned} scanned.`
+                  `${detail.data.channels_above} channel(s) above threshold of ${detail.data.channels_scanned} scanned, from ${detail.data.data_source} data, ${dateOnly(detail.data.window_from)} → ${dateOnly(detail.data.window_to)} UTC.`
                 }
                 actions={
                   <button
@@ -617,7 +649,10 @@ export function AutomatedBatchTab() {
                       <tr>
                         <th>Channel</th>
                         <th>Service ID</th>
-                        <th className="text-right">Avg rebuffering</th>
+                        <th className="text-right">
+                          Avg Rebuffering Ratio ({detail.data.data_source},{' '}
+                          {dateOnly(detail.data.window_from)} → {dateOnly(detail.data.window_to)})
+                        </th>
                         <th>Status</th>
                         <th>What the analysis found</th>
                       </tr>

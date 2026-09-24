@@ -18,7 +18,7 @@ states the values that produced it.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -61,6 +61,11 @@ class BatchSettings(BaseModel):
     # nothing is ever deleted unless an operator asks for it.
     retention_per_country: int = Field(default=0, ge=0, le=1000)
 
+    # Where a scheduled batch reads rebuffering from. Historical is seven complete days, one
+    # value per day; realtime is the rolling per-minute window. A batch started by hand names
+    # its source on the button, so this governs scheduled and automated runs only.
+    scheduled_data_source: Literal["realtime", "historical"] = Field(default="historical")
+
     def analysis_duration_s(self) -> float:
         return self.analysis_duration_minutes * 60.0
 
@@ -90,6 +95,7 @@ class BatchSettings(BaseModel):
             "threshold_pct": limits.cascada_rebuffering_threshold_pct,
             "window_days": limits.cascada_window_days,
             "scan_concurrency": limits.cascada_scan_concurrency,
+            "historical_min_days": limits.cascada_historical_min_days,
             "captured_at": dt.datetime.now(dt.UTC).isoformat(),
         }
 

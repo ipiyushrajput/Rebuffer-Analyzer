@@ -14,7 +14,9 @@ import {
   PREVIOUS_WEEK,
   THIS_WEEK,
   cascadaChartOption,
+  noDataBands,
   tooltipLines,
+  utcDay,
 } from './CascadaChart'
 import {
   WEEK_MS,
@@ -228,5 +230,76 @@ describe('how error figures are written', () => {
     expect(formatChange(12.345)).toBe('+12.3 %')
     expect(formatChange(-39.7)).toBe('-39.7 %')
     expect(formatChange(null)).toBe('—')
+  })
+})
+
+describe('the historical chart, one value per UTC day', () => {
+  const day = (d: number, value: number | null): CascadaPoint => ({
+    at: `2026-09-${String(d).padStart(2, '0')}T00:00:00+00:00`,
+    value,
+  })
+  const days = [day(16, 0.1), day(17, null), day(18, 0.3), day(19, 0.2), day(20, 0.26), day(21, null), day(22, 0.1)]
+  const option = cascadaChartOption({
+    origin: days,
+    comparison: [],
+    showComparison: true,
+    threshold: 0.25,
+    yName: 'rebuffering ratio (%)',
+    formatValue: (value) => `${value} %`,
+    granularity: 'day',
+  })
+  const series = option.series as {
+    name: string
+    showSymbol?: boolean
+    markArea?: { data: { xAxis: number; name?: string }[][] }
+    data: [number, number | null][]
+  }[]
+  const axes = option.xAxis as { min: number; max: number; minInterval: number }[]
+
+  it('draws one axis, no comparison and no zoom', () => {
+    expect(axes).toHaveLength(1)
+    expect(option.dataZoom).toEqual([])
+    expect(series.map((item) => item.name)).toEqual(['Rebuffering ratio', ABOVE_THRESHOLD])
+  })
+
+  it('puts a marker on every day and ticks on whole days, padded half a day either side', () => {
+    expect(series[0].showSymbol).toBe(true)
+    expect(axes[0].minInterval).toBe(24 * 60 * 60 * 1000)
+    expect(axes[0].min).toBe(Date.UTC(2026, 8, 15, 12))
+    expect(axes[0].max).toBe(Date.UTC(2026, 8, 22, 12))
+  })
+
+  it('leaves a null day as a gap and names it with a shaded no-data band', () => {
+    expect(series[0].data[1][1]).toBeNull()
+    const bands = series[0].markArea?.data ?? []
+    expect(bands).toHaveLength(2)
+    expect(bands[0][0].name).toBe('no data')
+    expect(noDataBands(days)).toEqual(bands)
+  })
+
+  it('marks the days above the threshold for the red series and nothing else', () => {
+    expect(series[1].data.map((point) => point[1])).toEqual([null, null, 0.3, null, 0.26, null, null])
+  })
+
+  it('reads the day under the pointer and says no data for an empty one', () => {
+    const at = (d: number) => Date.UTC(2026, 8, d)
+    const lines = (position: number) =>
+      tooltipLines({
+        at: position,
+        origin: new Map(days.map((point) => [new Date(point.at).valueOf(), point.value])),
+        comparison: new Map(),
+        withComparison: false,
+        threshold: 0.25,
+        formatValue: (value) => `${value} %`,
+        granularity: 'day',
+      })
+
+    expect(lines(at(18) + 5 * 60 * 60 * 1000)).toEqual([
+      '2026-09-18 UTC',
+      'Rebuffering ratio: 0.3 %',
+      'Above threshold: 0.3 %',
+    ])
+    expect(lines(at(17))).toEqual(['2026-09-17 UTC', 'Rebuffering ratio: no data'])
+    expect(utcDay(at(22))).toBe('2026-09-22')
   })
 })

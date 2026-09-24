@@ -15,6 +15,12 @@
  *
  * Every row also opens the channel's playback errors: the same CASCADA call with
  * `target_metrics[]=error_count`, over the same window, with the same previous-week overlay.
+ *
+ * A scan reads one of two sources. Realtime is the per-minute window to now; historical is one
+ * value per UTC day for the last seven complete days, a batch of channels per call. Both feed
+ * the same selection, report and Bulk hand-off, and the Avg column names the source and the
+ * dates of whatever it shows. A historical scan also lists what it could not judge: channels
+ * with too few days of data, and channels CASCADA lists no provider for.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -27,6 +33,7 @@ import {
   type CascadaErrorChannel,
   type CascadaScan,
   type CatalogueChannel,
+  type DataSource,
   type CataloguePage,
 } from '../api/client'
 import { CascadaSessionBanner } from '../components/CascadaSession'
@@ -91,6 +98,8 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
   const [filter, setFilter] = useState('')
   const [scanId, setScanId] = useState<string | null>(null)
   const [open, setOpen] = useState<CascadaChannelQuery | null>(null)
+  // Which source the Rebuffering Data panel shows; it opens on the last scan's.
+  const [panelSource, setPanelSource] = useState<DataSource>('realtime')
   const [openErrors, setOpenErrors] = useState<CascadaChannelQuery | null>(null)
   const [showComparison, setShowComparison] = useState(true)
   const [handoffNote, setHandoffNote] = useState<string | null>(null)
@@ -132,7 +141,7 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
   // --- the scan -------------------------------------------------------------
 
   const startScan = useMutation({
-    mutationFn: () => endpoints.startCascadaScan({ country }),
+    mutationFn: (source: DataSource) => endpoints.startCascadaScan({ country, source }),
     onSuccess: (scan: CascadaScan) => setScanId(scan.scan_id),
   })
 
@@ -167,8 +176,24 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
   const channel = useQuery({
     queryKey: ['cascada-channel', open?.service_id, open?.channel_name],
     queryFn: () => endpoints.cascadaChannel(open as CascadaChannelQuery),
-    enabled: open !== null,
+    enabled: open !== null && panelSource === 'realtime',
   })
+
+  const historicalChannel = useQuery({
+    queryKey: ['cascada-historical', open?.service_id, open?.channel_name],
+    queryFn: () => endpoints.cascadaHistorical(open as CascadaChannelQuery),
+    enabled: open !== null && panelSource === 'historical',
+  })
+  const panel = panelSource === 'historical' ? historicalChannel : channel
+
+  /** What the scan could not judge, by service id, so the row says so in place of a number. */
+  const notJudged = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const row of scanState?.insufficient ?? [])
+      map.set(row.service_id, `insufficient data (${row.days_with_data}/${row.days_expected} days)`)
+    for (const row of scanState?.no_provider ?? []) map.set(row.service_id, 'provider not found')
+    return map
+  }, [scanState])
 
   const errorData = useQuery({
     queryKey: ['cascada-errors', openErrors?.service_id, openErrors?.channel_name],
@@ -220,6 +245,7 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
     isSessionError(scanError) ||
     isSessionError(channel.error) ||
     isSessionError(errorData.error) ||
+    isSessionError(historicalChannel.error) ||
     scanState?.status === 'AUTH_FAILED'
 
   const pageLabel = page
@@ -248,7 +274,13 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
           <CascadaSessionBanner
             detail={
               scanState?.error ??
-              message(scanError ?? channel.error ?? errorData.error ?? 'CASCADA refused the call.')
+              message(
+                scanError ??
+                  channel.error ??
+                  historicalChannel.error ??
+                  errorData.error ??
+                  'CASCADA refused the call.',
+              )
             }
           />
         )}
@@ -320,8 +352,10 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
               title="Rebuffering scan"
               subtitle={
                 scanState
-                  ? `Every channel in ${scanState.country}, measured over ${scanState.window.days.toFixed(1)} days to ${utcLabel(scanState.window.end)} UTC.`
-                  : 'Measures every channel in this country, across every page, and marks the ones whose average is above the threshold.'
+                  ? scanState.source === 'historical'
+                    ? `Every channel in ${scanState.country}, historical: one value per UTC day, ${scanState.window_label}.`
+                    : `Every channel in ${scanState.country}, realtime: measured over ${scanState.window.days.toFixed(1)} days to ${utcLabel(scanState.window.end)} UTC.`
+                  : 'Measures every channel in this country, across every page, and marks the ones whose average is above the threshold. Realtime reads the per-minute window to now; historical reads the last 7 complete days, one value per day.'
               }
               actions={
                 <div className="flex flex-wrap items-center gap-2">
@@ -329,13 +363,25 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
                     type="button"
                     className="btn-primary btn-sm"
                     disabled={running || startScan.isPending}
-                    onClick={() => startScan.mutate()}
+                    onClick={() => startScan.mutate('realtime')}
                   >
-                    {running
+                    {running && scanState?.source === 'realtime'
                       ? 'Scanning'
-                      : startScan.isPending
+                      : startScan.isPending && startScan.variables === 'realtime'
                         ? 'Starting'
-                        : 'Scan rebuffering (all channels)'}
+                        : 'Scan rebuffering (realtime)'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary btn-sm"
+                    disabled={running || startScan.isPending}
+                    onClick={() => startScan.mutate('historical')}
+                  >
+                    {running && scanState?.source === 'historical'
+                      ? 'Scanning'
+                      : startScan.isPending && startScan.variables === 'historical'
+                        ? 'Starting'
+                        : 'Scan rebuffering (historical)'}
                   </button>
                   {running && (
                     <button
@@ -371,6 +417,17 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
                     {scanState.failures.length > 0 && (
                       <span className="chip-violet">{scanState.failures.length} failed</span>
                     )}
+                    {scanState.insufficient_count > 0 && (
+                      <span className="chip-neutral">
+                        {scanState.insufficient_count} insufficient data
+                      </span>
+                    )}
+                    {scanState.no_provider.length > 0 && (
+                      <span className="chip-neutral">
+                        {scanState.no_provider.length} provider not found
+                      </span>
+                    )}
+                    <span className="chip-neutral">{scanState.source}</span>
                     <span className="font-mono text-micro text-ink-muted">
                       status {scanState.status}
                     </span>
@@ -413,6 +470,54 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
                     </InlineAlert>
                   )}
                   {handoffNote && <InlineAlert tone="info">{handoffNote}</InlineAlert>}
+
+                  {scanState.insufficient.length > 0 && (
+                    <details className="rounded-tile border border-surface-line px-3.5 py-2.5">
+                      <summary className="cursor-pointer text-small font-semibold text-ink-soft">
+                        {scanState.insufficient.length} channel(s) with too few days to judge
+                      </summary>
+                      <ul className="mt-2 space-y-1">
+                        {scanState.insufficient.map((row) => (
+                          <li key={row.service_id} className="text-micro text-ink-muted">
+                            <span className="font-mono">{row.service_id}</span> {row.channel_name}{' '}
+                            — {row.days_with_data} of {row.days_expected} day(s) carry a value;
+                            neither flagged nor passed
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  {scanState.no_provider.length > 0 && (
+                    <details className="rounded-tile border border-surface-line px-3.5 py-2.5">
+                      <summary className="cursor-pointer text-small font-semibold text-ink-soft">
+                        {scanState.no_provider.length} channel(s) with no provider in CASCADA
+                      </summary>
+                      <ul className="mt-2 space-y-1">
+                        {scanState.no_provider.map((row) => (
+                          <li key={row.service_id} className="text-micro text-ink-muted">
+                            <span className="font-mono">{row.service_id}</span> {row.channel_name}{' '}
+                            — {row.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  {scanState.ambiguous.length > 0 && (
+                    <details className="rounded-tile border border-surface-line px-3.5 py-2.5">
+                      <summary className="cursor-pointer text-small font-semibold text-ink-soft">
+                        {scanState.ambiguous.length} channel(s) listed under more than one provider
+                      </summary>
+                      <ul className="mt-2 space-y-1">
+                        {scanState.ambiguous.map((row) => (
+                          <li key={row.service_id} className="text-micro text-ink-muted">
+                            <span className="font-mono">{row.service_id}</span> {row.channel_name}{' '}
+                            — measured with <span className="font-mono">{row.chosen}</span> of{' '}
+                            {row.candidates.join(', ')}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
 
                   {scanState.failures.length > 0 && (
                     <details className="rounded-tile border border-surface-line px-3.5 py-2.5">
@@ -498,7 +603,11 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
                     <th>Service ID</th>
                     <th>Country</th>
                     <th>Channel name</th>
-                    <th className="text-right">Avg rebuffering (7d)</th>
+                    <th className="text-right">
+                      {scanState
+                        ? `Avg Rebuffering Ratio (${scanState.source}, ${scanState.window_label})`
+                        : 'Avg Rebuffering Ratio'}
+                    </th>
                     <th className="text-right">Actions</th>
                   </tr>
                 </thead>
@@ -510,8 +619,10 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
                       key={`${item.service_id}-${item.number}-${index}`}
                       channel={item}
                       measured={measured.get(item.service_id) ?? null}
+                      notJudged={notJudged.get(item.service_id) ?? null}
                       onOpen={() => {
                         setOpenErrors(null)
+                        setPanelSource(scanState?.source ?? 'realtime')
                         setOpen({
                           service_id: item.service_id,
                           channel_name: item.name,
@@ -551,11 +662,11 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
       {open && (
         <RebufferingModal
           query={open}
-          channel={(channel.data as CascadaChannel | undefined) ?? null}
-          loading={channel.isPending}
-          error={
-            channel.isError && !isSessionError(channel.error) ? message(channel.error) : null
-          }
+          source={panelSource}
+          onSourceChange={setPanelSource}
+          channel={(panel.data as CascadaChannel | undefined) ?? null}
+          loading={panel.isPending}
+          error={panel.isError && !isSessionError(panel.error) ? message(panel.error) : null}
           showComparison={showComparison}
           onToggleComparison={setShowComparison}
           onClose={() => setOpen(null)}
@@ -598,6 +709,7 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
 function ChannelRow({
   channel,
   measured,
+  notJudged,
   onOpen,
   onOpenErrors,
   onAnalyse,
@@ -605,6 +717,8 @@ function ChannelRow({
   channel: CatalogueChannel
   /** The scan's result for this channel, once it has one. */
   measured: CascadaBulkRow | null
+  /** Why a historical scan could not judge this channel, when it could not. */
+  notJudged: string | null
   onOpen: () => void
   onOpenErrors: () => void
   onAnalyse: (target: 'realtime' | 'aging') => void
@@ -631,6 +745,8 @@ function ChannelRow({
             {formatPct(measured.average_pct)}
             {above && <span className="ml-1.5 chip-pink">Above threshold</span>}
           </span>
+        ) : notJudged ? (
+          <span className="text-micro text-ink-muted">{notJudged}</span>
         ) : (
           <span className="text-micro text-ink-faint">not scanned</span>
         )}
