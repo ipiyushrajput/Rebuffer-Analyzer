@@ -31,6 +31,9 @@ from app.db.models import Base
 
 ModelT = TypeVar("ModelT", bound=Base)
 
+# How many keys one `IN (...)` carries when rows are fetched back by key.
+KEY_CHUNK = 500
+
 
 async def newest_rows(
     session: AsyncSession,
@@ -38,24 +41,44 @@ async def newest_rows(
     *,
     where: tuple[ColumnElement[bool], ...] = (),
     order_by: tuple[Any, ...],
-    limit: int,
+    limit: int | None,
 ) -> list[ModelT]:
     """The first `limit` rows in `order_by` order, sorted on the primary key alone.
 
     The rows come back in the order asked for: the key query decides it, and the row query is
-    re-ordered against that rather than sorted a second time.
+    re-ordered against that rather than sorted a second time. `limit=None` returns every
+    matching row, still sorted on the key alone — a batch's channels, a batch's log.
     """
     key = inspect(model).primary_key[0]
 
-    keys = list(
-        (await session.execute(select(key).where(*where).order_by(*order_by).limit(limit)))
-        .scalars()
-        .all()
-    )
+    ordered = select(key).where(*where).order_by(*order_by, key)
+    if limit is not None:
+        ordered = ordered.limit(limit)
+    keys = list((await session.execute(ordered)).scalars().all())
     if not keys:
         return []
 
-    rows = list((await session.execute(select(model).where(key.in_(keys)))).scalars().all())
+    rows: list[ModelT] = []
+    # Fetched by key in slices, so a long IN list stays well inside any server's limits.
+    for start in range(0, len(keys), KEY_CHUNK):
+        chunk = keys[start : start + KEY_CHUNK]
+        rows.extend((await session.execute(select(model).where(key.in_(chunk)))).scalars().all())
     position = {value: index for index, value in enumerate(keys)}
     rows.sort(key=lambda row: position[getattr(row, key.name)])
     return rows
+
+
+async def sorted_rows(
+    session: AsyncSession,
+    model: type[ModelT],
+    *,
+    where: tuple[ColumnElement[bool], ...] = (),
+    order_by: tuple[Any, ...],
+) -> list[ModelT]:
+    """Every matching row in `order_by` order, the sort run on the primary key alone.
+
+    For a child table read whole — a batch's channels carry TEXT and a JSON correlation that
+    grows with the spikes a week had, so sorting the rows themselves fails with error 1038
+    exactly when a batch has the most to report.
+    """
+    return await newest_rows(session, model, where=where, order_by=order_by, limit=None)

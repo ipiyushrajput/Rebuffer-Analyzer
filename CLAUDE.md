@@ -175,7 +175,10 @@ frontend/src/
   `select(Model).order_by(...)` over a table with history fails with error 1038, "Out of sort
   memory" — for everyone, at once. `app/db/paging.py::newest_rows` sorts a projection of the
   primary key and then fetches those rows by key, and every newest-first listing goes through
-  it. A column a listing orders by carries an index: `jobs.created_at`, `batches.created_at`,
+  it. A child table read whole is no different: `sorted_rows` does the same without a limit,
+  and a batch's channels, its log and a bulk job's rows are read through it — a historical
+  batch whose channels each carried a week of spike windows in `correlation` failed its report
+  with 1038 on `ORDER BY batch_items.average_pct` before it was. A column a listing orders by carries an index: `jobs.created_at`, `batches.created_at`,
   and `(job_id, ts)` on the sample tables, which `(job_id, variant, ts)` cannot serve because
   it orders by rung first.
 - Every rule needs a positive and a negative test driven by the fault-injecting fixture

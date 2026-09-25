@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 
 from app.db import session as db_session
 from app.db.models import Batch, BatchItem, BatchLog
-from app.db.paging import newest_rows
+from app.db.paging import newest_rows, sorted_rows
 
 logger = logging.getLogger(__name__)
 
@@ -155,16 +155,13 @@ async def read(batch_id: str, with_items: bool = False) -> dict[str, Any] | None
             return None
         items: list[BatchItem] = []
         if with_items:
-            items = list(
-                (
-                    await session.execute(
-                        select(BatchItem)
-                        .where(BatchItem.batch_id == batch_id)
-                        .order_by(BatchItem.average_pct.desc())
-                    )
-                )
-                .scalars()
-                .all()
+            # Sorted on the key alone: a channel's correlation is a JSON list of every spike
+            # window in its week, and sorting whole rows ran MySQL out of sort memory (1038).
+            items = await sorted_rows(
+                session,
+                BatchItem,
+                where=(BatchItem.batch_id == batch_id,),
+                order_by=(BatchItem.average_pct.desc(),),
             )
         return batch_payload(row, items if with_items else None)
 
@@ -192,19 +189,14 @@ async def running_for(country: str) -> dict[str, Any] | None:
     second is refused and the first is offered instead.
     """
     async with db_session.session_scope() as session:
-        row = (
-            (
-                await session.execute(
-                    select(Batch)
-                    .where(Batch.country == country.upper(), Batch.status.in_(RUNNING_STATES))
-                    .order_by(Batch.created_at.desc())
-                    .limit(1)
-                )
-            )
-            .scalars()
-            .first()
+        rows = await newest_rows(
+            session,
+            Batch,
+            where=(Batch.country == country.upper(), Batch.status.in_(RUNNING_STATES)),
+            order_by=(Batch.created_at.desc(),),
+            limit=1,
         )
-        return batch_payload(row) if row is not None else None
+        return batch_payload(rows[0]) if rows else None
 
 
 async def add_items(batch_id: str, items: list[dict[str, Any]]) -> None:
@@ -249,30 +241,23 @@ async def update_item(batch_id: str, service_id: str, **fields: Any) -> None:
 async def items_for(batch_id: str, statuses: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
     """A batch's channels, worst first. `statuses` narrows to the ones still to do."""
     async with db_session.session_scope() as session:
-        query = (
-            select(BatchItem)
-            .where(BatchItem.batch_id == batch_id)
-            .order_by(BatchItem.average_pct.desc())
-        )
+        where: tuple[Any, ...] = (BatchItem.batch_id == batch_id,)
         if statuses:
-            query = query.where(BatchItem.status.in_(statuses))
-        rows = list((await session.execute(query)).scalars().all())
+            where = (*where, BatchItem.status.in_(statuses))
+        rows = await sorted_rows(
+            session, BatchItem, where=where, order_by=(BatchItem.average_pct.desc(),)
+        )
         return [item_payload(row) for row in rows]
 
 
 async def log_lines(batch_id: str, limit: int = 2000) -> list[dict[str, str]]:
     async with db_session.session_scope() as session:
-        rows = list(
-            (
-                await session.execute(
-                    select(BatchLog)
-                    .where(BatchLog.batch_id == batch_id)
-                    .order_by(BatchLog.at)
-                    .limit(limit)
-                )
-            )
-            .scalars()
-            .all()
+        rows = await newest_rows(
+            session,
+            BatchLog,
+            where=(BatchLog.batch_id == batch_id,),
+            order_by=(BatchLog.at,),
+            limit=limit,
         )
         return [
             {
@@ -309,19 +294,11 @@ async def previous_batch(country: str, before: str) -> dict[str, Any] | None:
         current = await session.get(Batch, before)
         if current is None:
             return None
-        row = (
-            (
-                await session.execute(
-                    select(Batch)
-                    .where(
-                        Batch.country == country.upper(),
-                        Batch.created_at < current.created_at,
-                    )
-                    .order_by(Batch.created_at.desc())
-                    .limit(1)
-                )
-            )
-            .scalars()
-            .first()
+        rows = await newest_rows(
+            session,
+            Batch,
+            where=(Batch.country == country.upper(), Batch.created_at < current.created_at),
+            order_by=(Batch.created_at.desc(),),
+            limit=1,
         )
-        return batch_payload(row) if row is not None else None
+        return batch_payload(rows[0]) if rows else None

@@ -178,6 +178,7 @@ def test_a_batch_from_before_the_choice_reads_as_realtime(api: TestClient) -> No
         lambda: store.create(batch_id="old", country="GB", kind=store.MANUAL, snapshot={})
     )
     assert api.get("/api/batch/batches/old").json()["data_source"] == "realtime"
+    api.portal.call(lambda: store.update("old", status=store.COMPLETED))  # type: ignore[attr-defined]
 
 
 # -- the historical scan inside a batch --------------------------------------
@@ -215,6 +216,7 @@ async def test_a_historical_batch_selects_on_the_historical_average_and_names_th
     assert items["GB4"]["status"] == runner.NO_PROVIDER
 
     row = await store.read(batch_id) or {}
+    await store.update(batch_id, status=store.COMPLETED)
     assert row["channels_above"] == 1
     # The stated window runs to the end of the last returned day.
     assert row["window_to"].startswith("2026-09-22T23:59:59")
@@ -236,6 +238,7 @@ async def test_a_realtime_batch_calls_the_scan_exactly_as_before(
     monkeypatch.setattr(cascada, "start_scan", fake_start)
     await store.create(batch_id="rt", country="GB", kind=store.MANUAL, snapshot=DEFAULTS.snapshot())
     await runner._scan("rt", "GB", DEFAULTS)
+    await store.update("rt", status=store.COMPLETED)
     assert calls == [(("GB",), {})]
 
 
@@ -380,7 +383,36 @@ async def test_the_report_reads_the_previous_batchs_aging_run_for_each_channel()
     await asyncio.sleep(0.01)
     await store.create(batch_id="week2", country="GB", kind=store.SCHEDULED, snapshot={})
 
+    for finished in ("week1", "week2"):
+        await store.update(finished, status=store.COMPLETED)
     current = await store.read("week2") or {}
     previous_id, aging = await reporting._previous_aging(current)
     assert previous_id == "week1"
     assert aging == {"GB1": "aging-from-week1"}
+
+
+def test_a_report_that_never_built_is_built_when_it_is_downloaded(api: TestClient) -> None:
+    """A build that failed part way leaves analysed channels with no summary; the download
+    finishes the job rather than printing empty cells."""
+
+    async def seed() -> None:
+        await store.create(batch_id="unbuilt", country="GB", kind=store.MANUAL, snapshot={})
+        await store.add_items(
+            "unbuilt",
+            [{"service_id": "GB1", "channel_name": "Worst", "country": "GB", "average_pct": 0.9}],
+        )
+        await store.update_item("unbuilt", "GB1", status="ANALYSED")
+        await store.update("unbuilt", status=store.COMPLETED)
+
+    api.portal.call(seed)  # type: ignore[attr-defined]
+    before = api.get("/api/batch/batches/unbuilt").json()
+    assert before["items"][0]["summary"] is None
+
+    response = api.get("/api/batch/batches/unbuilt/report.csv")
+    assert response.status_code == 200, response.text
+    assert "The analysis completed and recorded no finding." in response.text
+
+    after = api.get("/api/batch/batches/unbuilt").json()
+    assert after["items"][0]["summary"]
+    log = api.get("/api/batch/batches/unbuilt/log").json()["lines"]
+    assert any("never built" in line["message"] for line in log)

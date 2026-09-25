@@ -261,11 +261,32 @@ def _window_of(current: dict[str, Any]) -> Window | None:
     )
 
 
+def _unsummarised(batch: dict[str, Any]) -> bool:
+    """True when the batch finished but its report was never built.
+
+    `build` writes each channel's summary before it renders anything, so a finished batch whose
+    analysed channels carry no summary is one whose build failed part way — the sort that ran
+    MySQL out of memory did exactly that — and downloading it would print empty cells.
+    """
+    if batch.get("running"):
+        return False
+    return any(
+        item["status"] in exports.ANALYSED and not item.get("summary")
+        for item in batch.get("items", [])
+    )
+
+
 async def render(batch_id: str, fmt: str) -> tuple[bytes, str, str] | None:
-    """The report bytes for a batch, rebuilt from its rows if none is stored yet."""
+    """The report bytes for a batch, rebuilt from its rows, built first if it never was."""
     current = await store.read(batch_id, with_items=True)
     if current is None:
         return None
+    if _unsummarised(current):
+        await store.log(batch_id, "The report was never built; building it for this download.")
+        await build(batch_id)
+        current = await store.read(batch_id, with_items=True)
+        if current is None:
+            return None
 
     media = {
         "csv": "text/csv",
