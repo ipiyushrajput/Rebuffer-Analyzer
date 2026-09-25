@@ -23,7 +23,7 @@ from app.bulk import parsers
 from app.db import session as db_session
 from app.db.models import BulkItem
 from app.db.models import Job as JobRow
-from app.db.paging import newest_rows
+from app.db.paging import newest_rows, sorted_rows
 from app.jobs.manager import JobHandle, job_manager
 from app.reports import service
 
@@ -265,16 +265,12 @@ async def _build_rows(bulk_job_id: str, children: list[JobHandle]) -> list[dict[
     by_id = {child.id: child for child in children}
     rows: list[dict[str, Any]] = []
     async with db_session.session_scope() as db:
-        items = (
-            (
-                await db.execute(
-                    select(BulkItem)
-                    .where(BulkItem.bulk_job_id == bulk_job_id)
-                    .order_by(BulkItem.row_index)
-                )
-            )
-            .scalars()
-            .all()
+        # Sorted on the key alone: a bulk item carries four URLs as TEXT and a JSON column.
+        items = await sorted_rows(
+            db,
+            BulkItem,
+            where=(BulkItem.bulk_job_id == bulk_job_id,),
+            order_by=(BulkItem.row_index,),
         )
         for item in items:
             child = by_id.get(item.child_job_id or "")

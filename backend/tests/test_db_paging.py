@@ -182,3 +182,79 @@ def test_the_channels_listing_returns_the_wide_rows_it_sorted(api: TestClient) -
         assert channels[0]["verdict"]["counts"] == {"CRITICAL": 1}
     finally:
         api.portal.call(_clear)  # type: ignore[attr-defined]
+
+
+# -- a batch's channels and log, and a bulk job's rows -------------------------
+#
+# The same defect, found on a real deployment: a historical batch of 29 channels, each with a
+# correlation listing every spike window of its week, failed its report with error 1038 on
+# `SELECT batch_items.* ... ORDER BY batch_items.average_pct DESC`. Child tables read whole
+# are sorted on the key too.
+
+
+def _sorting_statements(statements: list[str]) -> list[str]:
+    return [s for s in statements if "ORDER BY" in s]
+
+
+async def _recorded(call: Any) -> tuple[Any, list[str]]:
+    statements: list[str] = []
+
+    def record(conn: Any, cursor: Any, statement: str, *rest: Any) -> None:
+        statements.append(" ".join(statement.split()))
+
+    sync_engine = db_session.engine().sync_engine
+    event.listen(sync_engine, "before_cursor_execute", record)
+    try:
+        result = await call()
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", record)
+    return result, statements
+
+
+@pytest.mark.asyncio()
+async def test_a_batchs_channels_and_log_are_sorted_on_the_key_alone(api: TestClient) -> None:
+    from app.batch import store
+
+    batch_id = "paging-batch"
+    await store.create(batch_id=batch_id, country="GB", kind=store.MANUAL, snapshot={})
+    try:
+        await store.add_items(
+            batch_id,
+            [
+                {"service_id": f"GB{n}", "channel_name": f"C{n}", "average_pct": avg,
+                 "playback_url": BULKY, "error": BULKY}
+                for n, avg in enumerate([0.3, 0.9, 0.5, None, 0.7])
+            ],
+        )  # fmt: skip
+        for n in range(5):
+            await store.update_item(
+                batch_id, f"GB{n}", summary=BULKY, correlation={"windows": [BULKY] * 20}
+            )
+            await store.log(batch_id, BULKY)
+
+        read, statements = await _recorded(lambda: store.read(batch_id, with_items=True))
+        assert read is not None
+        # Worst first, as the report and the tab need them.
+        averages = [item["average_pct"] for item in read["items"] if item["average_pct"]]
+        assert averages == sorted(averages, reverse=True)
+        for sorting in _sorting_statements(statements):
+            assert "SELECT batch_items.id" in sorting
+            for wide in ("correlation", "summary", "playback_url", "batch_items.error"):
+                assert wide not in sorting, f"{wide} would be packed into the sort buffer"
+
+        items, statements = await _recorded(lambda: store.items_for(batch_id))
+        assert [item["service_id"] for item in items][:3] == ["GB1", "GB4", "GB2"]
+        assert all("correlation" not in s for s in _sorting_statements(statements))
+
+        lines, statements = await _recorded(lambda: store.log_lines(batch_id))
+        assert len(lines) >= 5
+        assert all("message" not in s for s in _sorting_statements(statements))
+    finally:
+        from sqlalchemy import delete as sql_delete
+
+        from app.db.models import Batch, BatchItem, BatchLog
+
+        async with db_session.session_scope() as session:
+            await session.execute(sql_delete(BatchLog).where(BatchLog.batch_id == batch_id))
+            await session.execute(sql_delete(BatchItem).where(BatchItem.batch_id == batch_id))
+            await session.execute(sql_delete(Batch).where(Batch.id == batch_id))
