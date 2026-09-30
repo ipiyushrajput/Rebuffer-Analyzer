@@ -297,10 +297,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
       <div className={openFinding ? 'panel-hidden' : ''}>
         <PageHeader
           title="Realtime analysis"
-          subtitle={
-            store.channelName ||
-            'Paste a playback URL; every parameter is sent verbatim and every redirect hop is recorded.'
-          }
+          subtitle={store.channelName}
           status={
             <>
               <LiveChip label={running ? store.status : 'Idle'} live={running && store.connected} />
@@ -357,10 +354,6 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
                   <IconPulse size={15} />
                   Analyse stream
                 </button>
-                <span className="text-micro text-ink-muted">
-                  Player measurements are taken on the {PLAYER_METRICS_NOTE.toLowerCase()}, not on a
-                  television. Stopping files the run under Analysed channels and clears this tab.
-                </span>
               </div>
               {error && (
                 <div className="mt-3">
@@ -404,7 +397,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
               label="Risk score"
               value={store.verdict?.risk_score ?? '—'}
               suffix="/ 100"
-              note={store.verdict?.owner_label ?? 'no owner assigned yet'}
+              note={store.verdict?.owner_label}
               tone={(store.verdict?.risk_score ?? 0) >= 70 ? 'pink' : 'blue'}
             />
             <MetricTile
@@ -413,7 +406,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
               note={
                 SEVERITIES.filter((severity) => (store.counts[severity] ?? 0) > 0)
                   .map((severity) => `${severity.toLowerCase()} ${store.counts[severity]}`)
-                  .join(' · ') || 'no rule has fired'
+                  .join(' · ')
               }
               tone={
                 worstSeverity === 'CRITICAL' || worstSeverity === 'ERROR'
@@ -441,7 +434,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
               label="Live window"
               value={windowSeconds == null ? '—' : windowSeconds.toFixed(0)}
               suffix="s"
-              note={store.verdict?.worst_variant ?? 'every rendition'}
+              note={store.verdict?.worst_variant}
             />
           </MetricRow>
 
@@ -451,8 +444,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
 
               <Card>
                 <CardHeader
-                  title="Prioritized findings"
-                  subtitle="Ranked by viewer impact, then by how often the rule fired."
+                  title="Findings"
                   actions={
                     activeFindings.length > 0 && (
                       <span className="chip-neutral">{activeFindings.length}</span>
@@ -525,7 +517,6 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
               ) : (
                 <EmptyState
                   title="No master playlist has been fetched yet"
-                  detail="It appears here the moment the playback URL resolves, with every redirect hop recorded."
                 />
               )}
             </div>
@@ -551,7 +542,6 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
                 <div className="lg:col-span-2">
                   <EmptyState
                     title="No child playlist has been polled yet"
-                    detail="Each rendition appears here once its first poll completes."
                   />
                 </div>
               )}
@@ -593,7 +583,6 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
               ) : (
                 <EmptyState
                   title="No moment has been selected"
-                  detail="Click a bar on the Downloads chart to open the playlist exactly as it was at that instant, with a diff against the poll before it."
                 />
               )}
             </div>

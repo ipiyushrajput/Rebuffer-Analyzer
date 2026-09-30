@@ -382,7 +382,7 @@ export function CascadaChart(props: CascadaChartProps) {
 export function WeekAxesNote({ showComparison }: { showComparison: boolean }) {
   return (
     <>
-      Bottom axis: this week&apos;s dates{showComparison && '; top axis: the previous week’s dates for the grey line'}. All times UTC.
+      UTC{showComparison && ' · top axis: previous week'}
     </>
   )
 }

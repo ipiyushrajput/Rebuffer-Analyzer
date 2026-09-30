@@ -120,7 +120,7 @@ export function RebufferingModal({
           <span>
             <span className="font-mono">{query.service_id}</span>
             {query.country && ` · ${query.country}`} · historical ·{' '}
-            <span className="font-mono">{historicalLabel(channel)} UTC</span> (one value per day)
+            <span className="font-mono">{historicalLabel(channel)} UTC</span>
           </span>
         ) : channel ? (
           <span title={localTitle(channel.window.start)}>
@@ -154,11 +154,6 @@ export function RebufferingModal({
           onChange={onSourceChange}
           ariaLabel="Data source"
         />
-        <span className="text-micro text-ink-muted">
-          {source === 'historical'
-            ? 'One value per UTC day, the last 7 complete days.'
-            : 'One value per minute, the rolling window to now.'}
-        </span>
       </div>
 
       {error && <InlineAlert tone="error">{error}</InlineAlert>}
@@ -183,8 +178,7 @@ export function RebufferingModal({
         <>
           {channel.truncated && (
             <InlineAlert tone="warn">
-              CASCADA returned {channel.minutes_counted} measured minute(s) for a window of{' '}
-              {channel.window.minutes}, so these figures cover less than the window above.
+              Partial window: {channel.minutes_counted} of {channel.window.minutes} minutes.
             </InlineAlert>
           )}
 
@@ -214,12 +208,10 @@ export function RebufferingModal({
                   ? '—'
                   : `${channel.percent_time_above.toFixed(2)} %`
               }
-              note="of the measured week"
             />
             <MetricTile
               label="Previous week"
               value={formatPct(channel.previous_week_average_pct)}
-              note="average, for comparison"
             />
             <MetricTile
               label="Week on week"
@@ -230,9 +222,7 @@ export function RebufferingModal({
               }
               suffix="pp"
               tone={delta === null ? 'default' : delta > 0 ? 'pink' : 'clean'}
-              note={
-                delta === null ? 'no comparison week' : delta > 0 ? 'worse than last week' : 'better than last week'
-              }
+              note={delta !== null && (delta > 0 ? 'worse' : 'better')}
             />
           </MetricRow>
 
@@ -256,16 +246,13 @@ export function RebufferingModal({
                   className="flex items-center justify-center px-4 text-center text-small text-ink-muted"
                   style={{ height: CHART_HEIGHT }}
                 >
-                  CASCADA measured no minute of this channel inside the window.
+                  No data in this window.
                 </p>
               ) : (
                 <RebufferingChart channel={channel} showComparison={showComparison} />
               )}
             </div>
             <p className="px-4 pb-3 text-micro text-ink-faint">
-              Minutes above {channel.threshold_pct} % are drawn in pink; the rest in blue. A
-              minute CASCADA reported nothing for is a gap, not a zero —{' '}
-              {channel.minutes_missing} such minute(s) in this window.{' '}
               <WeekAxesNote showComparison={showComparison && channel.comparison.length > 0} />
             </p>
           </div>
@@ -317,10 +304,8 @@ export function RebufferingModal({
           </div>
 
           <p className="text-micro text-ink-faint">
-            Measured at <span className="font-mono">{utcLabel(channel.fetched_at)}</span> UTC
-            {channel.cached && ' · served from the stored window'}. CASCADA is queried with
-            channel_country=ALL, so this is the channel's rebuffering across every country it
-            runs in.
+            Measured <span className="font-mono">{utcLabel(channel.fetched_at)}</span> UTC
+            {channel.cached && ' · cached'}
           </p>
         </>
       )}
@@ -348,15 +333,13 @@ function HistoricalBody({
 }) {
   const withData = channel.days_with_data ?? channel.minutes_counted
   const expected = channel.days_expected ?? 7
-  const missing = expected - withData
   const renamed =
     channel.cascada_channel_name && channel.cascada_channel_name !== channel.channel_name
   return (
     <>
       {channel.insufficient && (
         <InlineAlert tone="warn">
-          Insufficient data: {withData} of {expected} day(s) carry a value, below the minimum of{' '}
-          {channel.min_days}. This channel is neither flagged nor passed.
+          Insufficient data: {withData} of {expected} days (minimum {channel.min_days}).
         </InlineAlert>
       )}
 
@@ -365,7 +348,7 @@ function HistoricalBody({
           label="Average"
           value={formatPct(channel.average_pct)}
           tone={channel.insufficient ? 'default' : channel.above_threshold ? 'pink' : 'clean'}
-          note={`over ${withData} day(s) with data · threshold ${channel.threshold_pct} %`}
+          note={`threshold ${channel.threshold_pct} %`}
         />
         <MetricTile
           label="Maximum day"
@@ -377,23 +360,20 @@ function HistoricalBody({
           label="Days above"
           value={channel.minutes_above}
           tone={channel.minutes_above > 0 ? 'violet' : 'default'}
-          note={`of ${withData} day(s) with data`}
         />
         <MetricTile
           label="Days with data"
           value={`${withData} / ${expected}`}
           tone={channel.insufficient ? 'pink' : 'default'}
-          note={`minimum ${channel.min_days ?? '—'} to judge`}
         />
         <MetricTile
           label="Provider"
           value={<span className="text-body">{channel.provider_name || '—'}</span>}
-          note={renamed ? `CASCADA name: ${channel.cascada_channel_name}` : 'as CASCADA lists it'}
+          note={renamed && `CASCADA name: ${channel.cascada_channel_name}`}
         />
         <MetricTile
           label="Window"
           value={<span className="text-body">{historicalLabel(channel)}</span>}
-          note="UTC, complete days, today excluded"
         />
       </MetricRow>
 
@@ -414,11 +394,6 @@ function HistoricalBody({
             granularity="day"
           />
         </div>
-        <p className="px-4 pb-3 text-micro text-ink-faint">
-          Days above {channel.threshold_pct} % are drawn in pink; the rest in blue. A day CASCADA
-          reported nothing for is a shaded gap labelled &ldquo;no data&rdquo;, not a zero —{' '}
-          {missing} such day(s) in this window. Dates are UTC.
-        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -452,10 +427,8 @@ function HistoricalBody({
       </div>
 
       <p className="text-micro text-ink-faint">
-        Measured at <span className="font-mono">{utcLabel(channel.fetched_at)}</span> UTC
-        {channel.cached && ' · served from the stored window'}. CASCADA historical data, one value
-        per UTC day, queried with channel_country=ALL, so this is the channel&apos;s rebuffering
-        across every country it runs in.
+        Measured <span className="font-mono">{utcLabel(channel.fetched_at)}</span> UTC
+        {channel.cached && ' · cached'}
       </p>
     </>
   )

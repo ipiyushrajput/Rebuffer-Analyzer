@@ -115,7 +115,7 @@ export function ManifestDiff({ diff }: { diff: string[] }) {
   if (diff.length === 0) {
     return (
       <p className="px-5 pb-4 text-small text-ink-muted">
-        This snapshot matches the one before it.
+        No change.
       </p>
     )
   }

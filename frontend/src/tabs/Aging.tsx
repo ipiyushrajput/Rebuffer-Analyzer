@@ -173,7 +173,6 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
     <>
       <PageHeader
         title="Aging analysis"
-        subtitle="Long-running jobs held on the server. Closing this browser does not stop them."
         status={
           <span className={active.length > 0 ? 'chip-blue' : 'chip-neutral'}>
             {active.length} running
@@ -234,9 +233,6 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
                 <IconPulse size={15} />
                 Start aging run
               </button>
-              <span className="text-micro text-ink-muted">
-                The job resumes from its own state after a backend restart.
-              </span>
             </div>
 
             {error && (
@@ -250,14 +246,10 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
         <Card>
           <CardHeader
             title="Jobs"
-            subtitle="Every run this deployment holds, newest first."
             actions={<span className="chip-neutral">{jobs.length}</span>}
           />
           {jobs.length === 0 ? (
-            <EmptyState
-              title="No aging job has been started yet"
-              detail="Start a run above; it appears here immediately and keeps running on the server."
-            />
+            <EmptyState title="No aging jobs yet" />
           ) : (
             <div className="overflow-x-auto">
               <table className="table table-hover">
@@ -398,10 +390,7 @@ function JobDetail({
   if (isLoading) {
     return (
       <Card>
-        <EmptyState
-          title="Reading the stored samples"
-          detail="The job's playlist polls, segment fetches and virtual buffer series are loading."
-        />
+        <EmptyState title="Loading…" />
       </Card>
     )
   }
@@ -428,7 +417,6 @@ function JobDetail({
         <MetricTile
           label="Active findings"
           value={active.length}
-          note={`${findings.length} rules recorded`}
           tone={active.length > 0 ? 'pink' : 'clean'}
         />
         <MetricTile
@@ -439,43 +427,32 @@ function JobDetail({
         <MetricTile
           label="Playlists checked"
           value={verdict?.playlists_checked ?? 0}
-          note="across every rendition"
         />
         <MetricTile
           label="Segments checked"
           value={verdict?.segments_checked ?? 0}
-          note="fetched and demuxed"
         />
         <MetricTile
           label="Virtual buffer"
           value={Object.keys(vpb).length}
-          note="renditions modelled"
         />
         <MetricTile
           label="Window"
           value={duration(verdict?.window_seconds ?? 0)}
-          note={verdict?.worst_variant ?? 'every rendition'}
+          note={verdict?.worst_variant}
         />
       </MetricRow>
 
       <Card>
         <CardHeader
-          title="Prioritized findings"
-          subtitle="Ranked by viewer impact, then by how often the rule fired."
+          title="Findings"
           actions={<span className="chip-neutral">{findings.length}</span>}
         />
         <div className="px-4 pb-4">
           <FindingsList
             findings={findings}
             onOpen={onOpenFinding}
-            emptyTitle={
-              settled ? 'This job recorded no finding' : 'No finding has been stored yet'
-            }
-            emptyDetail={
-              settled
-                ? 'Every check that ran returned clean for the whole window.'
-                : 'The job writes its findings and samples as each window settles. The counts in the jobs table are live.'
-            }
+            emptyTitle={settled ? 'No findings' : 'No findings yet'}
           />
         </div>
       </Card>
@@ -491,7 +468,6 @@ function JobDetail({
         <Card>
           <CardHeader
             title="Virtual Player Buffer"
-            subtitle="Stored samples, one series per rendition."
           />
           <div className="overflow-x-auto">
             <table className="table table-hover">

@@ -106,7 +106,6 @@ export function DrmSettingsPanel() {
       <Card>
         <CardHeader
           title="DRM"
-          subtitle="Configured once for this deployment. After that a protected channel is analysed exactly like a clear one, with nothing to fill in per channel."
           actions={chip && <span className={chip.className}>{chip.label}</span>}
         />
 
@@ -145,9 +144,7 @@ export function DrmSettingsPanel() {
           </label>
           {!enabled && (
             <InlineAlert tone="info">
-              A protected channel is still polled and measured for transport, timing and
-              playlist defects. Its report states, per rendition, that the payload was not
-              read.
+              Protected channels are measured without reading their payload.
             </InlineAlert>
           )}
 
@@ -169,16 +166,13 @@ export function DrmSettingsPanel() {
           </label>
           {decryptEvidence && (
             <InlineAlert tone="info">
-              Bundles will carry the decrypted segments alongside the encrypted ones, each with
-              its initialisation segment in front of it. No content key is ever written to a
-              bundle, a report or a log.
+              Bundles include decrypted segments. Keys are never written.
             </InlineAlert>
           )}
 
           <Field
             label="Widevine licence URL"
             htmlFor="drm-license"
-            hint="The licence server the player acquires a licence from. The browser never reaches it: POST /api/drm/license relays the challenge from this host."
           >
             <input
               id="drm-license"
@@ -194,7 +188,6 @@ export function DrmSettingsPanel() {
           <Field
             label="Licence request path"
             htmlFor="drm-license-path"
-            hint="Where the browser sends the licence challenge. The relay forwards it from this host, which works whatever the licence server's CORS policy is and keeps its address off the page."
           >
             <select
               id="drm-license-path"
@@ -208,16 +201,13 @@ export function DrmSettingsPanel() {
           </Field>
           {licensePath === 'direct' && (
             <InlineAlert tone="info">
-              The page will post the challenge to the licence server itself, so that server has
-              to allow a cross-origin POST and its URL reaches the page. Use it to establish
-              whether it does; the relay needs neither.
+              The licence server must allow cross-origin POSTs, and its URL reaches the page.
             </InlineAlert>
           )}
 
           <Field
             label="CPIX endpoint"
             htmlFor="drm-endpoint"
-            hint="The key server the content keys are requested from."
           >
             <input
               id="drm-endpoint"
@@ -233,7 +223,7 @@ export function DrmSettingsPanel() {
           <Field
             label="Client certificate"
             htmlFor="drm-client-cert"
-            hint="A path on the analyzer host, or an HTTPS URL. The CPIX request is signed with it and the keys come back encrypted to it."
+            hint="Path or HTTPS URL"
           >
             <input
               id="drm-client-cert"
@@ -249,7 +239,7 @@ export function DrmSettingsPanel() {
           <Field
             label="Client private key"
             htmlFor="drm-client-key"
-            hint="A path on the analyzer host, or an HTTPS URL. Keep it behind authentication: whoever can read it can read every key this deployment obtains."
+            hint="Path or HTTPS URL · keep it access-controlled"
           >
             <input
               id="drm-client-key"
@@ -265,7 +255,7 @@ export function DrmSettingsPanel() {
           <Field
             label="Key server certificate"
             htmlFor="drm-server-cert"
-            hint="The key server's own certificate. The answer's signature is checked against it, so a response signed by anything else is reported."
+            hint="Path or HTTPS URL"
           >
             <input
               id="drm-server-cert"
@@ -281,7 +271,6 @@ export function DrmSettingsPanel() {
           <Field
             label="Content identifier"
             htmlFor="drm-content-id"
-            hint="What a CPIX document names the content as. One value for the deployment; the key server keys on the key identifier, not on this."
           >
             <input
               id="drm-content-id"

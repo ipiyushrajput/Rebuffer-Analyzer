@@ -191,10 +191,7 @@ export function FindingInvestigation({
 
       {/* --- causal chain ---------------------------------------------------- */}
       <Card>
-        <CardHeader
-          title="Causal chain"
-          subtitle="Each step is measured; the step after it is what that measurement caused."
-        />
+        <CardHeader title="Causal chain" />
         <ol className="flex flex-col gap-3 px-5 pb-5 lg:flex-row">
           <Step
             index={1}
@@ -245,7 +242,6 @@ export function FindingInvestigation({
           <Card>
             <CardHeader
               title="Request evidence"
-              subtitle="The measured values the rule fired on."
               actions={
                 finding.evidence?.length > 0 && (
                   <CopyButton
@@ -289,10 +285,7 @@ export function FindingInvestigation({
                 </table>
               </div>
             ) : (
-              <EmptyState
-                title="This rule fired on a structural condition"
-                detail="The condition is stated in the finding itself; there is no per-request sample to list."
-              />
+              <EmptyState title="Structural condition — no per-request sample" />
             )}
           </Card>
 
@@ -363,7 +356,7 @@ export function FindingInvestigation({
           </Card>
 
           <Card>
-            <CardHeader title="Layer presence" subtitle="Where the same check was run." />
+            <CardHeader title="Layer presence" />
             <ul className="px-5 pb-5">
               {Object.keys(finding.layer_presence ?? {}).length === 0 && (
                 <li className="text-small text-ink-muted">

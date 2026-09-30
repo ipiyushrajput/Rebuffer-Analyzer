@@ -138,7 +138,6 @@ export function ReportsTab() {
           <Card className="overflow-hidden">
             <CardHeader
               title="Report"
-              subtitle="The stored document, exactly as it was generated."
             />
             {open.exists && open.format === 'html' ? (
               <iframe
@@ -149,12 +148,7 @@ export function ReportsTab() {
             ) : (
               <EmptyState
                 title={
-                  open.exists ? `This report is a ${open.format.toUpperCase()}` : 'No content is stored'
-                }
-                detail={
-                  open.exists
-                    ? 'Open it in a new tab or download it; the browser renders it outside this panel.'
-                    : 'The row remains so the verdict stays searchable, and the document itself is no longer stored. Generate a new report from the job.'
+                  open.exists ? `${open.format.toUpperCase()} report — open or download it` : 'No content stored'
                 }
               />
             )}
@@ -169,23 +163,20 @@ export function ReportsTab() {
     <>
       <PageHeader
         title="Reports"
-        subtitle="Every report this deployment has generated, with the verdict it carries."
         status={<span className="chip-neutral">{reports.length} stored</span>}
       />
 
       <PageBody>
         <MetricRow>
-          <MetricTile label="Reports" value={reports.length} note="matching these filters" />
+          <MetricTile label="Reports" value={reports.length} />
           <MetricTile
             label="Channels"
             value={channels}
-            note="distinct channels covered"
             tone="blue"
           />
           <MetricTile
             label="With a defect"
             value={defects.length}
-            note="verdict names a stream-side defect"
             tone={defects.length > 0 ? 'pink' : 'clean'}
           />
           <MetricTile
@@ -194,7 +185,7 @@ export function ReportsTab() {
             suffix="/ 100"
             tone="pink"
           />
-          <MetricTile label="Stored" value={bytes(totalBytes)} note="held in the database" />
+          <MetricTile label="Stored" value={bytes(totalBytes)} />
           <MetricTile
             label="Newest"
             value={
@@ -281,14 +272,10 @@ export function ReportsTab() {
         <Card>
           <CardHeader
             title="Library"
-            subtitle="Newest first. Opening a report renders it in place."
             actions={<span className="chip-neutral">{reports.length}</span>}
           />
           {reports.length === 0 ? (
-            <EmptyState
-              title="No report matches these filters"
-              detail="Reports are generated from the Realtime, Aging and Bulk tabs and appear here as soon as they are written."
-            />
+            <EmptyState title="No reports" />
           ) : (
             <div className="overflow-x-auto">
               <table className="table table-hover">

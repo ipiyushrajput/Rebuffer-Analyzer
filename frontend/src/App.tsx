@@ -86,16 +86,15 @@ export default function App() {
   const noBento4 = checks.mp4decrypt?.installed === false
   const railHealth = {
     ok: degraded.length === 0,
-    label: degraded.length === 0 ? 'System healthy' : 'Degraded',
+    label: degraded.length === 0 ? '' : 'Degraded',
     detail: [
-      degraded.length === 0
-        ? 'Analyzer host · every dependency answers'
-        : degraded
-            // The backend's own detail where it has one: for a schema a migration behind it
-            // names the columns and the command, which is the whole of what an operator
-            // needs and more than a fixed sentence here could say.
-            .map((item) => checks[item]?.detail ?? DEGRADED_NOTE[item] ?? `${item} is unavailable.`)
-            .join(' '),
+      degraded
+
+        // The backend's own detail where it has one: for a schema a migration behind it
+        // names the columns and the command, which is the whole of what an operator
+        // needs and more than a fixed sentence here could say.
+        .map((item) => checks[item]?.detail ?? DEGRADED_NOTE[item] ?? `${item} is unavailable.`)
+        .join(' '),
       noBento4 ? 'mp4decrypt is not installed, so cbcs tracks are not decrypted.' : '',
     ]
       .filter(Boolean)

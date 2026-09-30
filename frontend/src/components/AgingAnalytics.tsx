@@ -138,14 +138,13 @@ export function AgingAnalytics({
     segments.length > 0
       ? undefined
       : range === 'full'
-        ? 'This run stored none.'
-        : 'The selected range holds none. Widen it to the full range to read the whole run.'
+        ? 'No segments stored.'
+        : 'No segments in this range.'
 
   return (
     <Card>
       <CardHeader
         title="Analytics"
-        subtitle="The same charts Realtime draws, from the samples this run stored."
         actions={
           <SegmentedControl
             value={range}
@@ -164,9 +163,7 @@ export function AgingAnalytics({
 
         {data?.downsampled && (
           <InlineAlert tone="info">
-            This range holds more samples than a chart can draw, so the lines are thinned to{' '}
-            {data.max_points} points each. The stored rows are unchanged — a download or the
-            per-channel view reads all of them.
+            Thinned to {data.max_points} points per line.
           </InlineAlert>
         )}
 
@@ -174,14 +171,13 @@ export function AgingAnalytics({
 
         {spikes.length > 0 && (
           <InlineAlert tone="warn">
-            {spikes.length} rebuffering spike window(s) were measured for this channel in the
-            week this run covers: {spikes.map((band) => band.label).join(', ')}.
+            {spikes.length} spike window(s): {spikes.map((band) => band.label).join(', ')}
           </InlineAlert>
         )}
 
         {empty && !samples.isPending ? (
           <p className="py-10 text-center text-small text-ink-muted">
-            This run stored no playlist poll or segment fetch in the selected range.
+            No samples in this range.
           </p>
         ) : (
           /* Each chart carries its own card, title and empty state. They are rendered as
