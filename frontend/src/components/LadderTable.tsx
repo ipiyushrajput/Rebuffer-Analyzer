@@ -63,10 +63,7 @@ function Cell({
 export function LadderTable({ rows }: { rows: LadderRow[] }) {
   if (rows.length === 0) {
     return (
-      <EmptyState
-        title="No rung has been sampled yet"
-        detail="The ladder table fills in once a segment has been fetched and demuxed on each rung."
-      />
+      <EmptyState title="No rungs sampled yet" />
     )
   }
 
@@ -138,14 +135,11 @@ export function LadderTable({ rows }: { rows: LadderRow[] }) {
       </div>
       {refFramesDiffer && (
         <p className="border-t border-pink-200 bg-pink-50 px-5 py-2.5 text-small text-pink-600">
-          The rungs declare different reference frame counts. Every ABR switch between them
-          reallocates the decoded picture buffer.
+          Rungs declare different reference frame counts.
         </p>
       )}
       <p className="px-5 py-2.5 text-micro text-ink-muted">
-        The upper value in each cell is the manifest declaration; the lower value is what the
-        bitstream carries. A rung marked <span className="font-mono">demuxed</span> takes its
-        audio from the rendition named beneath it, so its own segments carry video only.
+        Top: manifest · bottom: bitstream
       </p>
     </div>
   )

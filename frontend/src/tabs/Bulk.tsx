@@ -224,7 +224,6 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
     <>
       <PageHeader
         title="Bulk analysis"
-        subtitle="One file, one batch, one consolidated report — every channel analysed by the same rules."
         status={
           job ? (
             <span className={isTerminal(job.status) ? 'chip-clean' : 'chip-blue'}>
@@ -270,7 +269,6 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
           <Card>
             <CardHeader
               title="Batches"
-              subtitle="A batch runs on the analyzer, not in this tab. Closing the page or reloading it leaves the run going; open it again here."
               actions={
                 running.length > 0 ? (
                   <span className="chip-blue">{running.length} running</span>
@@ -350,7 +348,6 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
         <Card className={cx(!setupOpen && 'panel-hidden')}>
           <CardHeader
             title="Channel list"
-            subtitle="CSV, XLSX or JSON. Column names are matched through their aliases."
             actions={(['csv', 'xlsx', 'json'] as const).map((fmt) => (
               <a
                 key={fmt}
@@ -386,9 +383,8 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
               </span>
               <p className="mt-3 text-card text-ink">Drop a channel list here</p>
               <p className="mx-auto mt-1 max-w-xl text-small text-ink-muted">
-                Required columns: <code className="font-mono">channel_name</code> and{' '}
-                <code className="font-mono">playback_url</code>. Optional: channel_id, country,
-                content_provider, cdn, origin_url, cdn_url, ssai_url.
+                CSV, XLSX or JSON with <code className="font-mono">channel_name</code> and{' '}
+                <code className="font-mono">playback_url</code>
               </p>
               <label className="btn-primary mt-4 cursor-pointer">
                 Choose file
@@ -419,13 +415,7 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
           <Card className={cx(!setupOpen && 'panel-hidden')}>
             <CardHeader
               title="Parsed rows"
-              subtitle={
-                invalidRows > 0
-                  ? `${validation.valid_count} of ${validation.total} rows run. ${invalidRows} ${
-                      invalidRows === 1 ? 'row carries' : 'rows carry'
-                    } an error and ${invalidRows === 1 ? 'is' : 'are'} skipped.`
-                  : `All ${validation.total} rows are valid and run.`
-              }
+              subtitle={invalidRows > 0 && `${invalidRows} skipped`}
               actions={
                 <span className={invalidRows > 0 ? 'chip-pink' : 'chip-clean'}>
                   {validation.valid_count} / {validation.total} valid
@@ -537,13 +527,12 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
               <MetricTile
                 label="Analysed"
                 value={(job as { completed?: number }).completed ?? 0}
-                note={`${Math.round((job.progress ?? 0) * 100)}% complete`}
+                note={`${Math.round((job.progress ?? 0) * 100)}%`}
                 tone="blue"
               />
               <MetricTile
                 label="Channels with a defect"
                 value={defectCount}
-                note="verdict names a stream-side defect"
                 tone={defectCount > 0 ? 'pink' : 'clean'}
               />
               <MetricTile
@@ -559,7 +548,6 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
               <MetricTile
                 label="Failed rows"
                 value={items.filter((item) => item.error).length}
-                note="the analysis could not complete"
               />
               <MetricTile
                 label="Mode"
@@ -606,10 +594,7 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
               </div>
 
               {visible.length === 0 ? (
-                <EmptyState
-                  title="No channel matches this filter"
-                  detail="Clear the filter to see every row in the batch."
-                />
+                <EmptyState title="No channel matches the filter" />
               ) : (
                 <div className="overflow-x-auto">
                   <table className="table table-hover">

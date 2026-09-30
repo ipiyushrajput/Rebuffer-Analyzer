@@ -82,10 +82,6 @@ export function CascadaLoading({ what, channel }: { what: string; channel: strin
         <p className="text-body font-semibold text-ink">
           Fetching {what} for {channel} from CASCADA
         </p>
-        <p className="max-w-md text-small text-ink-muted">
-          This week and the week before it, minute by minute. The data appears here as soon as
-          CASCADA answers.
-        </p>
         <p className="font-mono text-micro text-ink-faint">{seconds} s</p>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" aria-hidden="true">

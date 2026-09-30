@@ -153,11 +153,29 @@ def _inspect_drift(connection: Any) -> dict[str, list[str]]:
         if table.name not in present:
             # `create_all` makes a table that is absent, so this is not drift.
             continue
-        have = {column["name"] for column in inspector.get_columns(table.name)}
-        absent = [column.name for column in table.columns if column.name not in have]
-        if absent:
-            drift[table.name] = absent
+        live = {column["name"]: column for column in inspector.get_columns(table.name)}
+        absent = [column.name for column in table.columns if column.name not in live]
+        found = absent + narrow_columns(table, live)
+        if found:
+            drift[table.name] = found
     return drift
+
+
+def narrow_columns(table: Any, live: dict[str, dict[str, Any]]) -> list[str]:
+    """String columns the database holds narrower than the code writes them.
+
+    A revision that widens a column changes nothing until it is run, and until then a value
+    longer than the old width is refused — MySQL 1406, "Data too long" — which fails whatever
+    wrote it. SQLite never enforces a VARCHAR length, so only this check sees it before MySQL
+    does. Each entry names the column and both widths.
+    """
+    found: list[str] = []
+    for column in table.columns:
+        want = getattr(column.type, "length", None)
+        have = getattr(live.get(column.name, {}).get("type"), "length", None)
+        if isinstance(want, int) and isinstance(have, int) and have < want:
+            found.append(f"{column.name} (VARCHAR({have}), needs {want})")
+    return found
 
 
 async def schema_drift(*, force: bool = False) -> dict[str, list[str]]:
@@ -193,9 +211,16 @@ async def schema_drift(*, force: bool = False) -> dict[str, list[str]]:
 
 def describe_drift(drift: dict[str, list[str]]) -> str:
     """The drift as one sentence, naming every column so the report is actionable."""
-    return "; ".join(
-        f"{table} is missing {', '.join(columns)}" for table, columns in sorted(drift.items())
-    )
+    parts: list[str] = []
+    for table, columns in sorted(drift.items()):
+        # A narrow column carries its widths in parentheses; a missing one is a bare name.
+        absent = [column for column in columns if "(" not in column]
+        narrow = [column for column in columns if "(" in column]
+        if absent:
+            parts.append(f"{table} is missing {', '.join(absent)}")
+        if narrow:
+            parts.append(f"{table} is too narrow at {', '.join(narrow)}")
+    return "; ".join(parts)
 
 
 MIGRATION_COMMAND = (

@@ -86,7 +86,6 @@ export function CascadaSession() {
     <Card>
       <CardHeader
         title="CASCADA session"
-        subtitle="The field rebuffering metric is read with an operator's CASCADA session. It is held on the analyzer and never sent back to this page."
         actions={
           state && (
             <span
@@ -134,15 +133,13 @@ export function CascadaSession() {
 
         {fromHost ? (
           <InlineAlert tone="info">
-            This host carries its own CASCADA session in its environment, so nothing is pasted
-            here. Clear CASCADA_SESSIONID in backend/.env to paste one instead.
+            Session set in backend/.env (CASCADA_SESSIONID).
           </InlineAlert>
         ) : (
           <>
             <Field
               label="Paste a CASCADA session"
               htmlFor="cascada-cookie"
-              hint="In a signed-in CASCADA tab, open devtools, pick any request to cascada.samsungcloud.tv, and copy its Cookie request header. Paste the whole line — only sessionid, csrftoken and messages are kept."
             >
               <textarea
                 id="cascada-cookie"
@@ -234,7 +231,6 @@ export function ProviderMapPanel() {
     <Card>
       <CardHeader
         title="Provider map"
-        subtitle="Historical rebuffering names each channel by its CASCADA provider. The map is read from CASCADA's channel list, kept on the analyzer, and refreshed on its TTL or here."
         actions={
           <button
             type="button"
@@ -271,7 +267,7 @@ export function ProviderMapPanel() {
           </dl>
         ) : (
           <p className="text-small text-ink-muted">
-            Not read yet. The first historical scan reads it, or refresh it now.
+            Not loaded yet.
           </p>
         )}
       </div>

@@ -258,7 +258,6 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
     <>
       <PageHeader
         title="CASCADA Data"
-        subtitle="Rebuffering and playback errors measured on real televisions, week on week, for the channels TV Plus runs."
         status={
           scanState ? (
             <span className="font-mono text-micro text-ink-muted">
@@ -353,9 +352,9 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
               subtitle={
                 scanState
                   ? scanState.source === 'historical'
-                    ? `Every channel in ${scanState.country}, historical: one value per UTC day, ${scanState.window_label}.`
-                    : `Every channel in ${scanState.country}, realtime: measured over ${scanState.window.days.toFixed(1)} days to ${utcLabel(scanState.window.end)} UTC.`
-                  : 'Measures every channel in this country, across every page, and marks the ones whose average is above the threshold. Realtime reads the per-minute window to now; historical reads the last 7 complete days, one value per day.'
+                    ? `${scanState.country} · historical · ${scanState.window_label}`
+                    : `${scanState.country} · realtime · ${scanState.window.days.toFixed(1)} days to ${utcLabel(scanState.window.end)} UTC`
+                  : undefined
               }
               actions={
                 <div className="flex flex-wrap items-center gap-2">
@@ -545,9 +544,7 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
           <CardHeader
             title={page ? `${page.country.name} · ${ENVIRONMENT}` : 'Channels'}
             subtitle={
-              page
-                ? `${pageLabel} · searched for ${page.today}`
-                : 'Choose a country, then search.'
+              page && `${pageLabel} · ${page.today}`
             }
             actions={
               page && (
@@ -574,24 +571,16 @@ export function CascadaDataTab({ onAnalyse, onBulk }: Props) {
 
           {load.isPending ? (
             <div className="px-5 py-10 text-center text-small text-ink-muted">
-              Fetching the channel list from the catalogue…
+              Loading channels…
             </div>
           ) : !page ? (
-            <EmptyState
-              title="No channel list has been fetched yet"
-              detail="Pick a country and press Search. The rebuffering figures fill in once a scan has run."
-            />
+            <EmptyState title="Pick a country and search" />
           ) : visible.length === 0 ? (
             <EmptyState
               title={
                 page.channels.length === 0
-                  ? 'The catalogue returned no channel for this country'
-                  : 'No channel on this page matches the filter'
-              }
-              detail={
-                page.channels.length === 0
-                  ? 'Another country may carry it.'
-                  : 'Clear the filter to see the whole page.'
+                  ? 'No channels for this country'
+                  : 'No channel matches the filter'
               }
             />
           ) : (

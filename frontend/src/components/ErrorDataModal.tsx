@@ -114,8 +114,7 @@ export function ErrorDataModal({
         <>
           {channel.truncated && (
             <InlineAlert tone="warn">
-              CASCADA returned {channel.minutes_counted} measured minute(s) for a window of{' '}
-              {channel.window.minutes}, so these figures cover less than the window above.
+              Partial window: {channel.minutes_counted} of {channel.window.minutes} minutes.
             </InlineAlert>
           )}
 
@@ -124,9 +123,7 @@ export function ErrorDataModal({
               label="Average / min"
               value={formatCount(channel.average_per_min, 1)}
               tone={threshold === null ? 'default' : channel.above_threshold ? 'pink' : 'clean'}
-              note={
-                threshold === null ? 'no threshold set' : `threshold ${formatCount(threshold, 2)} / min`
-              }
+              note={threshold !== null && `threshold ${formatCount(threshold, 2)} / min`}
             />
             <MetricTile
               label="Maximum / min"
@@ -137,34 +134,22 @@ export function ErrorDataModal({
             <MetricTile
               label="Total errors"
               value={<span title={formatCount(channel.total)}>{formatCompact(channel.total)}</span>}
-              note={`${formatCount(channel.total)} over ${formatCount(channel.minutes_counted)} measured minute(s)`}
+              note={`${formatCount(channel.minutes_counted)} min measured`}
             />
             <MetricTile
               label="Minutes above"
               value={threshold === null ? '—' : channel.minutes_above}
               tone={channel.minutes_above > 0 ? 'violet' : 'default'}
-              note={
-                threshold === null
-                  ? 'set a threshold in Settings → CASCADA'
-                  : `of ${channel.minutes_counted} measured`
-              }
             />
             <MetricTile
               label="Previous week / min"
               value={formatCount(channel.previous_week_average_per_min, 1)}
-              note="average, for comparison"
             />
             <MetricTile
               label="Week on week"
               value={formatChange(change)}
               tone={change === null ? 'default' : change > 0 ? 'pink' : 'clean'}
-              note={
-                delta === null
-                  ? 'no comparison week'
-                  : `${delta > 0 ? '+' : ''}${formatCount(delta, 1)} / min, ${
-                      delta > 0 ? 'more than last week' : 'fewer than last week'
-                    }`
-              }
+              note={delta !== null && `${delta > 0 ? '+' : ''}${formatCount(delta, 1)} / min`}
             />
           </MetricRow>
 
@@ -188,7 +173,7 @@ export function ErrorDataModal({
                   className="flex items-center justify-center px-4 text-center text-small text-ink-muted"
                   style={{ height: CHART_HEIGHT }}
                 >
-                  CASCADA measured no minute of this channel inside the window.
+                  No data in this window.
                 </p>
               ) : (
                 <CascadaChart
@@ -205,11 +190,6 @@ export function ErrorDataModal({
               )}
             </div>
             <p className="px-4 pb-3 text-micro text-ink-faint">
-              {threshold === null
-                ? 'No error threshold is set, so no minute is marked; set one in Settings → CASCADA to draw it.'
-                : `Minutes above ${formatCount(threshold, 2)} errors / min are drawn in pink; the rest in blue.`}{' '}
-              A minute CASCADA reported nothing for is a gap, not a zero —{' '}
-              {channel.minutes_missing} such minute(s) in this window.{' '}
               <WeekAxesNote showComparison={showComparison && channel.comparison.length > 0} />
             </p>
           </div>
@@ -255,10 +235,8 @@ export function ErrorDataModal({
           </div>
 
           <p className="text-micro text-ink-faint">
-            Measured at <span className="font-mono">{utcLabel(channel.fetched_at)}</span> UTC
-            {channel.cached && ' · served from the stored window'}. CASCADA is queried with
-            channel_country=ALL, so this is the channel&apos;s errors across every country it runs
-            in, counted in {channel.unit}.
+            Measured <span className="font-mono">{utcLabel(channel.fetched_at)}</span> UTC
+            {channel.cached && ' · cached'}
           </p>
         </>
       )}

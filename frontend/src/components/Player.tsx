@@ -381,7 +381,7 @@ export function Player({ src, onEvent, drm }: Props) {
       )}
       {!src && (
         <p className="px-4 py-4 text-small text-ink-muted">
-          Start an analysis to load the stream through the proxy.
+          No stream loaded.
         </p>
       )}
     </div>

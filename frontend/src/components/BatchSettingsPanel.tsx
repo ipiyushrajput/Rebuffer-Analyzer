@@ -28,67 +28,60 @@ const WEEKDAYS = [
   'Sunday',
 ]
 
-/** Every editable batch setting, with the sentence that says what it governs. */
+/** Every editable batch setting. */
 const FIELDS: {
   key: keyof BatchSettings
   label: string
-  hint: string
+  hint?: string
   min: number
   max: number
 }[] = [
   {
     key: 'analysis_duration_minutes',
     label: 'Analysis duration per channel (minutes)',
-    hint: 'How long each above-threshold channel is analysed for.',
     min: 1,
     max: 240,
   },
   {
     key: 'analysis_concurrency',
     label: 'Channels analysed in parallel',
-    hint: 'Raising this shortens the batch and raises the load on the analyzer host.',
     min: 1,
     max: 16,
   },
   {
     key: 'max_runtime_minutes',
     label: 'Maximum batch runtime (minutes)',
-    hint: 'A batch that reaches this stops and files what it measured. The channels it did not reach are named in the report.',
     min: 10,
     max: 1440,
   },
   {
     key: 'aging_duration_days',
     label: 'Aging duration (days)',
-    hint: 'How long each aging run started by a scheduled batch keeps measuring.',
     min: 1,
     max: 30,
   },
   {
     key: 'aging_max_concurrent',
     label: 'Aging runs held at once',
-    hint: 'The worst channels by average take the slots. The rest are recorded as skipped, with the reason.',
     min: 1,
     max: 50,
   },
   {
     key: 'correlation_tolerance_s',
     label: 'Spike-to-event tolerance (seconds)',
-    hint: 'How far apart a rebuffering spike and an aging event may be and still be the same moment.',
     min: 0,
     max: 3600,
   },
   {
     key: 'spike_min_minutes',
     label: 'Minutes to make a spike',
-    hint: 'Consecutive minutes above the threshold before a stretch counts as a spike window.',
     min: 1,
     max: 120,
   },
   {
     key: 'retention_per_country',
     label: 'Batches kept per country',
-    hint: 'Zero keeps every batch. Any other number deletes the oldest beyond it once a new batch finishes.',
+    hint: '0 keeps every batch',
     min: 0,
     max: 500,
   },
@@ -120,10 +113,7 @@ export function BatchSettingsPanel() {
   if (!data || !draft) {
     return (
       <Card>
-        <CardHeader
-          title="Automated batches"
-          subtitle="Reading the stored batch configuration."
-        />
+        <CardHeader title="Automated batches" />
       </Card>
     )
   }
@@ -139,7 +129,6 @@ export function BatchSettingsPanel() {
       <Card>
         <CardHeader
           title="Automated batches"
-          subtitle="What a batch does once it is started, by an operator or by the weekly firing."
           actions={
             dirty ? <span className="chip-violet">unsaved</span> : <span className="chip-clean">Saved</span>
           }
@@ -147,10 +136,8 @@ export function BatchSettingsPanel() {
 
         <div className="px-5 pb-4">
           <InlineAlert tone="info">
-            A batch judges a channel on its average over{' '}
-            <span className="font-mono">{effective.window_days}</span> days against{' '}
-            <span className="font-mono">{effective.threshold_pct}%</span>. Both live with the
-            analysis thresholds, on the CASCADA tab, so there is one copy of each.
+            Window <span className="font-mono">{effective.window_days}</span> days · threshold{' '}
+            <span className="font-mono">{effective.threshold_pct}%</span> (set on the CASCADA tab)
           </InlineAlert>
         </div>
 
@@ -183,7 +170,7 @@ export function BatchSettingsPanel() {
           <Field
             label="Aging after a scheduled batch"
             htmlFor="batch-aging-enabled"
-            hint="A manual batch never starts aging. This governs the scheduled firing only."
+            hint="Scheduled batches only"
           >
             <label className="flex items-center gap-2 pt-1 text-small text-ink-soft">
               <input
@@ -203,7 +190,6 @@ export function BatchSettingsPanel() {
           <Field
             label="Default data source for scheduled/automated batches"
             htmlFor="batch-scheduled-source"
-            hint="A batch started by hand names its source on the button. Historical reads the last 7 complete UTC days, one value per day; realtime reads the per-minute window to now."
           >
             <select
               id="batch-scheduled-source"
@@ -365,8 +351,7 @@ function ScheduleTable() {
 
       {schedules.length === 0 ? (
         <p className="px-5 pb-5 text-small text-ink-muted">
-          No country fires by itself. Add one above, or start a batch by hand on the Automated
-          Batch tab.
+          No schedules.
         </p>
       ) : (
         <div className="overflow-x-auto">

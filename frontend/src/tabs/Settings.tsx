@@ -47,11 +47,10 @@ type GroupId =
   | 'drm'
   | 'rules'
 
-const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
+const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
   {
     id: 'rebuffering',
     title: 'Rebuffering',
-    note: 'The ratio that flags a channel, and how the virtual player models a Tizen device.',
     keys: [
       'rebuffer_ratio_threshold',
       'vpb_mode',
@@ -70,7 +69,6 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
   {
     id: 'playlists',
     title: 'Playlists and sequence numbers',
-    note: 'Freshness, window length, and how far renditions may drift apart.',
     keys: [
       'stale_playlist_factor',
       'cross_variant_msn_error_spread',
@@ -85,7 +83,6 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
   {
     id: 'delivery',
     title: 'Delivery',
-    note: 'How slowly a segment may arrive before the buffer is at risk.',
     keys: [
       'download_ratio_warn',
       'download_ratio_error',
@@ -97,7 +94,6 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
   {
     id: 'segments',
     title: 'Segments and bitstreams',
-    note: 'Container, timing and audio/video tolerances.',
     keys: [
       'tiny_segment_bytes',
       'extinf_vs_actual_tolerance_s',
@@ -114,13 +110,11 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
   {
     id: 'ladder',
     title: 'Ladder',
-    note: 'The shape a ladder must keep for ABR to recover on a constrained connection.',
     keys: ['lowest_rung_max_kbps', 'max_adjacent_rung_ratio', 'bandwidth_variation_tolerance'],
   },
   {
     id: 'incidents',
     title: 'Incidents and sampling',
-    note: 'Hysteresis on both edges of an incident, and how deeply each rung is sampled.',
     keys: [
       'incident_open_s',
       'incident_clear_s',
@@ -136,7 +130,6 @@ const GROUPS: { id: GroupId; title: string; note: string; keys: string[] }[] = [
   {
     id: 'cascada',
     title: 'CASCADA',
-    note: 'The field metrics: what counts as a rebuffering channel, the error count a channel is marked against (0 draws no error threshold), the window measured, and how hard a country scan pushes.',
     keys: [
       'cascada_rebuffering_threshold_pct',
       'cascada_error_threshold_per_min',
@@ -207,10 +200,7 @@ export function SettingsTab() {
         <PageHeader title="Settings" />
         <PageBody>
           <Card>
-            <EmptyState
-              title="Reading the stored configuration"
-              detail="Thresholds are held in the database so every deployment reports the same numbers."
-            />
+            <EmptyState title="Loading…" />
           </Card>
         </PageBody>
       </>
@@ -224,7 +214,6 @@ export function SettingsTab() {
     <div className="flex min-h-screen flex-col">
       <PageHeader
         title="Settings"
-        subtitle="A change applies to jobs started afterwards; a running job keeps the thresholds it started with."
         status={
           edited.length > 0 ? (
             <span className="chip-violet">{edited.length} unsaved</span>
@@ -244,7 +233,6 @@ export function SettingsTab() {
           <div className={tab === 'profile' ? '' : 'panel-hidden'}>
             <CardHeader
               title="Fetch profile and limits"
-              subtitle="How the analyzer identifies itself, how much it runs at once, and how long raw samples are kept."
             />
             <div className="grid gap-4 px-5 pb-5 md:grid-cols-2 xl:grid-cols-4">
               <Field label="Default User-Agent profile" htmlFor="pref-ua">
@@ -302,7 +290,6 @@ export function SettingsTab() {
               <Field
                 label="Sample retention (days)"
                 htmlFor="pref-retention"
-                hint="Raw samples older than this are purged. Findings, incidents and reports are kept."
               >
                 <input
                   id="pref-retention"
@@ -322,7 +309,7 @@ export function SettingsTab() {
           {/* --- threshold groups --------------------------------------------- */}
           {group && (
             <div>
-              <CardHeader title={group.title} subtitle={group.note} />
+              <CardHeader title={group.title} />
               <div className="grid gap-4 px-5 pb-5 md:grid-cols-2 xl:grid-cols-3">
                 {group.keys
                   .filter((key) => key in thresholds)
@@ -449,9 +436,6 @@ export function SettingsTab() {
               Saved
             </span>
           )}
-          <span className="ml-auto max-w-xl text-micro leading-snug text-rail-muted">
-            Every report states the threshold values its findings were measured against.
-          </span>
         </div>
       </div>
     </div>
@@ -548,14 +532,7 @@ function RuleCatalogue() {
         </div>
       )}
       {visible.length === 0 ? (
-        <EmptyState
-          title="No rule matches this filter"
-          detail={
-            onlyChanged
-              ? 'No rule has been reassigned. Every rule reports the severity the catalogue declares.'
-              : 'Clear the filter to see the whole catalogue.'
-          }
-        />
+        <EmptyState title={onlyChanged ? 'No reassigned rules' : 'No rule matches the filter'} />
       ) : (
         <div className="max-h-[560px] overflow-auto">
           <table className="table table-hover">

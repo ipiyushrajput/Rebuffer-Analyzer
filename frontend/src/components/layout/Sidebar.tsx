@@ -159,7 +159,6 @@ export function Sidebar({
           )}
         >
           {collapsed ? <IconExpand size={18} /> : <IconCollapse size={18} />}
-          {!collapsed && <span>Collapse</span>}
         </button>
       </div>
 

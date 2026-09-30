@@ -240,6 +240,11 @@ def parse(body: Any, window: DayWindow) -> dict[str, DaySeries]:
         raise HistoricalParseError(
             f"CASCADA answered the historical call with a {type(body).__name__}, not an object."
         )
+    if not body:
+        # CASCADA's answer for channels it holds no day for: an empty object, not an empty
+        # table. It is a successful call that returned nothing, so every channel in it has no
+        # row — which the caller files as insufficient data, never as a call that failed.
+        return {}
     columns = body.get("columns")
     rows = body.get("data")
     if not isinstance(columns, list) or not isinstance(rows, list):
@@ -482,9 +487,10 @@ async def fetch_days(
     if not missing:
         return results, failures
     if len(channels) == 1:
-        failures[channels[0].service_id] = (
-            batch_error or "CASCADA answered the historical call with no row for this channel."
-        )
+        if batch_error:
+            failures[channels[0].service_id] = batch_error
+        else:
+            results[channels[0].service_id] = _no_rows(channels[0], window)
         return results, failures
 
     if batch_error:
@@ -501,14 +507,23 @@ async def fetch_days(
         except CascadaError as exc:
             failures[channel.service_id] = str(exc)
             continue
-        if channel.service_id in single:
-            results[channel.service_id] = single[channel.service_id]
-        else:
-            failures[channel.service_id] = (
-                "CASCADA answered the historical call with no row for this channel "
-                f"(provider {channel.provider_name}, name {channel.cascada_name!r})."
-            )
+        results[channel.service_id] = single.get(channel.service_id) or _no_rows(channel, window)
     return results, failures
+
+
+def _no_rows(channel: HistoricalChannel, window: DayWindow) -> DaySeries:
+    """A channel CASCADA answered for with no row: every day of the window empty.
+
+    The call succeeded, so this is a measurement of zero days, not a failure, and the minimum
+    days rule files it as insufficient data — neither flagged nor passed.
+    """
+    logger.info(
+        "CASCADA holds no historical day for %s (provider %s, name %r)",
+        channel.service_id,
+        channel.provider_name,
+        channel.cascada_name,
+    )
+    return DaySeries(channel_id=channel.service_id, days=dict.fromkeys(window.days))
 
 
 # -- the store ---------------------------------------------------------------

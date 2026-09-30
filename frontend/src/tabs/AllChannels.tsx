@@ -115,8 +115,8 @@ export function AllChannelsTab({ onAnalyse }: Props) {
   return (
     <>
       <PageHeader
-        title="All channels"
-        subtitle="The TV Plus channel list for a country and environment, ready to analyse."
+        title="All TVplus Channels"
+        subtitle="Fetched from Dataplus"
         status={
           page ? (
             <span className="font-mono text-micro text-ink-muted">
@@ -204,9 +204,7 @@ export function AllChannelsTab({ onAnalyse }: Props) {
           <CardHeader
             title={page ? `${page.country.name} · ${page.environment}` : 'Channels'}
             subtitle={
-              page
-                ? `${pageLabel} · searched for ${page.today}`
-                : 'Choose a country and an environment, then search.'
+              page && `${pageLabel} · ${page.today}`
             }
             actions={
               page && (
@@ -233,24 +231,16 @@ export function AllChannelsTab({ onAnalyse }: Props) {
 
           {load.isPending ? (
             <div className="px-5 py-10 text-center text-small text-ink-muted">
-              Fetching the channel list from the catalogue…
+              Loading channels…
             </div>
           ) : !page ? (
-            <EmptyState
-              title="No channel list has been fetched yet"
-              detail="Pick a country and an environment, then press Search."
-            />
+            <EmptyState title="Pick a country and search" />
           ) : visible.length === 0 ? (
             <EmptyState
               title={
                 page.channels.length === 0
-                  ? 'The catalogue returned no channel for this selection'
-                  : 'No channel on this page matches the filter'
-              }
-              detail={
-                page.channels.length === 0
-                  ? 'Another environment or country may carry it.'
-                  : 'Clear the filter to see the whole page.'
+                  ? 'No channels for this selection'
+                  : 'No channel matches the filter'
               }
             />
           ) : (

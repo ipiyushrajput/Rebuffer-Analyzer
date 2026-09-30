@@ -84,16 +84,14 @@ export function FindingCard({
 export function FindingsList({
   findings,
   onOpen,
-  emptyTitle = 'No finding has been raised yet',
-  emptyDetail = 'Checks that return clean are recorded as PASS lines and appear here once the first poll completes.',
+  emptyTitle = 'No findings yet',
 }: {
   findings: FindingData[]
   onOpen?: (finding: FindingData) => void
   emptyTitle?: string
-  emptyDetail?: string
 }) {
   if (findings.length === 0) {
-    return <EmptyState title={emptyTitle} detail={emptyDetail} />
+    return <EmptyState title={emptyTitle} />
   }
   return (
     <div className="space-y-2.5">

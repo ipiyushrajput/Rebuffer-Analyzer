@@ -248,7 +248,6 @@ export function DownloadRatioChart({
   return (
     <ChartCard
       title="4 · Segment download ratio"
-      note="download time divided by playback duration"
       empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <Chart option={option} />
@@ -380,8 +379,8 @@ export function SequenceLadderChart({ snapshots }: { snapshots: PlaylistSnapshot
       title="7 · Sequence ladder"
       note={
         spread >= MSN_GAP_TOLERANCE
-          ? `spread ${spread} — at or above the tolerance of ${MSN_GAP_TOLERANCE}`
-          : `spread ${spread} — inside the tolerance of ${MSN_GAP_TOLERANCE}`
+          ? `spread ${spread} ≥ ${MSN_GAP_TOLERANCE}`
+          : `spread ${spread} < ${MSN_GAP_TOLERANCE}`
       }
       empty={snapshots.length === 0 ? NO_SNAPSHOTS : undefined}
     >
@@ -406,7 +405,6 @@ export function DiscontinuityChart({ snapshots }: { snapshots: PlaylistSnapshotD
   return (
     <ChartCard
       title="7b · Discontinuity sequence"
-      note="one counter is shared by the Tizen player"
       empty={snapshots.length === 0 ? NO_SNAPSHOTS : undefined}
     >
       <Chart option={option} />
@@ -444,7 +442,6 @@ export function FreshnessChart({ snapshots }: { snapshots: PlaylistSnapshotData[
   return (
     <ChartCard
       title="8 · Playlist freshness"
-      note="age since the last new segment"
       empty={snapshots.length === 0 ? NO_SNAPSHOTS : undefined}
     >
       <Chart option={option} />
@@ -582,7 +579,6 @@ export function DurationChart({
   return (
     <ChartCard
       title="11 · Segment duration"
-      note="EXTINF against the media inside"
       empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <Chart option={option} />
@@ -626,7 +622,6 @@ export function VirtualBufferChart({
   return (
     <ChartCard
       title="12 · Virtual Player Buffer"
-      note="modelled Tizen player, overlaid with the real hls.js buffer"
       empty={
         points.length === 0 && playerSamples.length === 0
           ? 'The buffer model starts once the first segment of a rung has been measured.'
@@ -705,7 +700,6 @@ export function DownloadsGanttChart({
   return (
     <ChartCard
       title="13 · Downloads"
-      note="each bar is one segment fetch; failures are red"
       empty={segments.length === 0 ? noSegments(reason) : undefined}
     >
       <ReactECharts

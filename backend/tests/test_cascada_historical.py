@@ -400,15 +400,49 @@ async def test_a_failed_batch_is_retried_channel_by_channel(
     assert "HTTP 500" in failures["BAD"]
 
 
-async def test_a_channel_missing_from_a_good_answer_is_asked_for_alone_then_named() -> None:
+async def test_a_channel_missing_from_a_good_answer_is_asked_alone_then_measured_as_no_days() -> None:
+    """Asked alone and still absent, the channel is a measurement of zero days — the call
+    succeeded — so it is insufficient data rather than a channel CASCADA did not answer for."""
     fetcher = FakeFetcher(
         lambda ids: (200, body([r for i in ids if i != "GONE" for r in week(i, [0.1] * 7)]))
     )
     results, failures = await historical.fetch_days(channels("A", "GONE"), WINDOW, auth(), fetcher)  # type: ignore[arg-type]
 
     assert fetcher.calls == [["A", "GONE"], ["GONE"]]
-    assert set(results) == {"A"}
-    assert "no row" in failures["GONE"]
+    assert set(results) == {"A", "GONE"}
+    assert failures == {}
+    assert results["GONE"].days_with_data == 0
+
+
+def test_an_empty_object_is_an_answer_with_no_rows() -> None:
+    """CASCADA's answer for channels it holds no day for is `{}`, not an empty table. It read
+    as a failed call — "Keys present: none" — for every US local news channel."""
+    assert historical.parse({}, WINDOW) == {}
+
+
+async def test_channels_answered_with_an_empty_object_are_insufficient_data_not_failures() -> None:
+    fetcher = FakeFetcher(lambda ids: (200, {}))
+    batch = channels("USBC3300001VE", "US3900004UL")
+    results, failures = await historical.fetch_days(batch, WINDOW, auth(), fetcher)  # type: ignore[arg-type]
+
+    assert failures == {}
+    assert fetcher.calls == [[c.service_id for c in batch], ["USBC3300001VE"], ["US3900004UL"]]
+    entry = historical.to_window(
+        series=results["US3900004UL"], window=WINDOW, channel=batch[1], thresholds=T
+    )
+    assert entry.details["insufficient"] is True
+    assert entry.details["days_with_data"] == 0
+
+
+async def test_a_single_channel_call_that_fails_is_still_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.cascada.client.RETRY_BACKOFF_S", 0.0)
+    fetcher = FakeFetcher(lambda ids: (500, None))
+    results, failures = await historical.fetch_days(channels("A"), WINDOW, auth(), fetcher)  # type: ignore[arg-type]
+
+    assert results == {}
+    assert "HTTP 500" in failures["A"]
 
 
 # -- the scan, end to end ----------------------------------------------------

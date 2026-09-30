@@ -48,7 +48,7 @@ export function SessionVerdict({
         <div>
           <p className="label">Verdict</p>
           <p className="mt-1 text-body text-ink-soft">
-            The verdict is issued once the first playlist and segment measurements complete.
+            Waiting for the first measurements.
           </p>
         </div>
         <span className="chip-neutral">elapsed {duration(elapsed)}</span>

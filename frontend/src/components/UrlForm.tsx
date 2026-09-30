@@ -183,14 +183,8 @@ export function UrlForm({ value, onChange, disabled }: Props) {
               />
             </Field>
           ))}
-          <p className="text-micro leading-snug text-ink-muted lg:col-span-3">
-            With these URLs the same checks run on each layer and every defect is pinned to the
-            first layer it appears on. Without them each defect is attributed from its own layer
-            and the response headers that prove it.
-          </p>
         </div>
       )}
-
       {showOptions && (
         <div className="space-y-4 rounded-tile border border-surface-line bg-surface-raised p-4">
           <div className="grid gap-3 lg:grid-cols-3">

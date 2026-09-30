@@ -222,7 +222,6 @@ export function AutomatedBatchTab() {
     <>
       <PageHeader
         title="Automated Batch"
-        subtitle="Scan a country, analyse every channel rebuffering above the threshold, and file the report — on the analyzer, not in this tab."
         status={
           rows.some((batch) => batch.running) ? (
             <span className="chip-blue">
@@ -331,7 +330,6 @@ export function AutomatedBatchTab() {
             <Card>
               <CardHeader
                 title={`Start a ${source} batch for ${confirming.country}?`}
-                subtitle="This runs on the analyzer. You can close this tab; the batch carries on."
               />
               <div className="space-y-3 px-5 pb-5">
                 <dl className="grid gap-3 sm:grid-cols-4">
@@ -362,13 +360,9 @@ export function AutomatedBatchTab() {
                 </dl>
 
                 <InlineAlert tone="info">
-                  Only channels whose <strong>average</strong> rebuffering ratio over the window
-                  is above the threshold are analysed, so how long this takes is not known until
-                  the scan has run. If every one of the {confirming.channels_listed} channels
-                  qualified it would take about{' '}
-                  {Math.round(confirming.worst_case_runtime_minutes)} minutes; the cap is{' '}
-                  {confirming.max_runtime_minutes} minutes, which fits{' '}
-                  {confirming.channels_within_runtime} channels.
+                  Worst case ~{Math.round(confirming.worst_case_runtime_minutes)} min · cap{' '}
+                  {confirming.max_runtime_minutes} min ({confirming.channels_within_runtime}{' '}
+                  channels)
                 </InlineAlert>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -397,11 +391,7 @@ export function AutomatedBatchTab() {
           <Card>
             <CardHeader
               title={page ? `${page.country.name} · ${ENVIRONMENT}` : 'Channels'}
-              subtitle={
-                page
-                  ? `${pageLabel} · searched for ${page.today}`
-                  : 'Choose a country and search to see what a batch would scan.'
-              }
+              subtitle={page && `${pageLabel} · ${page.today}`}
             />
 
             {page && (
@@ -417,10 +407,7 @@ export function AutomatedBatchTab() {
             )}
 
             {!page ? (
-              <EmptyState
-                title="No channel list has been fetched yet"
-                detail="A batch scans every page for the country, not just this one."
-              />
+              <EmptyState title="Pick a country and search" />
             ) : (
               <div className="overflow-x-auto">
                 <table className="table table-hover">
@@ -473,15 +460,9 @@ export function AutomatedBatchTab() {
         {/* --- playground ----------------------------------------------------- */}
         <div className={screen === 'playground' ? 'space-y-4' : 'panel-hidden'}>
           <Card>
-            <CardHeader
-              title="Batches"
-              subtitle="Every batch this analyzer has run, manual and scheduled. A running one updates without a refresh."
-            />
+            <CardHeader title="Batches" />
             {rows.length === 0 ? (
-              <EmptyState
-                title="No batch has run yet"
-                detail="Start one from the Start a batch screen, or wait for the weekly schedule."
-              />
+              <EmptyState title="No batches yet" />
             ) : (
               <div className="overflow-x-auto">
                 <table className="table table-hover">
@@ -625,7 +606,7 @@ export function AutomatedBatchTab() {
                 title={`${detail.data.country} · ${detail.data.kind} · ${detail.data.data_source} · ${detail.data.status.replace(/_/g, ' ')}`}
                 subtitle={
                   detail.data.error ??
-                  `${detail.data.channels_above} channel(s) above threshold of ${detail.data.channels_scanned} scanned, from ${detail.data.data_source} data, ${dateOnly(detail.data.window_from)} → ${dateOnly(detail.data.window_to)} UTC.`
+                  `${detail.data.channels_above} / ${detail.data.channels_scanned} above threshold · ${dateOnly(detail.data.window_from)} → ${dateOnly(detail.data.window_to)} UTC`
                 }
                 actions={
                   <button
@@ -638,10 +619,7 @@ export function AutomatedBatchTab() {
                 }
               />
               {(detail.data.items ?? []).length === 0 ? (
-                <EmptyState
-                  title="No channel was above the threshold"
-                  detail="Every channel in this country averaged below the rebuffering threshold over the window."
-                />
+                <EmptyState title="No channel above the threshold" />
               ) : (
                 <div className="overflow-x-auto">
                   <table className="table">
@@ -697,7 +675,6 @@ export function AutomatedBatchTab() {
             <Card>
               <CardHeader
                 title="Batch log"
-                subtitle="Every step the batch took, including the channels it could not measure."
                 actions={
                   <>
                     <a className="btn-ghost btn-sm" href={endpoints.batchLogUrl(logFor)}>
@@ -717,7 +694,7 @@ export function AutomatedBatchTab() {
               <div className="max-h-96 overflow-y-auto px-5 pb-5">
                 {(log.data?.lines ?? []).length === 0 ? (
                   <p className="py-6 text-center text-small text-ink-muted">
-                    This batch has written no log line yet.
+                    No log lines yet.
                   </p>
                 ) : (
                   <ol className="space-y-1">

@@ -64,10 +64,7 @@ export function EventFeed({ events }: { events: SessionEvent[] }) {
 
   if (events.length === 0) {
     return (
-      <EmptyState
-        title="No network event has been recorded yet"
-        detail="Every resolution, redirect, TLS negotiation and fetch is listed here as the analysis walks each layer."
-      />
+      <EmptyState title="No network events yet" />
     )
   }
 

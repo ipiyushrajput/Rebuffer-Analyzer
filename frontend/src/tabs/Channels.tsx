@@ -145,17 +145,15 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
     <>
       <PageHeader
         title="Analysed channels"
-        subtitle="Every finished analysis, with the verdict it reached and the reports it produced."
         status={<span className="chip-neutral">{channels.length} stored</span>}
       />
 
       <PageBody>
         <MetricRow>
-          <MetricTile label="Channels" value={channels.length} note="analyses kept" />
+          <MetricTile label="Channels" value={channels.length} />
           <MetricTile
             label="With a defect"
             value={withDefect}
-            note="verdict names a stream-side defect"
             tone={withDefect > 0 ? 'pink' : 'clean'}
           />
           <MetricTile
@@ -163,7 +161,6 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
             value={
               channels.filter((c) => c.verdict?.status === 'NO STREAM-SIDE DEFECT').length
             }
-            note="no stream-side defect"
             tone="clean"
           />
           <MetricTile
@@ -176,7 +173,7 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
             suffix="/ 100"
             tone="pink"
           />
-          <MetricTile label="Reports" value={reportCount} note="stored against these runs" />
+          <MetricTile label="Reports" value={reportCount} />
           <MetricTile
             label="Newest"
             value={
@@ -192,7 +189,6 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
         <Card>
           <CardHeader
             title="Channels"
-            subtitle="Newest first. Opening a channel shows its findings, its incidents and its reports."
             actions={
               <label className="relative">
                 <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint">
@@ -211,14 +207,7 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
           {visible.length === 0 ? (
             <EmptyState
               title={
-                channels.length === 0
-                  ? 'No channel has been analysed yet'
-                  : 'No channel matches this filter'
-              }
-              detail={
-                channels.length === 0
-                  ? 'Run an analysis from the Realtime or Aging tab. Stopping it files the result here with its verdict and reports.'
-                  : 'Clear the filter to see every analysed channel.'
+                channels.length === 0 ? 'No analysed channels yet' : 'No channel matches the filter'
               }
             />
           ) : (
@@ -380,10 +369,7 @@ function ChannelDetail({
         <PageHeader title="Analysed channel" onBack={onBack} backLabel="Back to channels" />
         <PageBody>
           <Card>
-            <EmptyState
-              title="Reading the stored analysis"
-              detail="The verdict, the findings and the virtual-buffer series are loading."
-            />
+            <EmptyState title="Loading…" />
           </Card>
         </PageBody>
       </>
@@ -495,33 +481,28 @@ function ChannelDetail({
           <MetricTile
             label="Playlists checked"
             value={verdict?.playlists_checked ?? 0}
-            note="across every rendition"
           />
           <MetricTile
             label="Segments checked"
             value={verdict?.segments_checked ?? 0}
-            note="fetched and demuxed"
           />
           <MetricTile
             label="Virtual buffer"
             value={Object.keys(vpb).length}
-            note="renditions modelled"
           />
-          <MetricTile label="Reports" value={reports.length} note="stored for this run" />
+          <MetricTile label="Reports" value={reports.length} />
         </MetricRow>
 
         <Card>
           <CardHeader
-            title="Prioritized findings"
-            subtitle="Ranked by viewer impact, then by how often the rule fired."
+            title="Findings"
             actions={<span className="chip-neutral">{findings.length}</span>}
           />
           <div className="px-4 pb-4">
             <FindingsList
               findings={findings}
               onOpen={onOpenFinding}
-              emptyTitle="This analysis recorded no finding"
-              emptyDetail="Every check that ran returned clean for the whole window."
+              emptyTitle="No findings"
             />
           </div>
         </Card>
@@ -530,7 +511,6 @@ function ChannelDetail({
           <Card>
             <CardHeader
               title="Incidents"
-              subtitle="Each rebuffer window, with the finding it was correlated against."
             />
             <div className="overflow-x-auto">
               <table className="table table-hover">
@@ -574,7 +554,6 @@ function ChannelDetail({
           <Card>
             <CardHeader
               title="Virtual Player Buffer"
-              subtitle="Stored samples, one series per rendition."
             />
             <div className="overflow-x-auto">
               <table className="table table-hover">
