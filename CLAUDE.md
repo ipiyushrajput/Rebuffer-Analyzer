@@ -169,7 +169,10 @@ frontend/src/
   is stated at startup, degrades `/api/health` and reaches the rail, naming the columns and
   the command (`make migrate`, `rba.cmd migrate`, `alembic upgrade head`). It is reported,
   not repaired: Alembic owns the schema. The answer is cached for a minute so running the
-  migration clears the badge without a restart.
+  migration clears the badge without a restart. A string column narrower in the database than
+  in the model is drift too, named with both widths: SQLite never enforces a VARCHAR length, so
+  `batch_items.status` at 16 refused `INSUFFICIENT_DATA` (17) with MySQL 1406 and failed a
+  whole batch with every test green.
 - **A listing sorts keys, never rows.** MySQL's filesort packs every selected column into
   `sort_buffer_size`, and a `jobs` row carries two JSON columns and five TEXT ones, so
   `select(Model).order_by(...)` over a table with history fails with error 1038, "Out of sort
@@ -245,7 +248,9 @@ frontend/src/
   request needs each channel's `provider_name`, read from CASCADA's channel-group list:
   entries with the exact group "Master Group - Local Channel Included" **and** `on_service`
   true, joined on `channel_id`, never a name; an ambiguous id takes the first provider by name
-  and is listed, a missing one is "provider not found" and listed. Fewer than
+  and is listed, a missing one is "provider not found" and listed. CASCADA answers `{}` for
+  channels it holds no day for; that is a successful call with no rows, so such a channel is
+  measured as zero days, never filed as a call that failed. Fewer than
   `cascada_historical_min_days` days of data is insufficient data — never flagged, never
   passed. Historical windows live in `cascada_daily_samples`. A batch records its source in
   `settings_snapshot["data_source"]`; scheduled runs default to `scheduled_data_source`

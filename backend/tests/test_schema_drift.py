@@ -81,6 +81,49 @@ async def test_the_drift_reads_as_a_sentence_naming_every_column() -> None:
     assert "jobs is missing a, b" in described
 
 
+def test_a_column_narrower_than_the_model_is_drift_naming_both_widths() -> None:
+    """The live failure: `batch_items.status` at VARCHAR(16) refused `INSUFFICIENT_DATA` with
+    MySQL 1406 and failed a whole batch. SQLite never enforces the width, so the comparison is
+    driven with the live widths a MySQL server reports."""
+    from sqlalchemy import String
+
+    from app.db.models import BatchItem
+
+    table = BatchItem.__table__
+    live = {column.name: {"name": column.name, "type": column.type} for column in table.columns}
+    live["status"] = {"name": "status", "type": String(16)}
+
+    assert db_session.narrow_columns(table, live) == ["status (VARCHAR(16), needs 24)"]
+    live["status"] = {"name": "status", "type": String(32)}
+    assert db_session.narrow_columns(table, live) == []
+
+
+def test_a_narrow_column_reads_as_too_narrow_not_missing() -> None:
+    described = db_session.describe_drift(
+        {"batch_items": ["status (VARCHAR(16), needs 24)"], "jobs": ["a"]}
+    )
+
+    assert "batch_items is too narrow at status (VARCHAR(16), needs 24)" in described
+    assert "batch_items is missing" not in described
+    assert "jobs is missing a" in described
+
+
+def test_every_status_a_batch_files_fits_its_column() -> None:
+    """A status longer than the column is refused by MySQL and by nothing in SQLite."""
+    from app.batch import runner, store
+    from app.db.models import BatchItem
+
+    width = BatchItem.__table__.c.status.type.length
+    statuses = [
+        value
+        for module in (runner, store)
+        for name, value in vars(module).items()
+        if name.isupper() and isinstance(value, str) and value.isupper()
+    ]
+    assert "INSUFFICIENT_DATA" in statuses
+    assert all(len(status) <= width for status in statuses), statuses
+
+
 def test_the_command_that_clears_it_is_named_for_both_platforms() -> None:
     """An operator reading the rail has to be told what to run, not just what is wrong."""
     command = db_session.MIGRATION_COMMAND

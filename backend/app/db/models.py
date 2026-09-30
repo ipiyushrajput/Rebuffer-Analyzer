@@ -102,7 +102,7 @@ class BulkItem(Base):
     cdn_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     ssai_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
     child_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     verdict_status: Mapped[str | None] = mapped_column(String(48), nullable=True)
@@ -373,7 +373,9 @@ class BatchItem(Base):
     max_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     minutes_above: Mapped[int] = mapped_column(Integer, default=0)
 
-    status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
+    # 24, not 16: `INSUFFICIENT_DATA` is 17 characters, and a narrower column refused the
+    # first historical item carrying it and failed the whole batch (MySQL 1406).
+    status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
     # The analysis this channel produced, so the report links into the per-channel view.
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     # The aging run started for this channel after a scheduled batch, when there was one.
