@@ -99,6 +99,10 @@ existing checkout up to date rather than starting over.
 Add `-SkipBrowser` to skip the ~150 MB Chromium download. PDF export is then unavailable and
 HTML export still works.
 
+Add `-Fresh` to delete `backend\.venv` and build it again. Setup already does this on its own
+when the existing venv's pip no longer runs; `backend\.env`, the database and the Playwright
+browser are not touched either way.
+
 ### 3. Fill in `backend\.env`
 
 See [Connecting your database](#connecting-your-database). For a purely local run, one
@@ -431,6 +435,14 @@ which can close a string and break the parse hundreds of lines further down. The
 `tests/test_deploy_scripts.py` fails the build if a non-ASCII byte gets in. If you edit one,
 keep it ASCII; `git diff` after saving is the quickest way to spot an editor that helpfully
 replaced `-` with `—`.
+
+**`ModuleNotFoundError: No module named 'pip._vendor.…'` during setup.** The pip inside
+`backend\.venv` is damaged — a pip upgrade was interrupted, or a file was locked or quarantined
+while it was written. Setup checks pip before using it and rebuilds the venv when it does not
+run; `setup.cmd -Fresh` forces the rebuild. If the delete is refused, setup names the processes
+running from the venv: stop them (a running `rba.cmd dev`, a terminal with the venv activated)
+and run it again. If it recurs on a fresh venv, check Windows Security → Protection history
+for quarantined files, and keep the checkout out of a OneDrive-synced folder.
 
 **`Port 8010 is already bound by …`.** The script names the process. Stop it, or set
 `$env:RBA_PORT` to the next free port and record it.

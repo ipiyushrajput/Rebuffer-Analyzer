@@ -55,6 +55,18 @@ def test_both_installers_refuse_the_metanalyser_port() -> None:
         assert "Metanalyser" in text, f"{path.name} must say why 8001 is reserved"
 
 
+def test_setup_rebuilds_a_venv_whose_pip_does_not_run() -> None:
+    """A damaged pip fails every run of setup at its first pip call; setup checks it first."""
+    setup = _read(WINDOWS / "setup.ps1")
+    common = _read(WINDOWS / "_common.ps1")
+    assert "[switch]$Fresh" in setup
+    assert "Test-VenvPip" in setup and "function Test-VenvPip" in common
+    assert "Remove-Venv" in setup and "function Remove-Venv" in common
+    # The pip check runs before the first pip call it protects.
+    assert setup.index("Test-VenvPip") < setup.index("-m pip install --upgrade pip")
+    assert "-Fresh" in _read(WINDOWS / "setup.cmd")
+
+
 def test_the_windows_wrappers_do_not_change_the_machine_execution_policy() -> None:
     """`-ExecutionPolicy Bypass` on the invocation; never Set-ExecutionPolicy on the host."""
     for name in ("setup.cmd", "rba.cmd"):

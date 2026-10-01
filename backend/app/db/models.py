@@ -102,7 +102,7 @@ class BulkItem(Base):
     cdn_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     ssai_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
     child_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     verdict_status: Mapped[str | None] = mapped_column(String(48), nullable=True)

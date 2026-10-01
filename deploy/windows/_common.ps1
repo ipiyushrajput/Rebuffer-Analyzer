@@ -80,6 +80,48 @@ function Get-PythonLauncher {
     Write-Fail 'Python 3.11 or newer is not on PATH. Install it from https://python.org or with: winget install Python.Python.3.12 (tick "Add python.exe to PATH").'
 }
 
+<#
+    Whether the venv's own pip runs. Returns $null when it does, otherwise the last line pip
+    printed, which names the damage (a ModuleNotFoundError from inside pip, for one).
+
+    The call runs with ErrorActionPreference Continue in this function's scope only: under
+    Windows PowerShell 5.1 with Stop, a native command writing to a redirected stderr throws
+    before its exit code can be read.
+#>
+function Test-VenvPip {
+    param([string]$Python)
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Python -m pip --version 2>&1
+    } catch {
+        # The interpreter itself does not start: the Python it was built from is gone.
+        return "python.exe does not start: $($_.Exception.Message)"
+    }
+    if ($LASTEXITCODE -eq 0) { return $null }
+    $last = $output | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Last 1
+    if (-not $last) { $last = "exit code $LASTEXITCODE" }
+    return $last
+}
+
+<#
+    Delete the backend virtualenv. A file held open - a running backend, a terminal with the
+    venv activated, an antivirus scan - stops the delete, so the processes running from the
+    venv are named rather than leaving the operator with a bare "access denied".
+#>
+function Remove-Venv {
+    param([string]$Path)
+    try {
+        Remove-Item -Recurse -Force -Path $Path -ErrorAction Stop
+    } catch {
+        $reason = $_.Exception.Message
+        $holders = Get-Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path.StartsWith($Path, [System.StringComparison]::OrdinalIgnoreCase) } |
+            ForEach-Object { "$($_.ProcessName) (PID $($_.Id))" }
+        $who = if ($holders) { 'Running from it: ' + ($holders -join ', ') + '. Stop them with Stop-Process -Id <PID>' } else { 'Close any terminal or editor that has it open' }
+        Write-Fail "backend\.venv could not be deleted: $reason $who, then run setup again."
+    }
+}
+
 function Get-VenvPython {
     $python = Join-Path $RepoRoot 'backend\.venv\Scripts\python.exe'
     if (-not (Test-Path $python)) {

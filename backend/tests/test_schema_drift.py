@@ -19,7 +19,11 @@ and the command.
 from __future__ import annotations
 
 import contextlib
+import os
+import subprocess
+import sys
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -122,6 +126,47 @@ def test_every_status_a_batch_files_fits_its_column() -> None:
     ]
     assert "INSUFFICIENT_DATA" in statuses
     assert all(len(status) <= width for status in statuses), statuses
+
+
+def test_a_database_built_by_the_migrations_matches_the_models(tmp_path: Path) -> None:
+    """Running every revision must leave nothing for the startup check to report.
+
+    A model edited without a revision is drift that `migrate` can never clear: the operator
+    runs it, restarts, and is told to run it again. That reached a deployment when
+    `bulk_items.status` was widened in the model alone.
+    """
+    from sqlalchemy import create_engine, inspect
+
+    from app.db.models import Base
+
+    backend = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "DB_ENGINE": "sqlite", "RBA_DATA_DIR": str(tmp_path)}
+    run = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=backend,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert run.returncode == 0, run.stderr[-2000:]
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'rba.db'}")
+    try:
+        inspector = inspect(engine)
+        present = set(inspector.get_table_names())
+        drift: dict[str, list[str]] = {}
+        for table in Base.metadata.sorted_tables:
+            assert table.name in present, f"no revision creates {table.name}"
+            live = {column["name"]: column for column in inspector.get_columns(table.name)}
+            found = [c.name for c in table.columns if c.name not in live]
+            found += db_session.narrow_columns(table, live)
+            if found:
+                drift[table.name] = found
+    finally:
+        engine.dispose()
+
+    assert drift == {}, db_session.describe_drift(drift)
 
 
 def test_the_command_that_clears_it_is_named_for_both_platforms() -> None:
