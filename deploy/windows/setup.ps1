@@ -18,13 +18,19 @@
     Skip the Playwright Chromium download (~150 MB). PDF export is then unavailable and
     HTML export still works; `run.ps1 setup` can install it later.
 
+.PARAMETER Fresh
+    Delete backend\.venv and build it again from scratch. An existing virtualenv whose pip
+    no longer runs is rebuilt without this switch; use it when the venv is suspect for any
+    other reason. backend\.env, the database and the Playwright browser are not touched.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File deploy\windows\setup.ps1 -Dev
 #>
 [CmdletBinding()]
 param(
     [switch]$Dev,
-    [switch]$SkipBrowser
+    [switch]$SkipBrowser,
+    [switch]$Fresh
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,7 +55,24 @@ if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
 # --- backend ----------------------------------------------------------------
 
 $venv = Join-Path $RepoRoot 'backend\.venv'
-if (-not (Test-Path (Join-Path $venv 'Scripts\python.exe'))) {
+$venvPython = Join-Path $venv 'Scripts\python.exe'
+
+if ($Fresh -and (Test-Path $venv)) {
+    Write-Step 'Removing the backend virtualenv (-Fresh)'
+    Remove-Venv -Path $venv
+} elseif (Test-Path $venvPython) {
+    # A venv whose pip is damaged fails every run of this script at its first pip call, with
+    # a ModuleNotFoundError from inside pip itself (pip._vendor.rich.markup, for one). That
+    # happens when a pip upgrade is interrupted or a file is locked or quarantined while it
+    # is written. The venv holds nothing but installed packages, so it is rebuilt.
+    $pipProblem = Test-VenvPip -Python $venvPython
+    if ($pipProblem) {
+        Write-Note "pip in backend\.venv does not run ($pipProblem). Rebuilding the virtualenv."
+        Remove-Venv -Path $venv
+    }
+}
+
+if (-not (Test-Path $venvPython)) {
     Write-Step 'Creating the backend virtualenv'
     & $python.File @($python.Args + @('-m', 'venv', $venv))
     Assert-LastExit 'Creating the virtualenv failed.'
@@ -57,11 +80,9 @@ if (-not (Test-Path (Join-Path $venv 'Scripts\python.exe'))) {
     Write-Step 'The backend virtualenv is already present'
 }
 
-$venvPython = Join-Path $venv 'Scripts\python.exe'
-
 Write-Step 'Installing the backend'
 & $venvPython -m pip install --upgrade pip --quiet
-Assert-LastExit 'Upgrading pip failed.'
+Assert-LastExit 'Upgrading pip failed. Close anything using backend\.venv and run setup again with -Fresh.'
 
 $target = if ($Dev) { 'backend[dev]' } else { 'backend' }
 Push-Location $RepoRoot

@@ -4,6 +4,7 @@ REM changed on the machine: -ExecutionPolicy Bypass applies to this invocation o
 REM
 REM   setup.cmd -Dev            also install pytest, ruff and mypy
 REM   setup.cmd -SkipBrowser    skip the Playwright download used for PDF export
+REM   setup.cmd -Fresh          delete backend\.venv and build it again
 setlocal
 REM PowerShell 7 when it is installed, Windows PowerShell 5.1 otherwise. Both are supported.
 set "PSEXE=powershell"

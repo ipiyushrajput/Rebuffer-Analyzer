@@ -33,32 +33,38 @@ def _is_sqlite() -> bool:
     return op.get_bind().dialect.name == "sqlite"
 
 
+def _alter(width_from: int, width_to: int) -> None:
+    """MySQL alters in place; SQLite has no ALTER COLUMN, so Alembic rebuilds the table.
+
+    SQLite does not enforce the width, but a database built by these revisions has to match
+    the models exactly, or the startup drift check reports a column no revision will widen.
+    """
+    if _is_sqlite():
+        with op.batch_alter_table(ITEMS) as batch:
+            batch.alter_column(
+                "status",
+                existing_type=sa.String(width_from),
+                type_=sa.String(width_to),
+                existing_nullable=False,
+            )
+        return
+    op.alter_column(
+        ITEMS,
+        "status",
+        existing_type=sa.String(width_from),
+        type_=sa.String(width_to),
+        existing_nullable=False,
+        # MySQL's MODIFY COLUMN drops a default it is not told to keep.
+        existing_server_default=sa.text("'PENDING'"),
+    )
+
+
 def upgrade() -> None:
-    if not _is_sqlite():
-        op.alter_column(
-            ITEMS,
-            "status",
-            existing_type=sa.String(16),
-            type_=sa.String(24),
-            existing_nullable=False,
-            # MySQL's MODIFY COLUMN drops a default it is not told to keep.
-            existing_server_default=sa.text("'PENDING'"),
-        )
+    _alter(16, 24)
 
 
 def downgrade() -> None:
     # Narrowing would truncate or refuse every INSUFFICIENT_DATA row, so those are cleared to
     # a status that fits first; the reason stays in `error`.
-    if not _is_sqlite():
-        op.execute(
-            sa.text(f"UPDATE {ITEMS} SET status = 'SKIPPED' WHERE CHAR_LENGTH(status) > 16")
-        )
-        op.alter_column(
-            ITEMS,
-            "status",
-            existing_type=sa.String(24),
-            type_=sa.String(16),
-            existing_nullable=False,
-            # MySQL's MODIFY COLUMN drops a default it is not told to keep.
-            existing_server_default=sa.text("'PENDING'"),
-        )
+    op.execute(sa.text(f"UPDATE {ITEMS} SET status = 'SKIPPED' WHERE LENGTH(status) > 16"))
+    _alter(24, 16)

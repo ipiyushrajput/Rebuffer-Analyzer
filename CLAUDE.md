@@ -172,7 +172,11 @@ frontend/src/
   migration clears the badge without a restart. A string column narrower in the database than
   in the model is drift too, named with both widths: SQLite never enforces a VARCHAR length, so
   `batch_items.status` at 16 refused `INSUFFICIENT_DATA` (17) with MySQL 1406 and failed a
-  whole batch with every test green.
+  whole batch with every test green. The other direction is a bug too: a model changed without
+  a revision is drift `migrate` can never clear, so the operator is told to migrate after
+  migrating. `tests/test_schema_drift.py` builds a database from the revisions alone and
+  requires it to match the models exactly, and a revision that alters a column does so on
+  SQLite as well (`batch_alter_table`) so that comparison holds.
 - **A listing sorts keys, never rows.** MySQL's filesort packs every selected column into
   `sort_buffer_size`, and a `jobs` row carries two JSON columns and five TEXT ones, so
   `select(Model).order_by(...)` over a table with history fails with error 1038, "Out of sort
