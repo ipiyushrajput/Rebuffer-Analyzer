@@ -294,6 +294,25 @@
 <div class="card"><p>No finding above INFO was raised during the analysis window.</p></div>
 {% endif %}
 
+{% if acknowledged_groups %}
+<h3>Acknowledged on this channel — {{ acknowledged_groups|length }} issue(s)</h3>
+<div class="card">
+<p class="small muted">Known, accepted behaviours of this channel. Each was measured and is listed
+  here; none is in the escalation text above. The verdict is computed from every finding.</p>
+<table class="fixed">
+  <colgroup><col style="width:80px"><col style="width:96px"><col><col style="width:160px"><col style="width:64px"></colgroup>
+  <thead><tr><th>ID</th><th>Severity</th><th>Title</th><th>Renditions</th><th>Count</th></tr></thead>
+  <tbody>
+  {% for item in acknowledged_groups %}
+    <tr><td class="nowrap"><code class="nowrap">{{ item.rule_id }}</code></td>
+      <td><span class="chip {{ item.severity }}">{{ item.severity }}</span></td>
+      <td>{{ item.title }}</td><td class="small">{{ item.renditions }}</td><td class="mono">{{ item.count }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
 {# 5. Incidents and stall correlation #}
 <h2>Incidents and stall correlation</h2>
 <div class="card">

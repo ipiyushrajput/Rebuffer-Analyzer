@@ -16,6 +16,7 @@ import { localDateTime, utcTitle } from '../lib/format'
 import type { FindingData } from '../ws/messages'
 import { membersOf } from '../lib/findingGroups'
 import { PollManifest } from './PollManifest'
+import { ReviewPanel } from './ReviewPanel'
 import { Timeline, windowAround } from './Timeline'
 import { Card, CardHeader, CopyButton, EmptyState, SegmentedControl, SeverityChip, cx } from './ui'
 import { IconArrowRight } from './ui/icons'
@@ -401,6 +402,8 @@ export function FindingInvestigation({
               />
             </div>
           </Card>
+
+          {jobId && <ReviewPanel jobId={jobId} finding={finding} />}
 
           <Card>
             <CardHeader title="Layer presence" />

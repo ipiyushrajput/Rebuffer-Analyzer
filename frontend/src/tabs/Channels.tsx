@@ -517,6 +517,7 @@ function ChannelDetail({
           />
           <div className="px-4 pb-4">
             <FindingsList
+              jobId={channelId}
               findings={findings}
               onOpen={onOpenFinding}
               emptyTitle="No findings"

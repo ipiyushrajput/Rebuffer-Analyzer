@@ -143,6 +143,7 @@ def create_app() -> FastAPI:
         proxy,
         realtime,
         reports,
+        review,
     )
     from app.api import settings as settings_api
     from app.ws import routes as ws_routes
@@ -157,6 +158,7 @@ def create_app() -> FastAPI:
     app.include_router(cascada.router, prefix="/api")
     app.include_router(batch.router, prefix="/api")
     app.include_router(reports.router, prefix="/api")
+    app.include_router(review.router, prefix="/api")
     app.include_router(proxy.router, prefix="/api")
     app.include_router(drm.router, prefix="/api")
     app.include_router(ws_routes.router)

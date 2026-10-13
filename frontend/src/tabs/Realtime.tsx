@@ -462,7 +462,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
                   }
                 />
                 <div className="max-h-[62vh] space-y-2.5 overflow-y-auto px-4 pb-4">
-                  <FindingsList findings={findings} onOpen={setOpenFinding} />
+                  <FindingsList findings={findings} onOpen={setOpenFinding} jobId={store.sessionId} />
                 </div>
               </Card>
             </div>

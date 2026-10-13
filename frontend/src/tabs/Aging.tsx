@@ -468,6 +468,7 @@ function JobDetail({
         />
         <div className="px-4 pb-4">
           <FindingsList
+            jobId={jobId}
             findings={findings}
             onOpen={(finding) => onOpenFinding(finding, findings)}
             emptyTitle={settled ? 'No findings' : 'No findings yet'}

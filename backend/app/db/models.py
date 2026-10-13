@@ -609,6 +609,48 @@ class CascadaErrorSample(Base):
     )
 
 
+class FindingFeedback(Base):
+    """An engineer's verdict on a finding: confirmed, or a false positive.
+
+    Kept per rule, layer and rendition of one run, and summed per rule into its precision —
+    the share of reviewed findings that were real — so the rules that raise noise are named
+    by the people who read them rather than guessed at.
+    """
+
+    __tablename__ = _t("finding_feedback")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    rule_id: Mapped[str] = mapped_column(String(16), index=True)
+    stream_layer: Mapped[str] = mapped_column(String(16), default="PLAYBACK")
+    variant: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # confirmed | false_positive
+    verdict: Mapped[str] = mapped_column(String(16))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Acknowledgement(Base):
+    """A known, accepted behaviour of one channel: the rule still fires, it no longer alarms.
+
+    Keyed by the channel's playback URL without its query, so a new token is the same
+    channel. An acknowledged finding is still measured, stored and shown — marked — and is
+    left out of alerts and escalations; the verdict is computed from every finding as before.
+    """
+
+    __tablename__ = _t("acknowledgements")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    channel_key: Mapped[str] = mapped_column(String(255), index=True)
+    channel_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rule_id: Mapped[str] = mapped_column(String(16))
+    # None acknowledges the rule on every rendition of the channel.
+    variant: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SettingRow(Base):
     __tablename__ = _t("settings")
 

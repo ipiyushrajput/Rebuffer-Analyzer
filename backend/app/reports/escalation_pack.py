@@ -24,6 +24,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app.analysis import review
 from app.analysis.grouping import group_findings
 from app.analysis.rules import catalogue  # noqa: F401  (registers every rule)
 from app.analysis.rules.base import Finding, Owner, Severity, StreamLayer, registry
@@ -103,16 +104,20 @@ async def build_pack(job_id: str, owner: str) -> bytes | None:
         wanted = Owner(owner)
     except ValueError:
         return None
+    async with db_session.session_scope() as session:
+        job = await session.get(JobRow, job_id)
+    # A channel's accepted behaviours are not escalated.
+    acks = await review.matches_for(job.playback_url if job is not None else None)
     findings = [
         f
         for f in await findings_for_job(job_id)
-        if f.owner == wanted and f.severity not in (Severity.PASS, Severity.INFO)
+        if f.owner == wanted
+        and f.severity not in (Severity.PASS, Severity.INFO)
+        and not review.is_acknowledged(acks, f.rule.id, f.variant)
     ]
     if not findings:
         return None
 
-    async with db_session.session_scope() as session:
-        job = await session.get(JobRow, job_id)
     channel = (job.channel_name if job is not None else "") or job_id
     playback_url = (job.playback_url if job is not None else "") or ""
     user_agent = await network_log.job_user_agent(job_id)

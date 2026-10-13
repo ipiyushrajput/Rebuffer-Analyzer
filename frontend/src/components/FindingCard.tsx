@@ -6,7 +6,9 @@
  * the affected layer and rendition beneath. The evidence itself opens in its own view.
  */
 
+import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { endpoints } from '../api/client'
 import { SEVERITY_STYLE, type Severity } from '../lib/constants'
 import { groupFindings, type FindingGroup } from '../lib/findingGroups'
 import { localTime, utcTitle } from '../lib/format'
@@ -87,18 +89,26 @@ export function FindingCard({
 export function FindingGroupCard({
   group,
   onOpen,
+  acknowledged = false,
 }: {
   group: FindingGroup
   onOpen?: (finding: FindingData) => void
+  acknowledged?: boolean
 }) {
   if (group.members.length === 1) {
-    return <FindingCard finding={group.lead} onOpen={onOpen} />
+    return (
+      <div className={cx(acknowledged && 'opacity-70')}>
+        {acknowledged && <span className="chip-violet mb-1 inline-block">Acknowledged</span>}
+        <FindingCard finding={group.lead} onOpen={onOpen} />
+      </div>
+    )
   }
   const style = SEVERITY_STYLE[group.severity as Severity]
   return (
     <article
       className={cx(
         'group relative overflow-hidden rounded-card border bg-white shadow-card transition-colors duration-150',
+        acknowledged && 'opacity-70',
         group.severity === 'CRITICAL' || group.severity === 'ERROR'
           ? 'border-pink-200'
           : group.severity === 'WARN'
@@ -112,7 +122,10 @@ export function FindingGroupCard({
       <span className={cx('absolute inset-y-0 left-0 w-[3px]', style.rail)} />
       <div className="px-4 py-3 pl-5">
         <div className="flex items-center justify-between gap-3">
-          <SeverityChip severity={group.severity as Severity} />
+          <span className="flex items-center gap-1.5">
+            <SeverityChip severity={group.severity as Severity} />
+            {acknowledged && <span className="chip-violet">Acknowledged</span>}
+          </span>
           <code className="font-mono text-[11px] text-ink-faint">{group.rule_id}</code>
         </div>
         <h4 className="mt-2 text-body font-semibold leading-snug text-ink">{group.title}</h4>
@@ -152,19 +165,38 @@ export function FindingsList({
   findings,
   onOpen,
   emptyTitle = 'No findings yet',
+  jobId,
 }: {
   findings: FindingData[]
   onOpen?: (finding: FindingData) => void
   emptyTitle?: string
+  /** The run, so the channel's acknowledged behaviours are marked and listed last. */
+  jobId?: string | null
 }) {
-  const groups = useMemo(() => groupFindings(findings), [findings])
+  const { data } = useQuery({
+    queryKey: ['acknowledged', jobId],
+    queryFn: () => endpoints.jobAcknowledged(jobId!),
+    enabled: !!jobId,
+  })
+  const groups = useMemo(() => {
+    const acks = data?.acknowledgements ?? []
+    const all = groupFindings(findings).map((group) => ({
+      group,
+      acknowledged: group.members.every((member) =>
+        acks.some(
+          (ack) => ack.rule_id === member.rule_id && (ack.variant === null || ack.variant === member.variant),
+        ),
+      ),
+    }))
+    return [...all.filter((item) => !item.acknowledged), ...all.filter((item) => item.acknowledged)]
+  }, [findings, data])
   if (findings.length === 0) {
     return <EmptyState title={emptyTitle} />
   }
   return (
     <div className="space-y-2.5">
-      {groups.map((group) => (
-        <FindingGroupCard key={group.key} group={group} onOpen={onOpen} />
+      {groups.map(({ group, acknowledged }) => (
+        <FindingGroupCard key={group.key} group={group} onOpen={onOpen} acknowledged={acknowledged} />
       ))}
     </div>
   )

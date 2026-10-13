@@ -23,6 +23,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import undefer
 
+from app.analysis import review
 from app.analysis.engine import AnalysisResult
 from app.config import get_settings
 from app.db import session as db_session
@@ -126,7 +127,12 @@ async def generate(
     if analysis is None:
         raise ValueError("This job has produced no result to report on yet")
 
-    html = render_html_for_handle(handle, analysis, await _manifests_for(handle, analysis))
+    html = render_html_for_handle(
+        handle,
+        analysis,
+        await _manifests_for(handle, analysis),
+        await review.matches_for(handle.urls.get("playback_url")),
+    )
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
     stem = f"{_slug(handle.channel_name)}-{handle.type}-{stamp}-{handle.id[:8]}"
 

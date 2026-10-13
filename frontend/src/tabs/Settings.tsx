@@ -8,7 +8,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { endpoints } from '../api/client'
+import { endpoints, type RulePrecision } from '../api/client'
 import { BatchSettingsPanel } from '../components/BatchSettingsPanel'
 import { CascadaSession, ProviderMapPanel } from '../components/CascadaSession'
 import { DrmSettingsPanel } from '../components/DrmSettingsPanel'
@@ -455,6 +455,8 @@ export function SettingsTab() {
 function RuleCatalogue() {
   const queryClient = useQueryClient()
   const { data } = useQuery({ queryKey: ['rules'], queryFn: endpoints.rules })
+  // Engineers' verdicts on findings, per rule: the share of reviewed findings that were real.
+  const precision = useQuery({ queryKey: ['rule-precision'], queryFn: endpoints.rulePrecision })
   const [filter, setFilter] = useState('')
   const [onlyChanged, setOnlyChanged] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -545,6 +547,7 @@ function RuleCatalogue() {
                 <th>Owner</th>
                 <th>Title, root cause and fix</th>
                 <th>Thresholds</th>
+                <th>Reviewed</th>
               </tr>
             </thead>
             <tbody>
@@ -591,6 +594,9 @@ function RuleCatalogue() {
                   <td className="font-mono text-micro text-ink-soft">
                     {rule.thresholds.join(', ') || '—'}
                   </td>
+                  <td className="whitespace-nowrap font-mono text-micro">
+                    <PrecisionCell value={precision.data?.rules[rule.id]} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -598,5 +604,19 @@ function RuleCatalogue() {
         </div>
       )}
     </div>
+  )
+}
+
+/** Confirmed / false positive, and the share that were real; a dash before any review. */
+function PrecisionCell({ value }: { value?: RulePrecision }) {
+  if (!value || value.reviewed === 0) return <span className="text-ink-faint">—</span>
+  const share = value.precision ?? 0
+  return (
+    <span
+      className={share < 0.5 ? 'text-pink-600' : share < 0.8 ? 'text-violet-600' : 'text-clean-600'}
+      title={`${value.confirmed} confirmed, ${value.false_positive} false positive`}
+    >
+      {Math.round(share * 100)}% real · {value.confirmed}✓ {value.false_positive}✗
+    </span>
   )
 }

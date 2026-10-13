@@ -411,6 +411,35 @@ export interface LocateRequest {
   text?: string
 }
 
+export interface FeedbackData {
+  id: number
+  job_id: string
+  rule_id: string
+  stream_layer: string
+  variant: string | null
+  verdict: 'confirmed' | 'false_positive'
+  note: string | null
+  created_at: string | null
+}
+
+export interface AcknowledgementData {
+  id: number
+  channel_key: string
+  channel_name: string | null
+  rule_id: string
+  variant: string | null
+  note: string
+  created_at: string | null
+  expires_at: string | null
+}
+
+export interface RulePrecision {
+  confirmed: number
+  false_positive: number
+  reviewed: number
+  precision: number | null
+}
+
 export const endpoints = {
   health: () => api.get<Record<string, unknown>>('/health'),
 
@@ -526,6 +555,23 @@ export const endpoints = {
   evidenceUrl: (jobId: string) => api.url(`/jobs/${jobId}/evidence.zip`),
   /** Every recorded rendition joined per clip, decrypted copies, and the clip's network log. */
   recordingUrl: (jobId: string) => api.url(`/jobs/${jobId}/recording.zip`),
+  jobFeedback: (jobId: string) => api.get<{ feedback: FeedbackData[] }>(`/jobs/${jobId}/feedback`),
+  giveFeedback: (
+    jobId: string,
+    body: { rule_id: string; stream_layer: string; variant: string | null; verdict: string; note?: string },
+  ) => api.post<FeedbackData>(`/jobs/${jobId}/feedback`, body),
+  rulePrecision: () => api.get<{ rules: Record<string, RulePrecision> }>('/rules/precision'),
+  jobAcknowledged: (jobId: string) =>
+    api.get<{ channel_key: string; acknowledgements: AcknowledgementData[] }>(`/jobs/${jobId}/acknowledged`),
+  acknowledge: (body: {
+    job_id?: string
+    playback_url?: string
+    rule_id: string
+    variant: string | null
+    note: string
+    expires_days?: number | null
+  }) => api.post<AcknowledgementData>('/acknowledgements', body),
+  unacknowledge: (id: number) => api.del<{ deleted: boolean }>(`/acknowledgements/${id}`),
   /** One owner's escalation: text, findings, marked playlists and a cURL per request. */
   escalationPackUrl: (jobId: string, owner: string) =>
     api.url(`/jobs/${jobId}/escalation.zip?owner=${encodeURIComponent(owner)}`),

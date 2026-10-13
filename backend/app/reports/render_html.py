@@ -18,6 +18,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.analysis.engine import AnalysisResult
 from app.analysis.grouping import group_findings
+from app.analysis.review import AckMatch, is_acknowledged
 from app.analysis.rules.base import Finding, Severity
 from app.api.health import VERSION
 from app.jobs.manager import _mask
@@ -233,6 +234,7 @@ def render_report(
     player_ratio: float | None = None,
     manifests: dict[str, Any] | None = None,
     user_agent: str = "",
+    acknowledged: list[AckMatch] | None = None,
 ) -> str:
     """Render the channel report to a self-contained HTML string.
 
@@ -245,14 +247,31 @@ def render_report(
     manifests = manifests or {}
     by_finding_manifest: dict[str, Any] = manifests.get("findings") or {}
 
+    acks = acknowledged or []
     actionable: list[Finding] = [
         f for f in result.findings if f.severity not in (Severity.PASS, Severity.INFO)
     ]
+    # A channel's accepted behaviours are still reported, under their own heading, and are
+    # left out of the escalation text; the verdict is computed from every finding as before.
+    escalated = [f for f in actionable if not is_acknowledged(acks, f.rule.id, f.variant)]
+    acknowledged_groups: list[dict[str, Any]] = []
     # One entry per issue: the same rule on the same layer is one defect, with each rendition
     # it was measured on beneath it — its own sentence, evidence and playlist at the time.
     by_owner: dict[str, list[dict[str, Any]]] = {}
     for group in group_findings(actionable):
         lead = group.lead
+        if all(is_acknowledged(acks, m.rule.id, m.variant) for m in group.members):
+            acknowledged_groups.append(
+                {
+                    "rule_id": group.rule_id,
+                    "title": lead.rule.title,
+                    "severity": group.severity.value,
+                    "count": group.count,
+                    "renditions": group.rendition_label(),
+                    "owner_label": lead.owner.label,
+                }
+            )
+            continue
         by_owner.setdefault(lead.owner.label, []).append(
             {
                 **lead.as_dict(),
@@ -273,7 +292,7 @@ def render_report(
     incident_manifests: list[Any] = manifests.get("incidents") or []
 
     escalations = build_blocks(
-        result.findings,
+        escalated,
         channel_name=channel_name,
         window_start=result.started_at,
         window_end=result.ended_at,
@@ -318,6 +337,7 @@ def render_report(
             for index, incident in enumerate(result.incidents)
         ],
         "poll_log": bool(manifests),
+        "acknowledged_groups": acknowledged_groups,
         "chains": [c.as_dict() for c in result.chains],
         "layer_diffs": [d.as_dict() for d in result.layer_diffs],
         "ladder": result.ladder,
@@ -359,13 +379,17 @@ def render_report(
 
 
 def render_html_for_handle(
-    handle: Any, result: AnalysisResult, manifests: dict[str, Any] | None = None
+    handle: Any,
+    result: AnalysisResult,
+    manifests: dict[str, Any] | None = None,
+    acknowledged: list[AckMatch] | None = None,
 ) -> str:
     """Render a report for a job handle, taking the channel identity from the job."""
     extra = handle.extra or {}
     return render_report(
         result,
         manifests=manifests,
+        acknowledged=acknowledged,
         channel_name=handle.channel_name,
         job_type=handle.type,
         urls=dict(handle.urls),
