@@ -7,12 +7,16 @@
  * words the escalation carries, so the operator copies rather than rewrites.
  */
 
+import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { api } from '../api/client'
+import { curlCommand, requestUrlOf } from '../lib/curl'
 import { OWNER_LABEL, SEVERITY_STYLE, type Severity } from '../lib/constants'
 import { localDateTime, utcTitle } from '../lib/format'
 import type { FindingData } from '../ws/messages'
 import { membersOf } from '../lib/findingGroups'
 import { PollManifest } from './PollManifest'
+import { Timeline, windowAround } from './Timeline'
 import { Card, CardHeader, CopyButton, EmptyState, SegmentedControl, SeverityChip, cx } from './ui'
 import { IconArrowRight } from './ui/icons'
 
@@ -139,6 +143,17 @@ export function FindingInvestigation({
   const [sampleIndex, setSampleIndex] = useState<number | null>(null)
   const selected = evidence.length > 0 ? Math.min(sampleIndex ?? evidence.length - 1, evidence.length - 1) : -1
   const sample = selected >= 0 ? evidence[selected] : null
+
+  const { data: profile } = useQuery({
+    queryKey: ['request-profile', jobId],
+    queryFn: () => api.get<{ user_agent: string }>(`/jobs/${jobId}/request-profile`),
+    enabled: !!jobId,
+    staleTime: Infinity,
+  })
+  const userAgent = profile?.user_agent ?? ''
+
+  const samplePoll = sample?.poll as { at?: string } | undefined
+  const occurrenceAt = samplePoll?.at ?? (sample?.at as string | undefined) ?? finding.last_seen
 
   const style = SEVERITY_STYLE[finding.severity as Severity]
   const owner = finding.owner_label || OWNER_LABEL[finding.owner] || finding.owner
@@ -277,6 +292,7 @@ export function FindingInvestigation({
                       <th>#</th>
                       <th>Poll</th>
                       <th>Measured</th>
+                      <th>Reproduce</th>
                       {evidenceKeys.map((key) => (
                         <th key={key}>{key.replace(/_/g, ' ')}</th>
                       ))}
@@ -306,6 +322,16 @@ export function FindingInvestigation({
                               {String(record.detail ?? finding.detail)}
                             </span>
                           </td>
+                          <td onClick={(event) => event.stopPropagation()}>
+                            {requestUrlOf(record) ? (
+                              <CopyButton
+                                label="cURL"
+                                text={() => curlCommand(requestUrlOf(record)!, userAgent)}
+                              />
+                            ) : (
+                              <span className="text-micro text-ink-faint">—</span>
+                            )}
+                          </td>
                           {evidenceKeys.map((key) => {
                             const text = evidenceValue(record[key])
                             return (
@@ -331,6 +357,14 @@ export function FindingInvestigation({
           </Card>
 
           {jobId && <PollManifest jobId={jobId} finding={finding} sample={sample} />}
+          {jobId && occurrenceAt && (
+            <Timeline
+              jobId={jobId}
+              {...windowAround(occurrenceAt)}
+              variant={finding.variant}
+              title="What happened around this occurrence"
+            />
+          )}
         </div>
 
         {/* --- decision ------------------------------------------------------ */}

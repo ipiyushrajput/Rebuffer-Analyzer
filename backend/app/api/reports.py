@@ -186,6 +186,52 @@ async def evidence_bundle(job_id: str) -> Response:
     )
 
 
+@router.get("/jobs/{job_id}/request-profile")
+async def job_request_profile(job_id: str) -> dict[str, Any]:
+    """The User-Agent a run went out as, so a copied cURL asks exactly what the run asked."""
+    handle = job_manager.get(job_id)
+    if handle is not None:
+        options = handle.options.public()
+        return {"ua_profile": options["ua_profile"], "user_agent": options["user_agent"]}
+    return {"ua_profile": "", "user_agent": await network_log.job_user_agent(job_id)}
+
+
+# -- the timeline --------------------------------------------------------------
+
+
+@router.get("/jobs/{job_id}/timeline")
+async def job_timeline(
+    job_id: str,
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    variant: str | None = Query(default=None),
+    limit: int = Query(default=1500, ge=10, le=10000),
+) -> dict[str, Any]:
+    """Polls, segment fetches, player events, findings and incidents of a window, in order."""
+    from app.reports.timeline import build_timeline
+
+    handle = job_manager.get(job_id)
+    live_findings = None
+    live_incidents = None
+    if handle is not None and handle.session is not None and handle.result is None:
+        # A running job: what is buffered is written first, and its findings are in memory.
+        if handle.poll_log is not None:
+            await handle.poll_log.flush()
+        if handle.recorder is not None:
+            await handle.recorder.flush()
+        live_findings = [f.as_dict() for f in handle.session.collector.all()]
+        live_incidents = [i.as_dict() for i in handle.session.incidents.incidents]
+    return await build_timeline(
+        job_id,
+        start=_moment(start, "start"),
+        end=_moment(end, "end"),
+        variant=variant,
+        live_findings=live_findings,
+        live_incidents=live_incidents,
+        limit=limit,
+    )
+
+
 # -- the recording -------------------------------------------------------------
 
 

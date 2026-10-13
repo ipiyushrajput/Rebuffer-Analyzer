@@ -16,6 +16,7 @@ import { groupFindings } from '../lib/findingGroups'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import { SessionVerdict } from '../components/SessionVerdict'
+import { Timeline } from '../components/Timeline'
 import {
   Card,
   CardHeader,
@@ -359,6 +360,7 @@ function ChannelDetail({
   onDelete: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
+  const [openIncident, setOpenIncident] = useState<number | null>(null)
   const { data, isLoading, error } = useQuery({
     queryKey: ['channel', channelId],
     queryFn: () => endpoints.readChannel(channelId),
@@ -536,6 +538,7 @@ function ChannelDetail({
                     <th>Started</th>
                     <th>Duration</th>
                     <th>Cause</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -554,8 +557,20 @@ function ChannelDetail({
                       <td className="font-mono text-micro tabular-nums text-ink-soft">
                         {duration(Number(incident.duration_s))}
                       </td>
-                      <td className="max-w-[420px] text-micro text-ink-muted">
-                        {String(incident.detail ?? '—')}
+                      <td className="max-w-[420px] break-words text-micro text-ink-muted">
+                        {typeof incident.detail === 'object'
+                          ? JSON.stringify(incident.detail)
+                          : String(incident.detail ?? '—')}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-ghost btn-sm"
+                          aria-pressed={openIncident === index}
+                          onClick={() => setOpenIncident(openIncident === index ? null : index)}
+                        >
+                          Timeline
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -563,6 +578,15 @@ function ChannelDetail({
               </table>
             </div>
           </Card>
+        )}
+
+        {openIncident !== null && incidents[openIncident] && (
+          <Timeline
+            jobId={channelId}
+            {...incidentWindow(incidents[openIncident])}
+            variant={(incidents[openIncident].variant as string | null) ?? null}
+            title={`Timeline of the ${String(incidents[openIncident].kind)} incident`}
+          />
         )}
 
         {Object.keys(vpb).length > 0 && (
@@ -602,4 +626,14 @@ function ChannelDetail({
       </PageBody>
     </>
   )
+}
+
+/** An incident and the two minutes that led into it, and the minute after it closed. */
+function incidentWindow(incident: Record<string, unknown>): { start: string; end: string } {
+  const started = new Date(String(incident.started_at)).valueOf()
+  const ended = incident.ended_at ? new Date(String(incident.ended_at)).valueOf() : started
+  return {
+    start: new Date(started - 120_000).toISOString(),
+    end: new Date(Math.max(ended, started) + 60_000).toISOString(),
+  }
 }
