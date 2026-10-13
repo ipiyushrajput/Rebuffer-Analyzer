@@ -9,7 +9,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { api } from '../api/client'
+import { api, endpoints } from '../api/client'
 import { curlCommand, requestUrlOf } from '../lib/curl'
 import { OWNER_LABEL, SEVERITY_STYLE, type Severity } from '../lib/constants'
 import { localDateTime, utcTitle } from '../lib/format'
@@ -389,6 +389,11 @@ export function FindingInvestigation({
             )}
             <div className="flex items-center justify-between gap-3 bg-surface-sunken px-5 py-3.5">
               <span className="chip-clean">Escalation ready</span>
+              {jobId && (
+                <a className="btn-ghost btn-sm" href={endpoints.escalationPackUrl(jobId, finding.owner)}>
+                  Pack for {owner}
+                </a>
+              )}
               <CopyButton
                 label="Copy escalation"
                 variant="primary"

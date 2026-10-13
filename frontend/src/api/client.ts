@@ -526,6 +526,9 @@ export const endpoints = {
   evidenceUrl: (jobId: string) => api.url(`/jobs/${jobId}/evidence.zip`),
   /** Every recorded rendition joined per clip, decrypted copies, and the clip's network log. */
   recordingUrl: (jobId: string) => api.url(`/jobs/${jobId}/recording.zip`),
+  /** One owner's escalation: text, findings, marked playlists and a cURL per request. */
+  escalationPackUrl: (jobId: string, owner: string) =>
+    api.url(`/jobs/${jobId}/escalation.zip?owner=${encodeURIComponent(owner)}`),
   /** The poll a finding fired on (or the rendition's poll at a moment), lines marked. */
   locatePoll: (jobId: string, body: LocateRequest) =>
     api.post<PollData>(`/jobs/${jobId}/polls/locate`, body),

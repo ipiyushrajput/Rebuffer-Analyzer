@@ -196,6 +196,25 @@ async def job_request_profile(job_id: str) -> dict[str, Any]:
     return {"ua_profile": "", "user_agent": await network_log.job_user_agent(job_id)}
 
 
+@router.get("/jobs/{job_id}/escalation.zip")
+async def escalation_pack(job_id: str, owner: str = Query(...)) -> Response:
+    """Everything one owner needs: the escalation text, their findings, the playlists the
+    findings fired on with the lines marked, and a cURL per request."""
+    from app.reports.escalation_pack import build_pack
+
+    pack = await build_pack(job_id, owner)
+    filename = f"escalation-{owner.lower()}-{job_id[:8]}.zip"
+    if pack is None:
+        raise HTTPException(
+            status_code=404, detail=f"This run has no actionable finding for {owner}"
+        )
+    return Response(
+        content=pack,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # -- the timeline --------------------------------------------------------------
 
 
