@@ -111,9 +111,16 @@ async def test_incident_mode_keeps_only_what_an_incident_spans(tmp_path: Path) -
         (directory / relative).write_bytes(b"x" * 10)
         recorder.entries.append(
             RecordedSegment(
-                layer="PLAYBACK", variant="v1", kind="video", msn=minute, uri=f"s{minute}.ts",
-                at=(base + dt.timedelta(minutes=minute)).isoformat(), duration=6.0,
-                file=relative, bytes=10, status=200,
+                layer="PLAYBACK",
+                variant="v1",
+                kind="video",
+                msn=minute,
+                uri=f"s{minute}.ts",
+                at=(base + dt.timedelta(minutes=minute)).isoformat(),
+                duration=6.0,
+                file=relative,
+                bytes=10,
+                status=200,
             )
         )
     # One incident from 09:05:00 to 09:05:20: kept from 09:04:30 to 09:05:30.
@@ -137,9 +144,16 @@ async def test_incident_mode_keeps_only_what_an_incident_spans(tmp_path: Path) -
                 {"at": (base + dt.timedelta(minutes=9)).isoformat()},
             ],
             "windows": [
-                {"variant": "v1", "start": (base + dt.timedelta(minutes=5)).isoformat(), "end": None},
-                {"variant": "v2", "start": (base + dt.timedelta(minutes=5, seconds=5)).isoformat(),
-                 "end": (base + dt.timedelta(minutes=5, seconds=6)).isoformat()},
+                {
+                    "variant": "v1",
+                    "start": (base + dt.timedelta(minutes=5)).isoformat(),
+                    "end": None,
+                },
+                {
+                    "variant": "v2",
+                    "start": (base + dt.timedelta(minutes=5, seconds=5)).isoformat(),
+                    "end": (base + dt.timedelta(minutes=5, seconds=6)).isoformat(),
+                },
             ],
             "ended_at": (base + dt.timedelta(minutes=6)).isoformat(),
         }
@@ -161,7 +175,9 @@ async def test_a_recorder_that_reaches_its_quota_stops_and_says_so(
     recorder_module.USAGE.root = None
     fetcher = Fetcher()
     recorder = StreamRecorder(job_id="quota", root=tmp_path, fetcher=fetcher, quota_bytes=100)
-    recorder.observe_playlist(layer="PLAYBACK", variant="v", kind="video", playlist=playlist, encrypted=False)
+    recorder.observe_playlist(
+        layer="PLAYBACK", variant="v", kind="video", playlist=playlist, encrypted=False
+    )
     summary = await recorder.close()
     await fetcher.aclose()
 
