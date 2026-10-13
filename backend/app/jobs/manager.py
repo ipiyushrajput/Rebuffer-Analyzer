@@ -18,7 +18,9 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app import alerts as alerts_module
 from app.analysis import recorder as recorder_module
+from app.analysis import review
 from app.analysis.engine import AnalysisResult, AnalysisSession, SessionOptions
 from app.config import default_ua_profile, get_settings, get_thresholds
 from app.db import session as db_session
@@ -58,6 +60,7 @@ class JobHandle:
     # Set for a run that records its samples; None for one that draws them live instead.
     recorder: SampleRecorder | None = None
     poll_log: ManifestLog | None = None
+    alerts: Any = None
     status: str = "PENDING"
     created_at: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
     started_at: dt.datetime | None = None
@@ -243,7 +246,29 @@ class JobManager:
             poll_log.resume_from(await manifest_last_seq(handle.id))
             handle.poll_log = poll_log
 
+            # Alerts for this run: the first occurrence of each issue at or above the
+            # configured severity is posted while the run is still going, unless the channel
+            # acknowledges it.
+            job_alerts = alerts_module.JobAlerts(
+                job_id=handle.id,
+                job_type=handle.type,
+                channel=handle.channel_name,
+                settings=await alerts_module.load(),
+                acknowledged=await review.matches_for(handle.urls.get("playback_url")),
+            )
+            handle.alerts = job_alerts
+            pending_alerts: set[asyncio.Task[bool]] = set()
+
             async def on_event(kind: str, payload: dict[str, Any]) -> None:
+                if (
+                    kind == "finding"
+                    and job_alerts.active
+                    and isinstance(payload.get("data"), dict)
+                ):
+                    # Never awaited here: a slow webhook must not hold up the poll handler.
+                    task = asyncio.create_task(job_alerts.observe(payload["data"]))
+                    pending_alerts.add(task)
+                    task.add_done_callback(pending_alerts.discard)
                 if recorder is not None:
                     await recorder.observe(kind, payload)
                 if self._event_sink is not None:

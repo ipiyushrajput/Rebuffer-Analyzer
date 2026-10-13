@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { endpoints, type RulePrecision } from '../api/client'
 import { BatchSettingsPanel } from '../components/BatchSettingsPanel'
 import { CascadaSession, ProviderMapPanel } from '../components/CascadaSession'
+import { AlertsPanel } from '../components/AlertsPanel'
 import { DrmSettingsPanel } from '../components/DrmSettingsPanel'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import {
@@ -45,6 +46,7 @@ type GroupId =
   | 'cascada'
   | 'batch'
   | 'drm'
+  | 'alerts'
   | 'rules'
 
 const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
@@ -150,6 +152,7 @@ const TABS: { id: GroupId; label: string }[] = [
   ...GROUPS.map((group) => ({ id: group.id, label: group.title })),
   { id: 'batch', label: 'Automated batches' },
   { id: 'drm', label: 'DRM' },
+  { id: 'alerts', label: 'Alerts' },
   { id: 'rules', label: 'Rule catalogue' },
 ]
 
@@ -385,6 +388,11 @@ export function SettingsTab() {
             <DrmSettingsPanel />
           </div>
 
+          {/* --- alerts: saved through their own endpoint, like DRM ------------- */}
+          <div className={tab === 'alerts' ? 'p-4 pt-2' : 'panel-hidden'}>
+            <AlertsPanel />
+          </div>
+
           {/* --- rule catalogue ------------------------------------------------ */}
           <div className={tab === 'rules' ? '' : 'panel-hidden'}>
             <RuleCatalogue />
@@ -409,7 +417,7 @@ export function SettingsTab() {
       <div
         className={cx(
           'sticky bottom-0 z-20 border-t border-rail-border bg-rail px-6 py-3',
-          (tab === 'batch' || tab === 'drm') && 'hidden',
+          (tab === 'batch' || tab === 'drm' || tab === 'alerts') && 'hidden',
         )}
       >
         <div className="flex flex-wrap items-center gap-3">
