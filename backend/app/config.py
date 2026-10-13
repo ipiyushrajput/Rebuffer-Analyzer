@@ -280,6 +280,18 @@ class Settings(BaseSettings):
     rba_bulk_default_concurrency: int = 5
     rba_per_host_connections: int = 8
     rba_sample_retention_days: int = 30
+    # The poll log: every playlist fetch of every run, bodies compressed and stored once per
+    # distinct content. Ordinary polls follow the sample retention; a poll a finding fired on
+    # or an incident spanned is pinned and kept this long.
+    rba_manifest_log: bool = True
+    rba_pinned_retention_days: int = 180
+
+    # Stream recordings: segment files written to disk, the one thing the analyzer host
+    # keeps, because video does not belong in a database row. Bounded by a quota and purged
+    # with the samples; a recording that was pinned (an aging incident clip) follows the
+    # pinned retention.
+    rba_recordings_dir: Path = BACKEND_ROOT / "var" / "recordings"
+    rba_recordings_quota_gb: float = 200.0
 
     rba_log_level: str = "INFO"
 

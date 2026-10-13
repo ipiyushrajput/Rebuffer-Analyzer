@@ -6,11 +6,11 @@ import datetime as dt
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from app.api.realtime import _interim
 from app.jobs.manager import job_manager
-from app.reports import service
+from app.reports import network_log, service
 
 router = APIRouter(tags=["reports"])
 
@@ -173,6 +173,84 @@ async def evidence_bundle(job_id: str) -> Response:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="evidence-{job_id[:8]}.zip"'},
     )
+
+
+# -- the poll log --------------------------------------------------------------
+
+
+def _moment(value: str | None, name: str) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        moment = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{name} must be ISO-8601") from exc
+    return moment if moment.tzinfo else moment.replace(tzinfo=dt.UTC)
+
+
+async def _with_curl(job_id: str, poll: dict[str, Any]) -> dict[str, Any]:
+    poll["curl"] = network_log.curl_command(poll["url"], await network_log.job_user_agent(job_id))
+    return poll
+
+
+@router.get("/jobs/{job_id}/network-log.zip")
+async def network_log_archive(job_id: str) -> StreamingResponse:
+    """Every playlist poll of the run as files, a HAR and a CSV, streamed as one ZIP.
+
+    Read from the database, so it is complete for the whole run and is served after the run
+    has finished and after a restart.
+    """
+    if await network_log.poll_count(job_id) == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="This run has no poll log: it ran before the poll log existed, or wrote none.",
+        )
+    return StreamingResponse(
+        network_log.stream_archive(job_id),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="network-log-{job_id[:8]}.zip"'},
+    )
+
+
+@router.get("/jobs/{job_id}/polls")
+async def job_polls(
+    job_id: str,
+    variant: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    after_seq: int = Query(default=0, ge=0),
+    limit: int = Query(default=500, ge=1, le=5000),
+) -> dict[str, Any]:
+    """The poll log in poll order, a page at a time."""
+    polls = await network_log.list_polls(
+        job_id,
+        variant=variant,
+        start=_moment(start, "start"),
+        end=_moment(end, "end"),
+        after_seq=after_seq,
+        limit=limit,
+    )
+    return {"polls": polls, "total": await network_log.poll_count(job_id)}
+
+
+@router.get("/jobs/{job_id}/polls/{seq}")
+async def job_poll(job_id: str, seq: int) -> dict[str, Any]:
+    """One poll with its body and the rendition's previous poll, as a finding names it."""
+    poll = await network_log.poll_with_context(job_id, seq=seq)
+    if poll is None:
+        raise HTTPException(status_code=404, detail=f"Poll {seq} is not in this run's log")
+    return await _with_curl(job_id, poll)
+
+
+@router.get("/jobs/{job_id}/poll-at")
+async def job_poll_at(
+    job_id: str, variant: str = Query(...), at: str | None = Query(default=None)
+) -> dict[str, Any]:
+    """The poll of a rendition current at a moment: the latest at or before it."""
+    poll = await network_log.poll_with_context(job_id, variant=variant, at=_moment(at, "at"))
+    if poll is None:
+        raise HTTPException(status_code=404, detail=f"No poll of {variant} is in this run's log")
+    return await _with_curl(job_id, poll)
 
 
 @router.get("/jobs/{job_id}/snapshots")

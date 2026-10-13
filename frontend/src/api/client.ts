@@ -477,6 +477,9 @@ export const endpoints = {
   rerunBatch: (id: string) => api.post<Batch>(`/batch/batches/${id}/rerun`),
   batchLog: (id: string) => api.get<{ lines: BatchLogLine[] }>(`/batch/batches/${id}/log`),
   batchLogUrl: (id: string) => api.url(`/batch/batches/${id}/log?download=true`),
+  /** Every playlist poll of a run as files, a HAR and a CSV. Read from the database. */
+  networkLogUrl: (jobId: string) => api.url(`/jobs/${jobId}/network-log.zip`),
+  evidenceUrl: (jobId: string) => api.url(`/jobs/${jobId}/evidence.zip`),
   batchReportUrl: (id: string, fmt: 'csv' | 'xlsx') =>
     api.url(`/batch/batches/${id}/report.${fmt}`),
   batchColumns: () =>

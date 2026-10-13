@@ -177,6 +177,20 @@ frontend/src/
   migrating. `tests/test_schema_drift.py` builds a database from the revisions alone and
   requires it to match the models exactly, and a revision that alters a column does so on
   SQLite as well (`batch_alter_table`) so that comparison holds.
+- **Every playlist poll is written down, and a finding names the poll it fired on.**
+  `app/jobs/manifest_log.py` numbers every playlist fetch of a run (`seq`, across every
+  rendition and the master) and writes it to `manifest_polls` — URL, final URL, status, full
+  response headers, the redirect chain, the timing split — with the body in `manifest_bodies`,
+  zlib-compressed and stored once per distinct content per job. It runs for every job,
+  realtime included, independent of `record_evidence`; the poller's in-memory history (400
+  polls) is for its own comparisons only and is never the record. The engine sets the poll
+  being handled in a per-task `ContextVar`, and `_record` stamps it into each evidence sample
+  as `poll`, so a finding from hour three of an aging run opens on the window as it stood
+  then. When a run ends, the polls a finding names and every poll inside an incident window
+  (±30 s) are pinned: ordinary polls follow `rba_sample_retention_days`, pinned ones
+  `rba_pinned_retention_days`, a running job is never purged, and orphaned bodies go with the
+  last poll that carried them. `GET /api/jobs/{id}/network-log.zip` streams every poll as a
+  file, `polls.csv` and a HAR 1.2 (playlists and segment fetches) from a spooled temp file.
 - **A listing sorts keys, never rows.** MySQL's filesort packs every selected column into
   `sort_buffer_size`, and a `jobs` row carries two JSON columns and five TEXT ones, so
   `select(Model).order_by(...)` over a table with history fails with error 1038, "Out of sort

@@ -39,6 +39,8 @@ class Snapshot:
     # Set when the body arrived and the analyzer's own parser raised on it. That is the
     # analyzer's defect, not the stream's, so it is logged rather than charged to the origin.
     parse_error: str = ""
+    # The poll's number in the job's poll log, set by the engine when it handles the poll.
+    seq: int = 0
 
     @property
     def ok(self) -> bool:
@@ -46,6 +48,7 @@ class Snapshot:
 
     def summary(self) -> dict[str, Any]:
         return {
+            "seq": self.seq,
             "at": self.at.isoformat(),
             "variant": self.variant,
             "url": self.url,

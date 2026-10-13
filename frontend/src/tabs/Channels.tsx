@@ -446,6 +446,10 @@ function ChannelDetail({
           ) : (
             <>
               <ReportLinks reports={reports} />
+              <a className="btn-ghost btn-sm" href={endpoints.networkLogUrl(channelId)}>
+                <IconDownload size={13} />
+                Network log
+              </a>
               <button
                 type="button"
                 className="btn-ghost btn-sm text-pink-600"

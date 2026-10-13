@@ -22,6 +22,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -287,6 +288,78 @@ class PlaylistSnapshot(Base):
         # Every rung at once, in time order: the charts and the exports read a job
         # whole. Without this the server sorts the whole run — URIs, JSON and all.
         Index(f"ix_{_t('playlist_snapshots')}_job_ts", "job_id", "ts"),
+    )
+
+
+class ManifestPoll(Base):
+    """One fetch of one playlist — every poll of every rendition, the master included.
+
+    The poll log is the network record of a run: what was asked for, what came back, how long
+    it took and which body it carried. The body itself lives in `ManifestBody`, once per
+    distinct content, because a live playlist polled at half its target duration repeats
+    itself on roughly every other poll. `seq` numbers the polls of a job in the order they
+    completed, across every rendition, and is how a finding names the poll it fired on.
+    """
+
+    __tablename__ = _t("manifest_polls")
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+    ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    stream_layer: Mapped[str] = mapped_column(String(16), default="PLAYBACK")
+    variant: Mapped[str] = mapped_column(String(64))
+    # master | video | audio | subtitles
+    kind: Mapped[str] = mapped_column(String(16), default="video")
+    url: Mapped[str] = mapped_column(Text)
+    final_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ttfb_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    bytes: Mapped[int] = mapped_column(Integer, default=0)
+    msn: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), nullable=True
+    )
+    last_msn: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), nullable=True
+    )
+    # Response headers in full, the redirect chain hop by hop, and the timing split: what a
+    # HAR file and a "copy as cURL" are built from.
+    headers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    hops: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    timings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # sha256 of the body as served; empty for a poll that carried none.
+    body_hash: Mapped[str] = mapped_column(String(64), default="")
+    # Kept past the sample retention: a poll a finding fired on or an incident spanned.
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        Index(f"ix_{_t('manifest_polls')}_job_seq", "job_id", "seq"),
+        Index(f"ix_{_t('manifest_polls')}_job_variant_ts", "job_id", "variant", "ts"),
+        # A body is looked up by the polls that carried it, and the purge asks whether any
+        # poll still does.
+        Index(f"ix_{_t('manifest_polls')}_job_hash", "job_id", "body_hash"),
+    )
+
+
+class ManifestBody(Base):
+    """A distinct playlist body of a job, zlib-compressed, stored once."""
+
+    __tablename__ = _t("manifest_bodies")
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    body_hash: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    body: Mapped[bytes] = mapped_column(ReportBlob)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "body_hash", name=f"uq_{_t('manifest_bodies')}_job_hash"),
     )
 
 

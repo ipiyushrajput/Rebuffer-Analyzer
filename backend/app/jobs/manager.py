@@ -26,6 +26,9 @@ from app.db.models import Incident as IncidentRow
 from app.db.models import Job as JobRow
 from app.db.models import PlaylistSample, PlaylistSnapshot, SegmentSample, VirtualBufferSample
 from app.drm import settings as drm_settings
+from app.jobs import manifest_log
+from app.jobs.manifest_log import ManifestLog
+from app.jobs.manifest_log import last_seq as manifest_last_seq
 from app.jobs.samples import SampleRecorder
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,7 @@ class JobHandle:
     task: asyncio.Task[AnalysisResult] | None = None
     # Set for a run that records its samples; None for one that draws them live instead.
     recorder: SampleRecorder | None = None
+    poll_log: ManifestLog | None = None
     status: str = "PENDING"
     created_at: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
     started_at: dt.datetime | None = None
@@ -226,11 +230,17 @@ class JobManager:
             handle.started_at = dt.datetime.now(dt.UTC)
             handle.ends_at = handle.started_at + dt.timedelta(seconds=handle.options.duration_s)
 
-            # A run nobody is watching has to write its polls and fetches down, or it leaves
-            # behind findings and nothing to look at. `record_evidence` is already true for
-            # aging and false for realtime, which draws its charts from the socket instead.
-            recorder = SampleRecorder(handle.id) if handle.options.record_evidence else None
+            # Every run writes its polls and fetches down. An aging run nobody is watching
+            # would otherwise leave findings and nothing to look at, and a realtime run that
+            # is stopped is filed under Analysed channels and downloaded as a network log —
+            # both read these rows, not the socket the realtime charts were drawn from.
+            recorder: SampleRecorder | None = SampleRecorder(handle.id)
             handle.recorder = recorder
+            poll_log = ManifestLog(job_id=handle.id, enabled=get_settings().rba_manifest_log)
+            # A run resumed after a restart carries its numbering on, so the polls of the run
+            # before the restart and after it never share a number.
+            poll_log.resume_from(await manifest_last_seq(handle.id))
+            handle.poll_log = poll_log
 
             async def on_event(kind: str, payload: dict[str, Any]) -> None:
                 if recorder is not None:
@@ -253,6 +263,7 @@ class JobManager:
                 # same DRM configuration without any of them asking for it.
                 drm=await drm_settings.load(),
                 on_event=on_event,
+                poll_log=poll_log,
             )
             handle.session = session
 
@@ -282,9 +293,20 @@ class JobManager:
                 # part of the run, and a cancelled or failed one keeps what it got to.
                 if recorder is not None:
                     await recorder.flush()
+                await poll_log.flush()
                 await self._persist_job(handle)
 
             await self._persist_result(handle, result)
+            # The polls a finding fired on and the polls an incident spanned outlive the
+            # sample retention: they are the evidence a report and an escalation point at.
+            await manifest_log.pin_polls(
+                handle.id,
+                seqs=manifest_log.poll_seqs_of(result.findings),
+                windows=[
+                    (i.variant, i.started_at, i.ended_at or result.ended_at)
+                    for i in result.incidents
+                ],
+            )
             if self._on_result is not None:
                 await self._on_result(handle, result)
             return result
@@ -491,6 +513,18 @@ class JobManager:
                 )
             )
             removed += int(getattr(snapshot_result, "rowcount", 0) or 0)
+
+        running = {
+            job_id
+            for job_id, h in self.jobs.items()
+            if h.status not in ("COMPLETED", "CANCELLED", "FAILED")
+        }
+        removed += await manifest_log.purge(
+            cutoff=cutoff,
+            pinned_cutoff=dt.datetime.now(dt.UTC)
+            - dt.timedelta(days=settings.rba_pinned_retention_days),
+            running=running,
+        )
         return removed
 
 

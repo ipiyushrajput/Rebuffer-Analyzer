@@ -326,6 +326,14 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
                 <IconDownload size={14} />
                 PDF report
               </button>
+              <a
+                className={cx('btn-ghost btn-sm', !store.sessionId && 'pointer-events-none opacity-50')}
+                href={store.sessionId ? endpoints.networkLogUrl(store.sessionId) : undefined}
+                title="Every playlist poll of every rendition, as files, a HAR and a CSV"
+              >
+                <IconDownload size={14} />
+                Network log
+              </a>
               <button
                 type="button"
                 className="btn-accent btn-sm"

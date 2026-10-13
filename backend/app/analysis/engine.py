@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import datetime as dt
 import logging
 from collections.abc import Awaitable, Callable
@@ -54,14 +55,21 @@ from app.drm.settings import DrmSettings
 from app.hls import scte35
 from app.hls.playlist import MasterPlaylist, MediaPlaylist, is_master, parse_master, parse_media
 from app.hls.uri import host_of
+from app.jobs.manifest_log import ManifestLog, PollRef
 from app.media import ffprobe
 from app.net import dns as dns_module
 from app.net import tls_inspect
-from app.net.fetcher import Fetcher
+from app.net.fetcher import Fetcher, FetchResult
 
 logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+# The poll being handled, per asyncio task. Each rendition's poller runs in its own task, so a
+# finding raised while one poll is handled can never be labelled with another rendition's.
+_CURRENT_POLL: contextvars.ContextVar[PollRef | None] = contextvars.ContextVar(
+    "rba_current_poll", default=None
+)
 
 LAYER_FIELDS = (
     ("playback_url", StreamLayer.PLAYBACK),
@@ -251,8 +259,12 @@ class AnalysisSession:
         thresholds: Thresholds | None = None,
         drm: DrmSettings | None = None,
         on_event: EventHandler | None = None,
+        poll_log: ManifestLog | None = None,
     ) -> None:
         self.session_id = session_id
+        # Every playlist fetch is numbered here and, when the job keeps a log, written down.
+        # A run without one (the CLI) still numbers its polls, so findings name them.
+        self.poll_log = poll_log or ManifestLog(job_id=session_id, enabled=False)
         self.channel_name = channel_name or "(unnamed channel)"
         self.urls = {
             "playback_url": playback_url,
@@ -375,7 +387,18 @@ class AnalysisSession:
         if findings is None:
             return
         items = findings if isinstance(findings, list) else [findings]
+        poll = _CURRENT_POLL.get()
         for finding in items:
+            if poll is not None:
+                # The poll this occurrence was measured on, carried by its own evidence
+                # sample: a finding merges many occurrences, each from its own poll.
+                ref = poll.as_dict()
+                if finding.evidence:
+                    for sample in finding.evidence:
+                        if isinstance(sample, dict):
+                            sample.setdefault("poll", ref)
+                else:
+                    finding.evidence = [{"poll": ref}]
             merged = self.collector.add(finding)
             if merged is not None and merged.count == 1:
                 await self._emit("finding", {"data": merged.as_dict()})
@@ -408,7 +431,10 @@ class AnalysisSession:
                 continue
             context = LayerContext(layer=layer, url=url)
             self.layers[layer] = context
-            await self._bootstrap_layer(context)
+            try:
+                await self._bootstrap_layer(context)
+            finally:
+                _CURRENT_POLL.set(None)
 
         if len(self.layers) == 1:
             await self._record(
@@ -450,6 +476,18 @@ class AnalysisSession:
 
         result = await self._fetcher.fetch(context.url)
         context.playlist_count += 1
+        text_head = result.text if result.ok else ""
+        root_variant = "master" if result.ok and is_master(text_head) else "media"
+        _CURRENT_POLL.set(
+            await self._log_poll(
+                layer=layer,
+                variant=root_variant,
+                kind="master" if root_variant == "master" else "video",
+                url=context.url,
+                result=result,
+                at=dt.datetime.now(dt.UTC),
+            )
+        )
         self.redirect_chains.append({"layer": layer.value, **result.as_dict()})
         await self._record(
             transport_rules.check_http(
@@ -684,7 +722,59 @@ class AnalysisSession:
 
         return handler
 
+    async def _log_poll(
+        self,
+        *,
+        layer: StreamLayer,
+        variant: str,
+        kind: str,
+        url: str,
+        result: FetchResult,
+        at: dt.datetime,
+        msn: int | None = None,
+        last_msn: int | None = None,
+    ) -> PollRef:
+        """Number one playlist fetch and hand it to the poll log."""
+        seq = self.poll_log.next_seq()
+        try:
+            await self.poll_log.record(
+                seq=seq,
+                at=at,
+                layer=layer.value,
+                variant=variant,
+                kind=kind,
+                url=url,
+                result=result,
+                msn=msn,
+                last_msn=last_msn,
+            )
+        except Exception:
+            # The log is evidence; a failure to write it never stops the measurement.
+            logger.exception("poll %d of %s could not be logged", seq, variant)
+        return PollRef(seq=seq, layer=layer.value, variant=variant, at=at, msn=msn)
+
     async def _on_snapshot(self, context: LayerContext, snapshot: Snapshot) -> None:
+        playlist = snapshot.playlist
+        ref = await self._log_poll(
+            layer=context.layer,
+            variant=snapshot.variant,
+            kind=context.targets[snapshot.variant].kind,
+            url=snapshot.url,
+            result=snapshot.result,
+            at=snapshot.at,
+            msn=playlist.media_sequence if playlist else None,
+            last_msn=playlist.last_msn if playlist else None,
+        )
+        snapshot.seq = ref.seq
+        # Every finding raised while this poll is handled names it — the segment checks
+        # included, since sampling runs inside the handler.
+        token = _CURRENT_POLL.set(ref)
+        try:
+            await self._handle_snapshot(context, snapshot)
+        finally:
+            _CURRENT_POLL.reset(token)
+
+    async def _handle_snapshot(self, context: LayerContext, snapshot: Snapshot) -> None:
         layer = context.layer
         variant = snapshot.variant
         target = context.targets[variant]
@@ -1252,25 +1342,43 @@ class AnalysisSession:
             if context.master is None:
                 continue
             result = await self._fetcher.fetch(context.url)
+            ref = await self._log_poll(
+                layer=context.layer,
+                variant="master",
+                kind="master",
+                url=context.url,
+                result=result,
+                at=dt.datetime.now(dt.UTC),
+            )
             if not result.ok:
                 continue
             text = result.text
-            if not is_master(text):
-                await self._record(
-                    R.MST_MEDIA_BECAME_MASTER.raise_finding(
-                        f"{context.url} no longer returns a master playlist.",
-                        evidence={"url": context.url},
-                        stream_layer=context.layer,
-                    )
-                )
-                continue
-            current = parse_master(text, result.final_url)
+            token = _CURRENT_POLL.set(ref)
+            try:
+                await self._check_repolled_master(context, result, text)
+            finally:
+                _CURRENT_POLL.reset(token)
+
+    async def _check_repolled_master(
+        self, context: LayerContext, result: FetchResult, text: str
+    ) -> None:
+        if not is_master(text):
             await self._record(
-                master_rules.check_master_changed(
-                    context.master, current, layer=context.layer, thresholds=self.thresholds
+                R.MST_MEDIA_BECAME_MASTER.raise_finding(
+                    f"{context.url} no longer returns a master playlist.",
+                    evidence={"url": context.url},
+                    stream_layer=context.layer,
                 )
             )
-            context.master = current
+            return
+        assert context.master is not None
+        current = parse_master(text, result.final_url)
+        await self._record(
+            master_rules.check_master_changed(
+                context.master, current, layer=context.layer, thresholds=self.thresholds
+            )
+        )
+        context.master = current
 
     async def _ladder_sweep(self) -> None:
         """Compare the same MSN across every rung, and the ladder's DPB footprints."""

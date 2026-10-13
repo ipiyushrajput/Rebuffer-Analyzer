@@ -341,10 +341,13 @@ function JobRow({
               Cancel
             </button>
           ) : (
-            <a className="btn-ghost btn-sm" href={api.url(`/jobs/${job.id}/evidence.zip`)}>
+            <a className="btn-ghost btn-sm" href={endpoints.evidenceUrl(job.id)}>
               Evidence
             </a>
           )}
+          <a className="btn-ghost btn-sm" href={endpoints.networkLogUrl(job.id)}>
+            Network log
+          </a>
         </div>
       </td>
     </tr>
