@@ -38,7 +38,10 @@ async def presets() -> dict[str, Any]:
 @router.post("/jobs", status_code=201)
 async def create_job(payload: AgingJobIn) -> dict[str, Any]:
     options = payload.options.to_session_options(
-        duration_s=payload.duration_minutes * 60, default_record=True
+        duration_s=payload.duration_minutes * 60,
+        default_record=True,
+        # A day of every rung is far more than a folder should hold: aging keeps clips.
+        record_mode="incidents",
     )
     handle = await job_manager.submit(
         job_type="aging",

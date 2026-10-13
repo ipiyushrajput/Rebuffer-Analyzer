@@ -326,6 +326,16 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
                 <IconDownload size={14} />
                 Network log
               </a>
+              {form.options.record_stream && (
+                <a
+                  className={cx('btn-ghost btn-sm', !store.sessionId && 'pointer-events-none opacity-50')}
+                  href={store.sessionId ? endpoints.recordingUrl(store.sessionId) : undefined}
+                  title="Every segment of every rendition recorded so far, joined into playable files"
+                >
+                  <IconDownload size={14} />
+                  Recording
+                </a>
+              )}
               <button
                 type="button"
                 className="btn-accent btn-sm"

@@ -21,6 +21,7 @@ from typing import Any
 
 from app.analysis import attribution, av_pairing, correlate, vpb
 from app.analysis import evidence as evidence_store
+from app.analysis import recorder as recorder_module
 from app.analysis.collectors.playlist_poller import PlaylistPoller, PollTarget, Snapshot
 from app.analysis.collectors.segment_sampler import (
     RungSampling,
@@ -98,6 +99,11 @@ class SessionOptions:
     nth_segment_sampling: int | None = None
     max_segment_samples: int = 5000
     snapshot_mode: bool = False
+    # Every segment of every analysed rendition written to RBA_RECORDINGS_DIR: the whole run
+    # ("full", realtime), or a rolling pre-roll kept only around incidents ("incidents",
+    # aging), because a day of every rung is well over a hundred gigabytes.
+    record_stream: bool = False
+    record_mode: str = "full"
 
     def enabled(self, name: str) -> bool:
         return name in self.check_sets
@@ -114,6 +120,8 @@ class SessionOptions:
             "check_sets": list(self.check_sets),
             "renditions": list(self.renditions) if self.renditions else None,
             "record_evidence": self.record_evidence,
+            "record_stream": self.record_stream,
+            "record_mode": self.record_mode,
             "vpb_mode": self.vpb_mode,
             "nth_segment_sampling": self.nth_segment_sampling,
             "snapshot_mode": self.snapshot_mode,
@@ -296,6 +304,9 @@ class AnalysisSession:
             if self.options.record_evidence
             else None
         )
+        # Every segment of every analysed rendition, on disk, when the run was asked to record.
+        self.recorder: recorder_module.StreamRecorder | None = None
+        self.recording: dict[str, Any] | None = None
         self.layers: dict[StreamLayer, LayerContext] = {}
         self.event_log: list[dict[str, Any]] = []
         self.stalls: list[correlate.StallEvent] = []
@@ -415,6 +426,17 @@ class AnalysisSession:
             timeout_s=self.thresholds.request_timeout_s,
             per_host_connections=settings.rba_per_host_connections,
         )
+        if self.options.record_stream:
+            self.recorder = recorder_module.StreamRecorder(
+                job_id=self.session_id,
+                root=settings.rba_recordings_dir,
+                fetcher=self._fetcher,
+                mode=self.options.record_mode,
+                preroll_s=self.thresholds.recording_preroll_s,
+                postroll_s=self.thresholds.recording_postroll_s,
+                quota_bytes=int(settings.rba_recordings_quota_gb * 1024**3),
+                drm=lambda: self.drm,
+            )
         try:
             await self._emit("status", {"state": "RESOLVING", "channel": self.channel_name})
             await self._bootstrap_layers()
@@ -422,6 +444,13 @@ class AnalysisSession:
             await self._collect()
         finally:
             await self._shutdown_pollers()
+            if self.recorder is not None:
+                # Before the fetcher closes: the recorder finishes what it has queued with it.
+                self.recorder.set_windows(self._incident_windows())
+                try:
+                    self.recording = await self.recorder.close()
+                except Exception:
+                    logger.exception("the recording of %s did not close cleanly", self.session_id)
             if self._fetcher is not None:
                 await self._fetcher.aclose()
         return await self._finalise()
@@ -926,6 +955,16 @@ class AnalysisSession:
             )
 
         await self._sample_new_segments(context, target, playlist, snapshot)
+        if self.recorder is not None:
+            # After sampling, so the segments the sampler just fetched are reused, not fetched
+            # twice. Queued for the recorder's own worker: this never waits on a download.
+            self.recorder.observe_playlist(
+                layer=layer.value,
+                variant=variant,
+                kind=target.kind,
+                playlist=playlist,
+                encrypted=bool(context.encrypted),
+            )
         # A refresh of the audio rendition is the event that could have published the segment
         # a deferred pair is waiting for, so the deferral clock advances here and nowhere
         # else. A video segment whose audio never arrives is given up on rather than measured
@@ -1182,6 +1221,8 @@ class AnalysisSession:
         decrypt already produced for the bitstream rules, and it is reused rather than
         decrypting a second time.
         """
+        if self.recorder is not None and sample.available:
+            self.recorder.offer(target.variant, sample.msn, sample.result.body)
         if self.evidence is None or not sample.available:
             return
         self.evidence.add(
@@ -1326,8 +1367,15 @@ class AnalysisSession:
             cause_rule_ids=[f.rule.id for f in findings],
         )
 
+    def _incident_windows(self) -> list[tuple[str | None, dt.datetime, dt.datetime | None]]:
+        return [(i.variant, i.started_at, i.ended_at) for i in self.incidents.incidents]
+
     async def _periodic(self) -> None:
         now = dt.datetime.now(dt.UTC)
+
+        if self.recorder is not None:
+            self.recorder.set_windows(self._incident_windows())
+            await self.recorder.prune()
 
         if (
             now - self._last_master_poll

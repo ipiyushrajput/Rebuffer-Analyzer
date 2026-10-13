@@ -371,19 +371,19 @@ class _Bodies:
         return text
 
 
-async def _poll_pages(job_id: str) -> AsyncIterator[list[ManifestPoll]]:
+async def _poll_pages(
+    job_id: str, start: dt.datetime | None = None, end: dt.datetime | None = None
+) -> AsyncIterator[list[ManifestPoll]]:
     after = 0
     while True:
+        query = select(ManifestPoll).where(ManifestPoll.job_id == job_id, ManifestPoll.seq > after)
+        if start is not None:
+            query = query.where(ManifestPoll.ts >= start)
+        if end is not None:
+            query = query.where(ManifestPoll.ts <= end)
         async with db_session.session_scope() as session:
             rows = list(
-                (
-                    await session.execute(
-                        select(ManifestPoll)
-                        .where(ManifestPoll.job_id == job_id, ManifestPoll.seq > after)
-                        .order_by(ManifestPoll.seq)
-                        .limit(PAGE)
-                    )
-                )
+                (await session.execute(query.order_by(ManifestPoll.seq).limit(PAGE)))
                 .scalars()
                 .all()
             )
@@ -393,19 +393,21 @@ async def _poll_pages(job_id: str) -> AsyncIterator[list[ManifestPoll]]:
         after = rows[-1].seq
 
 
-async def _segment_pages(job_id: str) -> AsyncIterator[list[SegmentSample]]:
+async def _segment_pages(
+    job_id: str, start: dt.datetime | None = None, end: dt.datetime | None = None
+) -> AsyncIterator[list[SegmentSample]]:
     after = 0
     while True:
+        query = select(SegmentSample).where(
+            SegmentSample.job_id == job_id, SegmentSample.id > after
+        )
+        if start is not None:
+            query = query.where(SegmentSample.ts >= start)
+        if end is not None:
+            query = query.where(SegmentSample.ts <= end)
         async with db_session.session_scope() as session:
             rows = list(
-                (
-                    await session.execute(
-                        select(SegmentSample)
-                        .where(SegmentSample.job_id == job_id, SegmentSample.id > after)
-                        .order_by(SegmentSample.id)
-                        .limit(PAGE)
-                    )
-                )
+                (await session.execute(query.order_by(SegmentSample.id).limit(PAGE)))
                 .scalars()
                 .all()
             )
@@ -469,6 +471,19 @@ def _readme(*, job_id: str, channel: str, user_agent: str, polls: int, segments:
 
 async def write_archive(job_id: str, target: IO[bytes]) -> dict[str, int]:
     """Write the network log of a job as a ZIP into `target`."""
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        return await write_into(archive, job_id)
+
+
+async def write_into(
+    archive: zipfile.ZipFile,
+    job_id: str,
+    *,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
+    prefix: str = "",
+) -> dict[str, int]:
+    """The network log of a job — or of one window of it — into an open archive at `prefix`."""
     async with db_session.session_scope() as session:
         job = await session.get(JobRow, job_id)
     channel = (job.channel_name if job is not None else "") or ""
@@ -478,109 +493,115 @@ async def write_archive(job_id: str, target: IO[bytes]) -> dict[str, int]:
     polls = 0
     segments = 0
 
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-        csv_buffer = io.StringIO()
-        writer = csv.writer(csv_buffer)
-        writer.writerow(CSV_COLUMNS)
+    csv_buffer = io.StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(CSV_COLUMNS)
 
-        # The HAR is spooled to its own file and copied in at the end: a ZIP takes one entry
-        # being written at a time, and the poll files are written as the polls are read.
-        with tempfile.SpooledTemporaryFile(max_size=SPOOL_BYTES) as har_spool:
-            har = io.TextIOWrapper(har_spool, encoding="utf-8")  # type: ignore[arg-type]
-            har.write(
-                json.dumps(
-                    {
-                        "log": {
-                            "version": "1.2",
-                            "creator": {"name": TOOL_NAME, "version": "1.0"},
-                            "pages": [
-                                {
-                                    "id": "run",
-                                    "title": f"{channel} ({job_id})",
-                                    "startedDateTime": _iso(job.started_at if job else None)
-                                    or _iso(dt.datetime.now(dt.UTC)),
-                                    "pageTimings": {},
-                                }
-                            ],
-                            "entries": [],
-                        }
+    # The HAR is spooled to its own file and copied in at the end: a ZIP takes one entry
+    # being written at a time, and the poll files are written as the polls are read.
+    with tempfile.SpooledTemporaryFile(max_size=SPOOL_BYTES) as har_spool:
+        har = io.TextIOWrapper(har_spool, encoding="utf-8")  # type: ignore[arg-type]
+        har.write(
+            json.dumps(
+                {
+                    "log": {
+                        "version": "1.2",
+                        "creator": {"name": TOOL_NAME, "version": "1.0"},
+                        "pages": [
+                            {
+                                "id": "run",
+                                "title": f"{channel} ({job_id})",
+                                "startedDateTime": _iso(job.started_at if job else None)
+                                or _iso(dt.datetime.now(dt.UTC)),
+                                "pageTimings": {},
+                            }
+                        ],
+                        "entries": [],
                     }
-                )[:-3]
-            )
-            first = True
-            async for page in _poll_pages(job_id):
-                for row in page:
-                    poll = poll_payload(row)
-                    body = await bodies.get(row.body_hash)
-                    ok = 200 <= (row.status or 0) < 300 and not row.error
-                    extension = "m3u8" if ok else "txt"
-                    name = (
-                        f"polls/{_slug(row.stream_layer)}/{_slug(row.variant)}/"
-                        f"{row.seq:07d}_{_stamp(row.ts)}.{extension}"
-                    )
-                    if ok:
-                        archive.writestr(name, body)
-                    else:
-                        archive.writestr(
-                            name,
-                            f"HTTP {row.status}\nerror: {row.error or ''}\n"
-                            f"url: {row.url}\n\n{body}",
-                        )
-                    key = (row.stream_layer, row.variant)
-                    changed = previous_hash.get(key) != row.body_hash
-                    previous_hash[key] = row.body_hash
-                    writer.writerow(
-                        [
-                            row.seq,
-                            _iso(row.ts),
-                            row.stream_layer,
-                            row.variant,
-                            row.kind,
-                            row.status,
-                            row.error or "",
-                            row.ttfb_ms if row.ttfb_ms is not None else "",
-                            row.total_ms,
-                            row.bytes,
-                            row.msn if row.msn is not None else "",
-                            row.last_msn if row.last_msn is not None else "",
-                            "yes" if changed else "no",
-                            "yes" if row.pinned else "no",
-                            row.url,
-                            row.final_url or "",
-                            row.body_hash,
-                            name,
-                        ]
-                    )
-                    for entry in har_poll_entries(poll, body, user_agent):
-                        har.write(("" if first else ",") + json.dumps(entry))
-                        first = False
-                    polls += 1
-            async for segment_page in _segment_pages(job_id):
-                for segment in segment_page:
-                    har.write(
-                        ("" if first else ",") + json.dumps(har_segment_entry(segment, user_agent))
-                    )
-                    first = False
-                    segments += 1
-            har.write("]}}")
-            har.flush()
-            har.detach()
-            har_spool.seek(0)
-            with archive.open("network.har", "w") as har_entry:
-                shutil.copyfileobj(har_spool, har_entry, STREAM_CHUNK)
-
-        archive.writestr("polls.csv", csv_buffer.getvalue())
-        archive.writestr(
-            "README.txt",
-            _readme(
-                job_id=job_id,
-                channel=channel,
-                user_agent=user_agent,
-                polls=polls,
-                segments=segments,
-            ),
+                }
+            )[:-3]
         )
+        first = True
+        async for page in _poll_pages(job_id, start, end):
+            for row in page:
+                poll = poll_payload(row)
+                body = await bodies.get(row.body_hash)
+                ok = 200 <= (row.status or 0) < 300 and not row.error
+                extension = "m3u8" if ok else "txt"
+                name = (
+                    f"{prefix}polls/{_slug(row.stream_layer)}/{_slug(row.variant)}/"
+                    f"{row.seq:07d}_{_stamp(row.ts)}.{extension}"
+                )
+                if ok:
+                    archive.writestr(name, body, zipfile.ZIP_DEFLATED)
+                else:
+                    archive.writestr(
+                        name,
+                        f"HTTP {row.status}\nerror: {row.error or ''}\nurl: {row.url}\n\n{body}",
+                    )
+                key = (row.stream_layer, row.variant)
+                changed = previous_hash.get(key) != row.body_hash
+                previous_hash[key] = row.body_hash
+                writer.writerow(
+                    [
+                        row.seq,
+                        _iso(row.ts),
+                        row.stream_layer,
+                        row.variant,
+                        row.kind,
+                        row.status,
+                        row.error or "",
+                        row.ttfb_ms if row.ttfb_ms is not None else "",
+                        row.total_ms,
+                        row.bytes,
+                        row.msn if row.msn is not None else "",
+                        row.last_msn if row.last_msn is not None else "",
+                        "yes" if changed else "no",
+                        "yes" if row.pinned else "no",
+                        row.url,
+                        row.final_url or "",
+                        row.body_hash,
+                        name,
+                    ]
+                )
+                for entry in har_poll_entries(poll, body, user_agent):
+                    har.write(("" if first else ",") + json.dumps(entry))
+                    first = False
+                polls += 1
+        async for segment_page in _segment_pages(job_id, start, end):
+            for segment in segment_page:
+                har.write(
+                    ("" if first else ",") + json.dumps(har_segment_entry(segment, user_agent))
+                )
+                first = False
+                segments += 1
+        har.write("]}}")
+        har.flush()
+        har.detach()
+        har_spool.seek(0)
+        with archive.open(
+            zipfile.ZipInfo(f"{prefix}network.har", _now_tuple()), "w", force_zip64=True
+        ) as har_entry:
+            shutil.copyfileobj(har_spool, har_entry, STREAM_CHUNK)
+
+    archive.writestr(f"{prefix}polls.csv", csv_buffer.getvalue(), zipfile.ZIP_DEFLATED)
+    archive.writestr(
+        f"{prefix}README.txt",
+        _readme(
+            job_id=job_id,
+            channel=channel,
+            user_agent=user_agent,
+            polls=polls,
+            segments=segments,
+        ),
+        zipfile.ZIP_DEFLATED,
+    )
     return {"polls": polls, "segments": segments}
+
+
+def _now_tuple() -> tuple[int, int, int, int, int, int]:
+    now = dt.datetime.now(dt.UTC)
+    return (now.year, now.month, now.day, now.hour, now.minute, now.second)
 
 
 async def stream_archive(job_id: str) -> AsyncIterator[bytes]:

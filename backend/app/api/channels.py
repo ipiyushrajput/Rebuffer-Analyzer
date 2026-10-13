@@ -11,6 +11,7 @@ last restart is still listed.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +19,14 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import delete, select
 
 from app.api.job_views import TERMINAL, row_summary, stored_result
+from app.config import get_settings
 from app.db import session as db_session
 from app.db.models import Finding as FindingRow
 from app.db.models import Incident as IncidentRow
 from app.db.models import Job as JobRow
 from app.db.models import (
+    ManifestBody,
+    ManifestPoll,
     PlayerSample,
     PlaylistSample,
     PlaylistSnapshot,
@@ -32,6 +36,7 @@ from app.db.models import (
 )
 from app.db.paging import newest_rows
 from app.jobs.manager import job_manager
+from app.reports.recording import recording_state
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
@@ -44,6 +49,9 @@ SAMPLE_TABLES = (
     PlaylistSnapshot,
     FindingRow,
     IncidentRow,
+    # The poll log goes with the run it recorded.
+    ManifestPoll,
+    ManifestBody,
 )
 
 
@@ -117,6 +125,7 @@ async def read_channel(job_id: str) -> dict[str, Any]:
         payload = {
             **row_summary(row),
             **result,
+            "recording": recording_state(get_settings().rba_recordings_dir, job_id),
             "reports": [
                 {
                     "id": report.id,
@@ -168,6 +177,10 @@ async def delete_channel(job_id: str) -> dict[str, Any]:
 
     # The handle is dropped too, so a stopped session does not reappear in any listing.
     job_manager.jobs.pop(job_id, None)
+    # And the recording, which is the one thing a run keeps on disk.
+    recording = get_settings().rba_recordings_dir / job_id
+    if recording.is_dir():
+        shutil.rmtree(recording, ignore_errors=True)
     return {
         "deleted": True,
         "id": job_id,

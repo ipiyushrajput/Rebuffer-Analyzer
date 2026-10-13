@@ -123,6 +123,8 @@ const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
       'evidence_window_s',
       'evidence_max_bytes',
       'evidence_segments_per_rendition',
+      'recording_preroll_s',
+      'recording_postroll_s',
       'segment_retry_attempts',
       'segment_retry_backoff_s',
     ],

@@ -197,7 +197,12 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
 
         <Card>
           <div className="px-5 pb-4 pt-4">
-            <UrlForm value={form} onChange={setForm} disabled={create.isPending} />
+            <UrlForm
+              value={form}
+              onChange={setForm}
+              disabled={create.isPending}
+              recordLabel="Record incident clips — every rendition around each incident"
+            />
 
             <div className="mt-4 grid gap-3 border-t border-surface-line pt-4 lg:grid-cols-[1fr_160px]">
               <Field label="Duration">
@@ -353,6 +358,11 @@ function JobRow({
           <a className="btn-ghost btn-sm" href={endpoints.networkLogUrl(job.id)}>
             Network log
           </a>
+          {Boolean(job.options?.record_stream) && !ACTIVE.has(job.status) && (
+            <a className="btn-ghost btn-sm" href={endpoints.recordingUrl(job.id)}>
+              Clips
+            </a>
+          )}
         </div>
       </td>
     </tr>

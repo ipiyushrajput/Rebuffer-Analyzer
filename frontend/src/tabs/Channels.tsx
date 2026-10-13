@@ -451,6 +451,16 @@ function ChannelDetail({
                 <IconDownload size={13} />
                 Network log
               </a>
+              {data.recording?.available && (
+                <a
+                  className="btn-ghost btn-sm"
+                  href={endpoints.recordingUrl(channelId)}
+                  title={`${data.recording.segments} segment(s), ${bytes(data.recording.bytes ?? 0)}`}
+                >
+                  <IconDownload size={13} />
+                  {data.recording.mode === 'incidents' ? 'Clips' : 'Recording'}
+                </a>
+              )}
               <button
                 type="button"
                 className="btn-ghost btn-sm text-pink-600"

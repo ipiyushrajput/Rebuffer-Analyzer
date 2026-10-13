@@ -239,6 +239,12 @@ class Thresholds(BaseModel):
     # long enough to carry an incident and its approach.
     evidence_segments_per_rendition: int = 12
 
+    # Stream recording. Aging records incident clips only: segments older than the pre-roll
+    # are deleted unless an incident spans them, and an incident keeps the pre-roll before it
+    # and the post-roll after it.
+    recording_preroll_s: float = 120.0
+    recording_postroll_s: float = 60.0
+
     # Tizen segment retry policy modelled by the Virtual Player Buffer.
     segment_retry_attempts: int = 2
     segment_retry_backoff_s: float = 0.5

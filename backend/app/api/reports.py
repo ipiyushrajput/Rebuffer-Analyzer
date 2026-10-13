@@ -166,15 +166,57 @@ async def remove_report(report_id: int) -> dict[str, bool]:
 
 @router.get("/jobs/{job_id}/evidence.zip")
 async def evidence_bundle(job_id: str) -> Response:
-    """The evidence archive, built in memory from the stored rows and streamed."""
+    """The evidence archive, built in memory from the stored rows and streamed.
+
+    A run still in memory includes the segment bytes its session held; one that is not (after
+    a restart, or long after it ended) is built from the database and the poll log alone.
+    """
     handle = job_manager.get(job_id)
-    if handle is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    archive = await service.build_evidence_bundle(handle)
+    if handle is not None:
+        archive = await service.build_evidence_bundle(handle)
+    else:
+        stored = await service.build_stored_evidence_bundle(job_id)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        archive = stored
     return Response(
         content=archive,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="evidence-{job_id[:8]}.zip"'},
+    )
+
+
+# -- the recording -------------------------------------------------------------
+
+
+@router.get("/jobs/{job_id}/recording")
+async def job_recording(job_id: str) -> dict[str, Any]:
+    """Whether a run was recorded, and what its recording holds."""
+    from app.config import get_settings
+    from app.reports.recording import recording_state
+
+    return recording_state(get_settings().rba_recordings_dir, job_id)
+
+
+@router.get("/jobs/{job_id}/recording.zip")
+async def job_recording_archive(job_id: str) -> StreamingResponse:
+    """The recording: each rendition joined into one playable file per clip, the decrypted
+    copy of a protected rendition, audio and video joined when ffmpeg is installed, and the
+    network log of the clip's own minutes. Streamed as it is built."""
+    from app.config import get_settings
+    from app.reports.recording import recording_state, stream_recording
+
+    root = get_settings().rba_recordings_dir
+    state = recording_state(root, job_id)
+    if not state.get("available"):
+        raise HTTPException(
+            status_code=404,
+            detail="This run has no recording: start it with Record stream on.",
+        )
+    return StreamingResponse(
+        stream_recording(root, job_id),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="recording-{job_id[:8]}.zip"'},
     )
 
 

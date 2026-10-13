@@ -316,6 +316,20 @@ frontend/src/
   `mp4decrypt` — a bundle that is short of something never leaves a reader guessing.
   `cbcs` is decrypted only by Bento4's `mp4decrypt`, reported by `/api/health`; `cenc` stays
   in process. No key, private key or credential reaches a bundle.
+- **A recording is the one thing the analyzer host keeps.** "Record stream" on a run starts
+  `app/analysis/recorder.py`: a worker per rendition downloads every segment its playlist lists
+  (reusing the bytes the sampler already fetched), writes it under
+  `RBA_RECORDINGS_DIR/<job>/`, and — for a protected rung whose key the run holds — a decrypted
+  copy through the run's `DrmContext`. It is queued from the poll handler and never waits on a
+  download. Realtime records `full`; aging records `incidents`: a rolling pre-roll
+  (`recording_preroll_s`) is deleted as it ages unless an incident spans it, and an incident
+  keeps the pre-roll before it and the post-roll after it. Every recorder shares one byte count
+  against `rba_recordings_quota_gb` and stops with a stated reason at the quota. The purge
+  removes full recordings with the samples and incident clips with the pinned retention, never
+  a running job's. `GET /api/jobs/{id}/recording.zip` streams each rendition joined into one
+  playable file per clip, the decrypted copy, audio and video joined by ffmpeg when installed,
+  and the clip's own network log. An evidence download for a run no longer in memory is built
+  from the database and the poll log and says that the session's segment bytes went with it.
 - **EME needs a secure context, and that is the page's origin, not the stream.**
   `navigator.requestMediaKeySystemAccess` is undefined on a plain `http://` origin that is not
   localhost, and hls.js turns that into `keySystemNoAccess` — a message naming nothing

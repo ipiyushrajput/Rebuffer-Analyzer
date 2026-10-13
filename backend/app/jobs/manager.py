@@ -18,6 +18,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app.analysis import recorder as recorder_module
 from app.analysis.engine import AnalysisResult, AnalysisSession, SessionOptions
 from app.config import default_ua_profile, get_settings, get_thresholds
 from app.db import session as db_session
@@ -525,6 +526,14 @@ class JobManager:
             - dt.timedelta(days=settings.rba_pinned_retention_days),
             running=running,
         )
+        removed += await asyncio.to_thread(
+            recorder_module.purge,
+            settings.rba_recordings_dir,
+            cutoff=cutoff,
+            pinned_cutoff=dt.datetime.now(dt.UTC)
+            - dt.timedelta(days=settings.rba_pinned_retention_days),
+            running=running,
+        )
         return removed
 
 
@@ -535,6 +544,8 @@ def _options_from_params(params: dict[str, Any]) -> SessionOptions:
         check_sets=tuple(params.get("check_sets") or ("baseline",)),
         renditions=tuple(params["renditions"]) if params.get("renditions") else None,
         record_evidence=bool(params.get("record_evidence", False)),
+        record_stream=bool(params.get("record_stream", False)),
+        record_mode=str(params.get("record_mode") or "full"),
         vpb_mode=params.get("vpb_mode"),
         nth_segment_sampling=params.get("nth_segment_sampling"),
         snapshot_mode=bool(params.get("snapshot_mode", False)),

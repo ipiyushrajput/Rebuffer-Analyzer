@@ -138,8 +138,19 @@ export interface ChannelReport {
 }
 
 /** A finished analysis, read back from the database rather than the job manager. */
+export interface RecordingState {
+  available: boolean
+  mode?: 'full' | 'incidents' | 'unknown'
+  segments?: number
+  bytes?: number
+  clips?: number
+  decrypted?: number
+  stopped_reason?: string
+}
+
 export interface AnalysedChannel extends JobSummary {
   reports: ChannelReport[]
+  recording?: RecordingState
 }
 
 /** One country the channel catalogue serves, and the data set its channels come from. */
@@ -513,6 +524,8 @@ export const endpoints = {
   /** Every playlist poll of a run as files, a HAR and a CSV. Read from the database. */
   networkLogUrl: (jobId: string) => api.url(`/jobs/${jobId}/network-log.zip`),
   evidenceUrl: (jobId: string) => api.url(`/jobs/${jobId}/evidence.zip`),
+  /** Every recorded rendition joined per clip, decrypted copies, and the clip's network log. */
+  recordingUrl: (jobId: string) => api.url(`/jobs/${jobId}/recording.zip`),
   /** The poll a finding fired on (or the rendition's poll at a moment), lines marked. */
   locatePoll: (jobId: string, body: LocateRequest) =>
     api.post<PollData>(`/jobs/${jobId}/polls/locate`, body),
