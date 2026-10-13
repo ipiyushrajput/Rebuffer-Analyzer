@@ -152,6 +152,7 @@ class Finding:
     layer_presence: dict[str, bool] = field(default_factory=dict)
 
     MAX_EVIDENCE = 5
+    KEEP_FIRST = 2
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -162,9 +163,16 @@ class Finding:
         self.count += other.count
         self.last_seen = max(self.last_seen, other.last_seen)
         self.first_seen = min(self.first_seen, other.first_seen)
+        # The first occurrences say when it started and the latest say what it looks like
+        # now; keeping only the first five dropped every later occurrence of a defect that
+        # recurred for hours, while the sentence above them was the latest.
         for sample in other.evidence:
             if len(self.evidence) < self.MAX_EVIDENCE:
                 self.evidence.append(sample)
+                continue
+            kept_first = self.evidence[: self.KEEP_FIRST]
+            recent = [*self.evidence[self.KEEP_FIRST :], sample]
+            self.evidence = kept_first + recent[-(self.MAX_EVIDENCE - self.KEEP_FIRST) :]
         if other.severity.rank > self.severity.rank:
             self.severity = other.severity
         self.layer_presence.update(other.layer_presence)

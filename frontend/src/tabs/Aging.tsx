@@ -68,6 +68,7 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
   const [custom, setCustom] = useState('')
   const [openJob, setOpenJob] = useState<JobSummary | null>(null)
   const [openFinding, setOpenFinding] = useState<FindingData | null>(null)
+  const [openSiblings, setOpenSiblings] = useState<FindingData[]>([])
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
@@ -116,7 +117,7 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
           status={<SeverityChip severity={openFinding.severity as Severity} />}
         />
         <PageBody>
-          <FindingInvestigation finding={openFinding} />
+          <FindingInvestigation finding={openFinding} findings={openSiblings} jobId={openJob.id} />
         </PageBody>
       </>
     )
@@ -162,7 +163,10 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
             status={openJob.status}
             threshold={thresholds.rebuffer_ratio_threshold ?? REBUFFER_RATIO_THRESHOLD_DEFAULT}
             thresholds={thresholds}
-            onOpenFinding={setOpenFinding}
+            onOpenFinding={(finding, siblings) => {
+              setOpenSiblings(siblings)
+              setOpenFinding(finding)
+            }}
           />
         </PageBody>
       </>
@@ -381,7 +385,7 @@ function JobDetail({
   status: string
   threshold: number
   thresholds: Record<string, number>
-  onOpenFinding: (finding: FindingData) => void
+  onOpenFinding: (finding: FindingData, siblings: FindingData[]) => void
 }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['aging-result', jobId],
@@ -454,7 +458,7 @@ function JobDetail({
         <div className="px-4 pb-4">
           <FindingsList
             findings={findings}
-            onOpen={onOpenFinding}
+            onOpen={(finding) => onOpenFinding(finding, findings)}
             emptyTitle={settled ? 'No findings' : 'No findings yet'}
           />
         </div>

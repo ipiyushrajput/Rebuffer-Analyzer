@@ -367,6 +367,39 @@ function cascadaChannelQuery(params: CascadaChannelQuery & { refresh?: boolean }
   return query.toString()
 }
 
+/** One playlist fetch from the poll log, with the lines a finding points at. */
+export interface PollData {
+  seq: number
+  at: string
+  layer: string
+  variant: string
+  kind: string
+  url: string
+  final_url: string | null
+  status: number
+  error: string | null
+  ttfb_ms: number | null
+  total_ms: number
+  bytes: number
+  msn: number | null
+  last_msn: number | null
+  headers: Record<string, string>
+  hops: { url: string; status: number; location: string | null }[]
+  raw: string
+  previous: (Omit<PollData, 'previous' | 'highlights' | 'curl' | 'exact'> & { raw: string }) | null
+  highlights?: { line: number; reason: string }[]
+  curl?: string
+  exact?: boolean
+}
+
+export interface LocateRequest {
+  seq?: number | null
+  variant?: string | null
+  at?: string | null
+  evidence?: Record<string, unknown>
+  text?: string
+}
+
 export const endpoints = {
   health: () => api.get<Record<string, unknown>>('/health'),
 
@@ -480,6 +513,9 @@ export const endpoints = {
   /** Every playlist poll of a run as files, a HAR and a CSV. Read from the database. */
   networkLogUrl: (jobId: string) => api.url(`/jobs/${jobId}/network-log.zip`),
   evidenceUrl: (jobId: string) => api.url(`/jobs/${jobId}/evidence.zip`),
+  /** The poll a finding fired on (or the rendition's poll at a moment), lines marked. */
+  locatePoll: (jobId: string, body: LocateRequest) =>
+    api.post<PollData>(`/jobs/${jobId}/polls/locate`, body),
   batchReportUrl: (id: string, fmt: 'csv' | 'xlsx') =>
     api.url(`/batch/batches/${id}/report.${fmt}`),
   batchColumns: () =>

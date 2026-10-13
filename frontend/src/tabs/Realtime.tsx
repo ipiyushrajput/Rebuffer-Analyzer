@@ -252,15 +252,6 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
   const variantManifests = manifests.filter((m) => m.variant !== 'master')
   const masterManifest = manifests.find((m) => m.variant === 'master')
 
-  /* The manifest the investigation shows is the one from the finding's own rendition. */
-  const investigationManifest = useMemo(() => {
-    if (!openFinding) return null
-    const match =
-      manifests.find((m) => m.variant === openFinding.variant) ??
-      (openFinding.variant ? undefined : masterManifest)
-    return match ? { title: match.variant, raw: match.raw, url: match.url } : null
-  }, [openFinding, manifests, masterManifest])
-
   const activeFindings = findings.filter((finding) => finding.severity !== 'PASS')
   const latestBuffer = store.playerSamples.at(-1)?.buffer_s ?? null
   const windowSeconds = store.verdict?.window_seconds ?? store.snapshots.at(-1)?.window_s ?? null
@@ -287,7 +278,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
               status={<SeverityChip severity={openFinding.severity as Severity} />}
             />
             <PageBody>
-              <FindingInvestigation finding={openFinding} manifest={investigationManifest} />
+              <FindingInvestigation finding={openFinding} findings={findings} jobId={store.sessionId} />
             </PageBody>
           </>
         )}

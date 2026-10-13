@@ -7,8 +7,10 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.api.realtime import _interim
+from app.hls.locate import locate
 from app.jobs.manager import job_manager
 from app.reports import network_log, service
 
@@ -250,6 +252,103 @@ async def job_poll_at(
     poll = await network_log.poll_with_context(job_id, variant=variant, at=_moment(at, "at"))
     if poll is None:
         raise HTTPException(status_code=404, detail=f"No poll of {variant} is in this run's log")
+    return await _with_curl(job_id, poll)
+
+
+class LocateIn(BaseModel):
+    """What a finding knows about where it fired: its poll, or its rendition and moment."""
+
+    seq: int | None = None
+    variant: str | None = None
+    at: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    # The finding's title and sentence, for the tags they name.
+    text: str = ""
+
+
+def _snapshot_payload(snapshot: Any, layer: str, variant: str, kind: str) -> dict[str, Any]:
+    """An in-memory poll in the shape the poll log serves."""
+    return {
+        "seq": snapshot.seq,
+        "at": snapshot.at.isoformat(),
+        "layer": layer,
+        "variant": variant,
+        "kind": kind,
+        "url": snapshot.url,
+        "final_url": snapshot.result.final_url,
+        "status": snapshot.result.status,
+        "error": snapshot.result.error,
+        "ttfb_ms": snapshot.result.timings.ttfb_ms,
+        "total_ms": snapshot.result.timings.total_ms,
+        "bytes": snapshot.result.bytes_received,
+        "msn": snapshot.playlist.media_sequence if snapshot.playlist else None,
+        "last_msn": snapshot.playlist.last_msn if snapshot.playlist else None,
+        "headers": dict(snapshot.result.headers),
+        "hops": [hop.as_dict() for hop in snapshot.result.hops],
+        "timings": snapshot.result.timings.as_dict(),
+        "body_hash": "",
+        "pinned": False,
+        "raw": snapshot.raw or snapshot.result.text,
+    }
+
+
+def _memory_poll(job_id: str, body: LocateIn) -> dict[str, Any] | None:
+    """A poll the log has not flushed yet, from the live session's own history."""
+    handle = job_manager.get(job_id)
+    if handle is None or handle.session is None:
+        return None
+    moment = _moment(body.at, "at")
+    for context in handle.session.layers.values():
+        for variant, target in context.targets.items():
+            history = [s for s in target.history if s.raw or s.result.body]
+            if not history:
+                continue
+            chosen = None
+            if body.seq is not None:
+                chosen = next((s for s in history if s.seq == body.seq), None)
+            elif body.variant == variant:
+                before = [s for s in history if moment is None or s.at <= moment]
+                chosen = (before or history)[-1]
+            if chosen is None:
+                continue
+            index = history.index(chosen)
+            previous = history[index - 1] if index > 0 else None
+
+            layer = context.layer.value
+            payload = _snapshot_payload(chosen, layer, variant, target.kind)
+            payload["previous"] = (
+                _snapshot_payload(previous, layer, variant, target.kind)
+                if previous is not None
+                else None
+            )
+            return payload
+    return None
+
+
+@router.post("/jobs/{job_id}/polls/locate")
+async def locate_poll(job_id: str, body: LocateIn) -> dict[str, Any]:
+    """The playlist a finding fired on, with the lines its evidence points at highlighted.
+
+    The poll the finding names when it carries one; otherwise the rendition's poll current
+    at the moment given. Never the live window: a finding is shown against the playlist as it
+    stood when the rule fired.
+    """
+    poll = await network_log.poll_with_context(
+        job_id, seq=body.seq, variant=body.variant, at=_moment(body.at, "at")
+    )
+    if poll is None or (body.seq is not None and poll.get("seq") != body.seq):
+        poll = _memory_poll(job_id, body) or poll
+    if poll is None:
+        raise HTTPException(status_code=404, detail="No poll of this rendition is recorded")
+    highlights = locate(
+        poll.get("raw") or "",
+        evidence=body.evidence,
+        text=body.text,
+        base_url=poll.get("final_url") or poll.get("url") or "",
+    )
+    poll["highlights"] = [h.as_dict() for h in highlights]
+    # Whether this is the poll the finding named, or the nearest one to its moment.
+    poll["exact"] = body.seq is not None and poll.get("seq") == body.seq
     return await _with_curl(job_id, poll)
 
 

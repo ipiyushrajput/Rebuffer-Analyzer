@@ -410,7 +410,7 @@ function ChannelDetail({
           status={<SeverityChip severity={openFinding.severity as Severity} />}
         />
         <PageBody>
-          <FindingInvestigation finding={openFinding} />
+          <FindingInvestigation finding={openFinding} findings={findings} jobId={channelId} />
         </PageBody>
       </>
     )

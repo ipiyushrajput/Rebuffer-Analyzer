@@ -7,11 +7,13 @@
  * words the escalation carries, so the operator copies rather than rewrites.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { OWNER_LABEL, SEVERITY_STYLE, type Severity } from '../lib/constants'
 import { localDateTime, utcTitle } from '../lib/format'
 import type { FindingData } from '../ws/messages'
-import { Card, CardHeader, CopyButton, EmptyState, SeverityChip, cx } from './ui'
+import { membersOf } from '../lib/findingGroups'
+import { PollManifest } from './PollManifest'
+import { Card, CardHeader, CopyButton, EmptyState, SegmentedControl, SeverityChip, cx } from './ui'
 import { IconArrowRight } from './ui/icons'
 
 const IMPACT_TEXT: Record<string, string> = {
@@ -28,13 +30,16 @@ const LAYER_TEXT: Record<string, string> = {
 }
 
 /** The escalation text, assembled once so the copy button and the panel never disagree. */
-export function escalationText(finding: FindingData): string {
+export function escalationText(finding: FindingData, members: FindingData[] = [finding]): string {
+  const renditions = members.map((item) => item.variant).filter(Boolean)
   return [
     `Rule: ${finding.rule_id} — ${finding.title}`,
     `Severity: ${finding.severity}`,
     `Layer: ${LAYER_TEXT[finding.stream_layer] ?? finding.stream_layer}`,
-    `Rendition: ${finding.variant ?? 'every rendition'}`,
-    `Occurrences: ${finding.count}`,
+    members.length > 1
+      ? `Renditions: ${renditions.join(', ')} (${members.length})`
+      : `Rendition: ${finding.variant ?? 'every rendition'}`,
+    `Occurrences: ${members.reduce((sum, item) => sum + item.count, 0)}`,
     `First seen: ${finding.first_seen}`,
     `Last seen: ${finding.last_seen}`,
     '',
@@ -112,54 +117,42 @@ function evidenceValue(value: unknown): string {
   return String(value)
 }
 
+/** Evidence columns that are shown elsewhere: the poll in its own column, the sentence too. */
+const HIDDEN_KEYS = new Set(['poll', 'detail', 'at'])
+
 export function FindingInvestigation({
-  finding,
-  manifest,
+  finding: opened,
+  findings,
+  jobId,
 }: {
   finding: FindingData
-  manifest?: { title: string; raw: string; url?: string } | null
+  /** Every finding of the run, so the same rule on other renditions opens with this one. */
+  findings?: FindingData[]
+  /** The run the finding belongs to; the manifest is read from its poll log. */
+  jobId?: string | null
 }) {
+  const members = useMemo(() => membersOf(opened, findings ?? [opened]), [opened, findings])
+  const [memberKey, setMemberKey] = useState(() => opened.variant ?? '')
+  const finding = members.find((item) => (item.variant ?? '') === memberKey) ?? members[0]
+  const evidence = useMemo(() => finding.evidence ?? [], [finding])
+  // The latest occurrence first: it is the one the sentence above describes.
+  const [sampleIndex, setSampleIndex] = useState<number | null>(null)
+  const selected = evidence.length > 0 ? Math.min(sampleIndex ?? evidence.length - 1, evidence.length - 1) : -1
+  const sample = selected >= 0 ? evidence[selected] : null
+
   const style = SEVERITY_STYLE[finding.severity as Severity]
   const owner = finding.owner_label || OWNER_LABEL[finding.owner] || finding.owner
+  const total = members.reduce((sum, item) => sum + item.count, 0)
 
   const evidenceKeys = useMemo(() => {
     const keys: string[] = []
-    for (const record of finding.evidence ?? []) {
-      for (const key of Object.keys(record)) if (!keys.includes(key)) keys.push(key)
-    }
-    return keys
-  }, [finding.evidence])
-
-  /*
-   * The manifest lines worth showing are the ones naming a resource the rule measured. Only
-   * string evidence becomes a needle, and a URL contributes its last path segment as well —
-   * a bare number matches a timestamp or a duration on any line and marks the wrong one.
-   */
-  const manifestLines = useMemo(() => {
-    if (!manifest?.raw) return []
-    const needles = new Set<string>()
-    for (const record of finding.evidence ?? []) {
-      for (const value of Object.values(record)) {
-        if (typeof value !== 'string') continue
-        if (value.length < 4 || value.length > 400) continue
-        if (/^[\d.\-+:TZ]+$/.test(value)) continue
-        const tail = value.split('?')[0].split('/').pop()
-        if (tail && tail.length > 3) needles.add(tail)
-        if (!value.includes('/')) needles.add(value)
+    for (const record of evidence) {
+      for (const key of Object.keys(record)) {
+        if (!HIDDEN_KEYS.has(key) && !keys.includes(key)) keys.push(key)
       }
     }
-    const lines = manifest.raw.split('\n')
-    const marked = lines.map((text, index) => ({
-      number: index + 1,
-      text,
-      marked: [...needles].some((needle) => text.includes(needle)),
-    }))
-    const hits = marked.filter((line) => line.marked)
-    if (hits.length === 0) return marked.slice(0, 24)
-    /* Three lines of context each side of the first hit keep the tag in its block. */
-    const first = hits[0].number - 1
-    return marked.slice(Math.max(0, first - 3), first + 9)
-  }, [manifest, finding.evidence])
+    return keys
+  }, [evidence])
 
   return (
     <div className="space-y-4">
@@ -174,11 +167,16 @@ export function FindingInvestigation({
               <span className="chip-blue">{owner}</span>
             </div>
             <h2 className="mt-2.5 text-section text-ink">{finding.title}</h2>
-            <p className="mt-1.5 max-w-3xl text-body text-ink-soft">{finding.detail}</p>
+            <p className="mt-1.5 max-w-3xl break-words text-body text-ink-soft">{finding.detail}</p>
+            {members.length > 1 && (
+              <p className="mt-2 text-small text-ink-muted">
+                Seen on {members.length} renditions — each opens with its own evidence and manifest.
+              </p>
+            )}
           </div>
           <div className="shrink-0 text-right">
             <p className="label">Occurrences</p>
-            <p className={cx('metric mt-1', style.text)}>{finding.count}</p>
+            <p className={cx('metric mt-1', style.text)}>{total}</p>
             <p className="mt-1 text-micro text-ink-muted" title={utcTitle(finding.first_seen)}>
               first {localDateTime(finding.first_seen)}
             </p>
@@ -188,6 +186,26 @@ export function FindingInvestigation({
           </div>
         </div>
       </Card>
+
+      {members.length > 1 && (
+        <Card>
+          <div className="flex flex-wrap items-center gap-3 px-5 py-3">
+            <span className="label">Rendition</span>
+            <SegmentedControl
+              options={members.map((item) => ({
+                value: item.variant ?? '',
+                label: `${item.variant ?? 'every rendition'} · ${item.count}`,
+              }))}
+              value={finding.variant ?? ''}
+              onChange={(next) => {
+                setMemberKey(String(next))
+                setSampleIndex(null)
+              }}
+              ariaLabel="Rendition"
+            />
+          </div>
+        </Card>
+      )}
 
       {/* --- causal chain ---------------------------------------------------- */}
       <Card>
@@ -251,36 +269,59 @@ export function FindingInvestigation({
                 )
               }
             />
-            {finding.evidence?.length > 0 ? (
+            {evidence.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="table table-hover">
                   <thead>
                     <tr>
                       <th>#</th>
+                      <th>Poll</th>
+                      <th>Measured</th>
                       {evidenceKeys.map((key) => (
                         <th key={key}>{key.replace(/_/g, ' ')}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {finding.evidence.map((record, index) => (
-                      <tr key={index}>
-                        <td className="font-mono text-micro text-ink-faint">{index + 1}</td>
-                        {evidenceKeys.map((key) => {
-                          const text = evidenceValue(record[key])
-                          return (
-                            <td key={key} className="font-mono text-micro text-ink-soft">
-                              <span
-                                className="block max-w-[280px] truncate"
-                                title={text.length > 40 ? text : undefined}
-                              >
-                                {text}
+                    {evidence.map((record, index) => {
+                      const poll = record.poll as { seq?: number; at?: string } | undefined
+                      return (
+                        <tr
+                          key={index}
+                          onClick={() => setSampleIndex(index)}
+                          className={cx('cursor-pointer', index === selected && 'bg-brand-50')}
+                          aria-selected={index === selected}
+                        >
+                          <td className="font-mono text-micro text-ink-faint">{index + 1}</td>
+                          <td className="whitespace-nowrap font-mono text-micro text-ink-soft">
+                            {poll?.seq != null ? `#${poll.seq}` : '—'}
+                            {poll?.at && (
+                              <span className="block text-ink-faint" title={utcTitle(poll.at)}>
+                                {localDateTime(poll.at)}
                               </span>
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    ))}
+                            )}
+                          </td>
+                          <td className="min-w-[220px] max-w-[360px] text-micro text-ink-soft">
+                            <span className="line-clamp-3 break-words">
+                              {String(record.detail ?? finding.detail)}
+                            </span>
+                          </td>
+                          {evidenceKeys.map((key) => {
+                            const text = evidenceValue(record[key])
+                            return (
+                              <td key={key} className="font-mono text-micro text-ink-soft">
+                                <span
+                                  className="block max-w-[280px] truncate"
+                                  title={text.length > 40 ? text : undefined}
+                                >
+                                  {text}
+                                </span>
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -289,40 +330,7 @@ export function FindingInvestigation({
             )}
           </Card>
 
-          {manifest && manifestLines.length > 0 && (
-            <Card>
-              <CardHeader
-                title="Manifest context"
-                subtitle={manifest.title}
-                actions={<CopyButton label="Copy manifest" text={manifest.raw} />}
-              />
-              <div className="px-5 pb-5">
-                {manifest.url && (
-                  <p className="mb-2 truncate font-mono text-micro text-ink-faint" title={manifest.url}>
-                    {manifest.url}
-                  </p>
-                )}
-                <div className="overflow-hidden rounded-tile border border-surface-line bg-surface-raised">
-                  {manifestLines.map((line) => (
-                    <div
-                      key={line.number}
-                      className={cx(
-                        'flex gap-3 px-3 py-0.5 font-mono text-micro leading-relaxed',
-                        line.marked
-                          ? 'border-l-[3px] border-pink-500 bg-pink-50 text-pink-600'
-                          : 'border-l-[3px] border-transparent text-ink-soft',
-                      )}
-                    >
-                      <span className="w-8 shrink-0 select-none text-right text-ink-faint">
-                        {line.number}
-                      </span>
-                      <span className="min-w-0 break-all">{line.text || ' '}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </Card>
-          )}
+          {jobId && <PollManifest jobId={jobId} finding={finding} sample={sample} />}
         </div>
 
         {/* --- decision ------------------------------------------------------ */}
@@ -350,7 +358,7 @@ export function FindingInvestigation({
               <CopyButton
                 label="Copy escalation"
                 variant="primary"
-                text={() => escalationText(finding)}
+                text={() => escalationText(finding, members)}
               />
             </div>
           </Card>

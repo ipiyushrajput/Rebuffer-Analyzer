@@ -393,12 +393,17 @@ class AnalysisSession:
                 # The poll this occurrence was measured on, carried by its own evidence
                 # sample: a finding merges many occurrences, each from its own poll.
                 ref = poll.as_dict()
-                if finding.evidence:
-                    for sample in finding.evidence:
-                        if isinstance(sample, dict):
-                            sample.setdefault("poll", ref)
-                else:
-                    finding.evidence = [{"poll": ref}]
+                if not finding.evidence:
+                    finding.evidence = [{}]
+                for sample in finding.evidence:
+                    if isinstance(sample, dict):
+                        sample.setdefault("poll", ref)
+            # Each occurrence keeps its own sentence: the finding's `detail` is the latest
+            # one, and an earlier sample shown beside it has to say what it measured.
+            for sample in finding.evidence:
+                if isinstance(sample, dict):
+                    sample.setdefault("detail", finding.detail)
+                    sample.setdefault("at", finding.first_seen.isoformat())
             merged = self.collector.add(finding)
             if merged is not None and merged.count == 1:
                 await self._emit("finding", {"data": merged.as_dict()})
