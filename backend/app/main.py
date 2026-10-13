@@ -140,6 +140,7 @@ def create_app() -> FastAPI:
         catalogue,
         channels,
         drm,
+        insights,
         proxy,
         realtime,
         reports,
@@ -159,6 +160,7 @@ def create_app() -> FastAPI:
     app.include_router(batch.router, prefix="/api")
     app.include_router(reports.router, prefix="/api")
     app.include_router(review.router, prefix="/api")
+    app.include_router(insights.router, prefix="/api")
     app.include_router(proxy.router, prefix="/api")
     app.include_router(drm.router, prefix="/api")
     app.include_router(ws_routes.router)

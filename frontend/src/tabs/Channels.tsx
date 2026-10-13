@@ -11,7 +11,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api, endpoints, type AnalysedChannel, type ChannelReport } from '../api/client'
+import { CompareRuns } from '../components/CompareRuns'
 import { FindingsList } from '../components/FindingCard'
+import { FindingSearch } from '../components/FindingSearch'
 import { groupFindings } from '../lib/findingGroups'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
@@ -86,6 +88,9 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null)
   const [openFinding, setOpenFinding] = useState<FindingData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Two runs picked for a side-by-side comparison, in the order they were picked.
+  const [selected, setSelected] = useState<string[]>([])
+  const [comparing, setComparing] = useState(false)
   const queryClient = useQueryClient()
 
   /*
@@ -124,6 +129,17 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
   useEffect(() => {
     setOpenFinding(null)
   }, [openId])
+
+  const toggleSelected = (id: string) =>
+    setSelected((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id].slice(-2),
+    )
+
+  if (comparing && selected.length === 2) {
+    return <CompareRuns a={selected[0]} b={selected[1]} onBack={() => setComparing(false)} />
+  }
 
   if (openId) {
     return (
@@ -192,6 +208,16 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
           <CardHeader
             title="Channels"
             actions={
+              <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={selected.length !== 2}
+                title="Tick two runs to compare them"
+                onClick={() => setComparing(true)}
+              >
+                Compare {selected.length}/2
+              </button>
               <label className="relative">
                 <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint">
                   <IconSearch size={14} />
@@ -203,6 +229,7 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
                   onChange={(event) => setFilter(event.target.value)}
                 />
               </label>
+              </div>
             }
           />
 
@@ -217,6 +244,9 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
               <table className="table table-hover">
                 <thead>
                   <tr>
+                    <th className="w-8">
+                      <span className="sr-only">Compare</span>
+                    </th>
                     <th>Channel</th>
                     <th>Verdict</th>
                     <th>Responsible party</th>
@@ -233,6 +263,8 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
                       key={channel.id}
                       channel={channel}
                       confirming={confirming === channel.id}
+                      selected={selected.includes(channel.id)}
+                      onToggleSelected={() => toggleSelected(channel.id)}
                       onOpen={() => onOpenChange(channel.id)}
                       onAskDelete={() => setConfirming(channel.id)}
                       onCancelDelete={() => setConfirming(null)}
@@ -245,6 +277,8 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
             </div>
           )}
         </Card>
+
+        <FindingSearch onOpen={(id) => onOpenChange(id)} />
       </PageBody>
     </>
   )
@@ -253,6 +287,8 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
 function ChannelRow({
   channel,
   confirming,
+  selected,
+  onToggleSelected,
   deleting,
   onOpen,
   onAskDelete,
@@ -261,6 +297,8 @@ function ChannelRow({
 }: {
   channel: AnalysedChannel
   confirming: boolean
+  selected: boolean
+  onToggleSelected: () => void
   deleting: boolean
   onOpen: () => void
   onAskDelete: () => void
@@ -275,6 +313,15 @@ function ChannelRow({
 
   return (
     <tr>
+      <td>
+        <input
+          type="checkbox"
+          className="h-4 w-4 accent-brand-600"
+          checked={selected}
+          onChange={onToggleSelected}
+          aria-label={`Compare ${channel.channel_name}`}
+        />
+      </td>
       <td>
         <button
           type="button"
