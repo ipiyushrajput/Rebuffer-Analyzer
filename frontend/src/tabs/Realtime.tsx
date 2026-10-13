@@ -32,6 +32,7 @@ import {
 } from '../components/charts'
 import { EventFeed } from '../components/EventFeed'
 import { FindingsList } from '../components/FindingCard'
+import { groupFindings } from '../lib/findingGroups'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { LadderTable, type LadderRow } from '../components/LadderTable'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
@@ -401,7 +402,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
             />
             <MetricTile
               label="Active findings"
-              value={activeFindings.length}
+              value={groupFindings(activeFindings).length}
               note={
                 SEVERITIES.filter((severity) => (store.counts[severity] ?? 0) > 0)
                   .map((severity) => `${severity.toLowerCase()} ${store.counts[severity]}`)
@@ -446,7 +447,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
                   title="Findings"
                   actions={
                     activeFindings.length > 0 && (
-                      <span className="chip-neutral">{activeFindings.length}</span>
+                      <span className="chip-neutral">{groupFindings(activeFindings).length}</span>
                     )
                   }
                 />

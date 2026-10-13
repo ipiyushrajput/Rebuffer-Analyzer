@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from app.api.realtime import _interim
 from app.hls.locate import locate
 from app.jobs.manager import job_manager
+from app.net.curl import curl_command
 from app.reports import network_log, service
 
 router = APIRouter(tags=["reports"])
@@ -191,7 +192,7 @@ def _moment(value: str | None, name: str) -> dt.datetime | None:
 
 
 async def _with_curl(job_id: str, poll: dict[str, Any]) -> dict[str, Any]:
-    poll["curl"] = network_log.curl_command(poll["url"], await network_log.job_user_agent(job_id))
+    poll["curl"] = curl_command(poll["url"], await network_log.job_user_agent(job_id))
     return poll
 
 

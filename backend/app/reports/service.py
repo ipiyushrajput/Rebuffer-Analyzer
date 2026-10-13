@@ -29,6 +29,7 @@ from app.db import session as db_session
 from app.db.models import PlaylistSnapshot, Report
 from app.drm import settings as drm_settings
 from app.jobs.manager import JobHandle
+from app.reports.manifests import report_manifests
 from app.reports.render_html import render_bulk_report, render_html_for_handle
 from app.reports.render_pdf import PdfUnavailable, render_pdf_bytes
 
@@ -94,6 +95,18 @@ async def store_report(
         }
 
 
+async def _manifests_for(handle: JobHandle, analysis: AnalysisResult) -> dict[str, Any] | None:
+    """The playlists the report shows, read from the poll log; none rather than no report."""
+    try:
+        if handle.poll_log is not None:
+            # A report on a running session reads polls the log has not flushed yet.
+            await handle.poll_log.flush()
+        return await report_manifests(handle.id, analysis)
+    except Exception as exc:
+        logger.warning("report manifests for %s were not read: %s", handle.id, exc)
+        return None
+
+
 async def generate(
     handle: JobHandle,
     *,
@@ -105,7 +118,7 @@ async def generate(
     if analysis is None:
         raise ValueError("This job has produced no result to report on yet")
 
-    html = render_html_for_handle(handle, analysis)
+    html = render_html_for_handle(handle, analysis, await _manifests_for(handle, analysis))
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
     stem = f"{_slug(handle.channel_name)}-{handle.type}-{stamp}-{handle.id[:8]}"
 
@@ -156,7 +169,9 @@ async def generate_bulk(
         if child.result is None:
             continue
         try:
-            html = render_html_for_handle(child, child.result)
+            html = render_html_for_handle(
+                child, child.result, await _manifests_for(child, child.result)
+            )
         except Exception as exc:
             logger.warning("per-channel report failed for %s: %s", child.id, type(exc).__name__)
             continue

@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { api, endpoints, type JobSummary } from '../api/client'
 import { AgingAnalytics } from '../components/AgingAnalytics'
 import { FindingsList } from '../components/FindingCard'
+import { groupFindings } from '../lib/findingGroups'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import { SessionVerdict } from '../components/SessionVerdict'
@@ -453,7 +454,7 @@ function JobDetail({
       <Card>
         <CardHeader
           title="Findings"
-          actions={<span className="chip-neutral">{findings.length}</span>}
+          actions={<span className="chip-neutral">{groupFindings(findings).length}</span>}
         />
         <div className="px-4 pb-4">
           <FindingsList

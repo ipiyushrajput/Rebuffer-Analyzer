@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api, endpoints, type AnalysedChannel, type ChannelReport } from '../api/client'
 import { FindingsList } from '../components/FindingCard'
+import { groupFindings } from '../lib/findingGroups'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import { SessionVerdict } from '../components/SessionVerdict'
@@ -500,7 +501,7 @@ function ChannelDetail({
         <Card>
           <CardHeader
             title="Findings"
-            actions={<span className="chip-neutral">{findings.length}</span>}
+            actions={<span className="chip-neutral">{groupFindings(findings).length}</span>}
           />
           <div className="px-4 pb-4">
             <FindingsList
