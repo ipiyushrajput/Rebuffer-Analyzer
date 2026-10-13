@@ -44,7 +44,9 @@ async def _drop(job_id: str) -> None:
             await session.execute(delete(model).where(model.job_id == job_id))
 
 
-def _result(body: str, *, status: int = 200, url: str = "https://cdn.example/v/index.m3u8") -> FetchResult:
+def _result(
+    body: str, *, status: int = 200, url: str = "https://cdn.example/v/index.m3u8"
+) -> FetchResult:
     raw = body.encode()
     timings = Timings(dns_ms=1.0, connect_ms=2.0, tls_ms=3.0, ttfb_ms=40.0, total_ms=55.0)
     return FetchResult(
@@ -58,7 +60,9 @@ def _result(body: str, *, status: int = 200, url: str = "https://cdn.example/v/i
     )
 
 
-PLAYLIST = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:{msn}\n#EXTINF:6.0,\nseg_{msn}.ts\n"
+PLAYLIST = (
+    "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:{msn}\n#EXTINF:6.0,\nseg_{msn}.ts\n"
+)
 
 
 # -- the writer --------------------------------------------------------------
@@ -114,16 +118,26 @@ async def test_a_resumed_log_never_reuses_a_number_or_rewrites_a_body() -> None:
     first = ManifestLog(job_id=job)
     at = dt.datetime(2026, 10, 13, 9, 0, tzinfo=dt.UTC)
     await first.record(
-        seq=first.next_seq(), at=at, layer="PLAYBACK", variant="v1", kind="video",
-        url="u", result=_result(PLAYLIST.format(msn=1)),
+        seq=first.next_seq(),
+        at=at,
+        layer="PLAYBACK",
+        variant="v1",
+        kind="video",
+        url="u",
+        result=_result(PLAYLIST.format(msn=1)),
     )
     await first.flush()
 
     second = ManifestLog(job_id=job)
     second.resume_from(await manifest_log.last_seq(job))
     await second.record(
-        seq=second.next_seq(), at=at, layer="PLAYBACK", variant="v1", kind="video",
-        url="u", result=_result(PLAYLIST.format(msn=1)),
+        seq=second.next_seq(),
+        at=at,
+        layer="PLAYBACK",
+        variant="v1",
+        kind="video",
+        url="u",
+        result=_result(PLAYLIST.format(msn=1)),
     )
     await second.flush()
     try:
@@ -162,8 +176,13 @@ async def test_the_purge_keeps_pinned_polls_and_running_jobs_and_drops_orphan_bo
         log = ManifestLog(job_id=job)
         for index, msn in enumerate((1, 2)):
             await log.record(
-                seq=log.next_seq(), at=old + dt.timedelta(seconds=index), layer="PLAYBACK",
-                variant="v1", kind="video", url="u", result=_result(PLAYLIST.format(msn=msn)),
+                seq=log.next_seq(),
+                at=old + dt.timedelta(seconds=index),
+                layer="PLAYBACK",
+                variant="v1",
+                kind="video",
+                url="u",
+                result=_result(PLAYLIST.format(msn=msn)),
             )
         await log.flush()
     await manifest_log.pin_polls("purge-done", seqs={2}, windows=[])
@@ -176,15 +195,23 @@ async def test_the_purge_keeps_pinned_polls_and_running_jobs_and_drops_orphan_bo
         )
         async with db_session.session_scope() as session:
             done = (
-                (await session.execute(select(ManifestPoll.seq).where(ManifestPoll.job_id == "purge-done")))
+                (
+                    await session.execute(
+                        select(ManifestPoll.seq).where(ManifestPoll.job_id == "purge-done")
+                    )
+                )
                 .scalars()
                 .all()
             )
             running = await session.scalar(
-                select(func.count()).select_from(ManifestPoll).where(ManifestPoll.job_id == "purge-running")
+                select(func.count())
+                .select_from(ManifestPoll)
+                .where(ManifestPoll.job_id == "purge-running")
             )
             done_bodies = await session.scalar(
-                select(func.count()).select_from(ManifestBody).where(ManifestBody.job_id == "purge-done")
+                select(func.count())
+                .select_from(ManifestBody)
+                .where(ManifestBody.job_id == "purge-done")
             )
         assert list(done) == [2], "the unpinned poll is gone, the pinned one kept"
         assert running == 2, "a running job is never purged"
@@ -236,7 +263,11 @@ async def test_a_realtime_run_logs_every_poll_and_its_findings_name_them(
         assert handle.poll_log is not None and handle.poll_log.failed_flushes == 0
         async with db_session.session_scope() as session:
             polls = (
-                (await session.execute(select(ManifestPoll).where(ManifestPoll.job_id == handle.id)))
+                (
+                    await session.execute(
+                        select(ManifestPoll).where(ManifestPoll.job_id == handle.id)
+                    )
+                )
                 .scalars()
                 .all()
             )
@@ -253,7 +284,9 @@ async def test_a_realtime_run_logs_every_poll_and_its_findings_name_them(
 
         missing = next(f for f in handle.result.findings if f.rule.id == "HTTP-005")
         poll = missing.evidence[0]["poll"]
-        assert poll["variant"] == missing.variant, "a segment finding names its own rendition's poll"
+        assert poll["variant"] == missing.variant, (
+            "a segment finding names its own rendition's poll"
+        )
         assert by_seq[poll["seq"]].pinned, "the poll a finding fired on is pinned"
 
         served = await network_log.poll_with_context(handle.id, seq=poll["seq"])
@@ -306,7 +339,9 @@ async def test_the_api_serves_a_poll_with_its_previous_one_and_a_curl(
 
     handle = await _run_job(origin)
     try:
-        listed = await reports_api.job_polls(handle.id, variant=None, start=None, end=None, after_seq=0, limit=500)
+        listed = await reports_api.job_polls(
+            handle.id, variant=None, start=None, end=None, after_seq=0, limit=500
+        )
         video = [p for p in listed["polls"] if p["kind"] == "video"]
         later = video[-1]
         served = await reports_api.job_poll(handle.id, later["seq"])

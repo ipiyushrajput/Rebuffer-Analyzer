@@ -80,8 +80,8 @@ async def test_a_report_shows_each_renditions_playlist_with_the_missing_segment_
 ) -> None:
     from app.api.schemas import JobOptionsIn
     from app.jobs.manager import job_manager
-    from app.reports.service import _manifests_for
     from app.reports.render_html import render_html_for_handle
+    from app.reports.service import _manifests_for
 
     url = build_simple_channel(origin, variant_count=2, segment_count=6)
     origin.remove("low-seg2.ts")
@@ -105,7 +105,9 @@ async def test_a_report_shows_each_renditions_playlist_with_the_missing_segment_
         assert html.count(">HTTP-005</code>") == 1
         assert "2 rendition(s)" in row
         # Each rendition carries its own playlist at the time, with the segment marked.
-        marked = re.findall(r'class="ln hl"[^>]*><span class="n">\d+</span><span class="t">([^<]*)</span>', row)
+        marked = re.findall(
+            r'class="ln hl"[^>]*><span class="n">\d+</span><span class="t">([^<]*)</span>', row
+        )
         assert any("low-seg2.ts" in line for line in marked), marked
         assert any("mid-seg2.ts" in line for line in marked), marked
         assert "the poll the finding fired on" in row

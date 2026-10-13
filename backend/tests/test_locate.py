@@ -171,13 +171,9 @@ async def test_time_travel_reads_the_poll_log_once_the_session_is_gone(
     )
     assert handle.task is not None
     await handle.task
-    variant = next(
-        v for context in handle.session.layers.values() for v in context.targets
-    )
+    variant = next(v for context in handle.session.layers.values() for v in context.targets)
     first_at = next(
-        s.at
-        for context in handle.session.layers.values()
-        for s in context.targets[variant].history
+        s.at for context in handle.session.layers.values() for s in context.targets[variant].history
     )
     try:
         handle.session = None  # as after a restart

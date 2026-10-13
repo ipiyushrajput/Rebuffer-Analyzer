@@ -400,7 +400,9 @@ async def test_a_failed_batch_is_retried_channel_by_channel(
     assert "HTTP 500" in failures["BAD"]
 
 
-async def test_a_channel_missing_from_a_good_answer_is_asked_alone_then_measured_as_no_days() -> None:
+async def test_a_channel_missing_from_a_good_answer_is_asked_alone_then_measured_as_no_days() -> (
+    None
+):
     """Asked alone and still absent, the channel is a measurement of zero days — the call
     succeeded — so it is insufficient data rather than a channel CASCADA did not answer for."""
     fetcher = FakeFetcher(
