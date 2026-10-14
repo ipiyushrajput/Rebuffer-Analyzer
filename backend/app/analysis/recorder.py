@@ -110,6 +110,9 @@ class RecordedSegment:
     init: str | None = None
     decrypted_file: str | None = None
     drm_reason: str = ""
+    # What a replay needs to serve this file back for the request that fetched it.
+    byterange: str | None = None
+    map_uri: str | None = None
     error: str | None = None
 
     def moment(self) -> dt.datetime:
@@ -299,6 +302,8 @@ class StreamRecorder:
             decrypted_file=decrypted_file,
             drm_reason=drm_reason,
             error=error if not body else None,
+            byterange=job.byterange,
+            map_uri=job.map_uri,
         )
         if not body:
             self.failed += 1

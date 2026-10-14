@@ -1,8 +1,9 @@
 # Setup
 
-RBA is a Python backend and a React frontend. Running it means three things: a virtualenv
-with the backend installed, `node_modules` for the frontend, and a `backend/.env` naming the
-database. Everything below does those three things; they differ only in the shell.
+StreamLens (internally `rba`) is a Python backend and a React frontend. Running it means three
+things: a virtualenv with the backend installed, `node_modules` for the frontend, and a
+`backend/.env` naming the database. Everything below does those three things; they differ only
+in the shell.
 
 | | Linux / macOS | Windows |
 |---|---|---|

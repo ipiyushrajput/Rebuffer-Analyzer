@@ -35,6 +35,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from sqlalchemy import func, select
 
+from app.config import PRODUCT_NAME
 from app.db import session as db_session
 from app.db.models import Job as JobRow
 from app.db.models import ManifestBody, ManifestPoll, SegmentSample
@@ -43,7 +44,7 @@ from app.jobs.manifest_log import decompress
 PAGE = 2000
 SPOOL_BYTES = 64 * 1024 * 1024
 STREAM_CHUNK = 256 * 1024
-TOOL_NAME = "StreamLens"
+TOOL_NAME = PRODUCT_NAME
 
 
 def _iso(moment: dt.datetime | None) -> str:

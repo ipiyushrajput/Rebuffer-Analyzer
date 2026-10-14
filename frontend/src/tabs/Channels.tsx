@@ -412,6 +412,13 @@ function ChannelDetail({
     queryKey: ['channel', channelId],
     queryFn: () => endpoints.readChannel(channelId),
   })
+  // Re-analyse from the poll log and recording with the thresholds and rules in force now.
+  const replay = useMutation({
+    mutationFn: () =>
+      api.post<{ job_id: string; duration_s: number; recorded: boolean; playlists: number }>(
+        `/jobs/${channelId}/replay`,
+      ),
+  })
 
   if (isLoading) {
     return (
@@ -512,6 +519,15 @@ function ChannelDetail({
               )}
               <button
                 type="button"
+                className="btn-ghost btn-sm"
+                disabled={replay.isPending || data.status === 'RUNNING' || data.status === 'PENDING'}
+                title="Run the analysis again on what this run stored, with the current settings"
+                onClick={() => replay.mutate()}
+              >
+                Re-analyse
+              </button>
+              <button
+                type="button"
                 className="btn-ghost btn-sm text-pink-600"
                 onClick={() => setConfirming(true)}
               >
@@ -524,6 +540,15 @@ function ChannelDetail({
       />
 
       <PageBody>
+        {replay.error && <InlineAlert tone="error">{String(replay.error)}</InlineAlert>}
+        {replay.data && (
+          <InlineAlert tone="info">
+            Replaying {replay.data.playlists} stored playlist response(s)
+            {replay.data.recorded ? ' and the recording' : ' (no recording, so playlist checks only)'}{' '}
+            at 1× with the current settings — {duration(replay.data.duration_s)}. It is filed under
+            Analysed channels as “{data.channel_name.replace(/ — replay$/, '')} — replay” when it ends.
+          </InlineAlert>
+        )}
         <SessionVerdict
           verdict={verdict}
           threshold={thresholds.rebuffer_ratio_threshold ?? REBUFFER_RATIO_THRESHOLD_DEFAULT}

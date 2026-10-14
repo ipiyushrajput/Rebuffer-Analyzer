@@ -15,6 +15,7 @@ import contextlib
 import contextvars
 import datetime as dt
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -22,7 +23,13 @@ from typing import Any
 from app.analysis import attribution, av_pairing, correlate, vpb
 from app.analysis import evidence as evidence_store
 from app.analysis import recorder as recorder_module
-from app.analysis.collectors.playlist_poller import PlaylistPoller, PollTarget, Snapshot
+from app.analysis import replay as replay_module
+from app.analysis.collectors.playlist_poller import (
+    MIN_POLL_INTERVAL_S,
+    PlaylistPoller,
+    PollTarget,
+    Snapshot,
+)
 from app.analysis.collectors.segment_sampler import (
     RungSampling,
     SampledSegment,
@@ -40,6 +47,7 @@ from app.analysis.rules import sequence as sequence_rules
 from app.analysis.rules import subtitles as subtitle_rules
 from app.analysis.rules import transport as transport_rules
 from app.analysis.rules.base import Finding, FindingCollector, Severity, StreamLayer
+from app.analysis.self_check import SelfCheck
 from app.analysis.verdict import Verdict
 from app.analysis.verdict import build as build_verdict
 from app.config import (
@@ -104,6 +112,8 @@ class SessionOptions:
     # aging), because a day of every rung is well over a hundred gigabytes.
     record_stream: bool = False
     record_mode: str = "full"
+    # The run this one re-analyses from its poll log and recording, instead of the network.
+    replay_of: str | None = None
 
     def enabled(self, name: str) -> bool:
         return name in self.check_sets
@@ -122,6 +132,7 @@ class SessionOptions:
             "record_evidence": self.record_evidence,
             "record_stream": self.record_stream,
             "record_mode": self.record_mode,
+            "replay_of": self.replay_of,
             "vpb_mode": self.vpb_mode,
             "nth_segment_sampling": self.nth_segment_sampling,
             "snapshot_mode": self.snapshot_mode,
@@ -230,6 +241,10 @@ class AnalysisResult:
     # key material: what the system was, which identifier, whether a key was obtained, and
     # how many segments were decrypted.
     drm: dict[str, Any] = field(default_factory=dict)
+    # Whether the analyzer kept its own schedule over the window (`app/analysis/self_check.py`).
+    self_check: dict[str, Any] = field(default_factory=dict)
+    # For a replay: what was served from the original run and what was not re-measured.
+    replay: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -248,6 +263,8 @@ class AnalysisResult:
             "event_log": self.event_log[-500:],
             "owner_summary": self.owner_summary,
             "drm": self.drm,
+            "self_check": self.self_check,
+            "replay": self.replay,
         }
 
 
@@ -268,8 +285,10 @@ class AnalysisSession:
         drm: DrmSettings | None = None,
         on_event: EventHandler | None = None,
         poll_log: ManifestLog | None = None,
+        replay: replay_module.ReplaySource | None = None,
     ) -> None:
         self.session_id = session_id
+        self.replay = replay
         # Every playlist fetch is numbered here and, when the job keeps a log, written down.
         # A run without one (the CLI) still numbers its polls, so findings name them.
         self.poll_log = poll_log or ManifestLog(job_id=session_id, enabled=False)
@@ -307,6 +326,8 @@ class AnalysisSession:
         # Every segment of every analysed rendition, on disk, when the run was asked to record.
         self.recorder: recorder_module.StreamRecorder | None = None
         self.recording: dict[str, Any] | None = None
+        # The analyzer's own timing: a late poll reads as a late stream unless it is measured.
+        self.self_check = SelfCheck(lag_threshold_s=self.thresholds.selfcheck_loop_lag_ms / 1000)
         self.layers: dict[StreamLayer, LayerContext] = {}
         self.event_log: list[dict[str, Any]] = []
         self.stalls: list[correlate.StallEvent] = []
@@ -421,12 +442,21 @@ class AnalysisSession:
 
     async def run(self) -> AnalysisResult:
         settings = get_settings()
-        self._fetcher = Fetcher(
-            ua_profile=self.options.ua_profile,
-            timeout_s=self.thresholds.request_timeout_s,
-            per_host_connections=settings.rba_per_host_connections,
-        )
-        if self.options.record_stream:
+        if self.replay is not None:
+            # Every response comes from the replayed run's poll log and recording.
+            self._fetcher = replay_module.ReplayFetcher(
+                self.replay,
+                ua_profile=self.options.ua_profile,
+                timeout_s=self.thresholds.request_timeout_s,
+                per_host_connections=settings.rba_per_host_connections,
+            )
+        else:
+            self._fetcher = Fetcher(
+                ua_profile=self.options.ua_profile,
+                timeout_s=self.thresholds.request_timeout_s,
+                per_host_connections=settings.rba_per_host_connections,
+            )
+        if self.options.record_stream and self.replay is None:
             self.recorder = recorder_module.StreamRecorder(
                 job_id=self.session_id,
                 root=settings.rba_recordings_dir,
@@ -489,10 +519,8 @@ class AnalysisSession:
                 )
             )
 
-    async def _bootstrap_layer(self, context: LayerContext) -> None:
-        assert self._fetcher is not None
+    async def _check_name_and_certificate(self, context: LayerContext) -> None:
         layer = context.layer
-
         dns_result = await dns_module.resolve(context.url)
         await self._record(
             transport_rules.check_dns(dns_result, layer=layer, thresholds=self.thresholds)
@@ -507,6 +535,15 @@ class AnalysisSession:
             await self._emit(
                 "event", {"kind": "tls", "layer": layer.value, "data": tls_result.as_dict()}
             )
+
+    async def _bootstrap_layer(self, context: LayerContext) -> None:
+        assert self._fetcher is not None
+        layer = context.layer
+
+        if self.replay is None:
+            # A replay answers from stored responses: name resolution and the certificate
+            # chain belong to the network, which it does not re-measure.
+            await self._check_name_and_certificate(context)
 
         result = await self._fetcher.fetch(context.url)
         context.playlist_count += 1
@@ -731,8 +768,11 @@ class AnalysisSession:
 
         deadline = self.started_at + dt.timedelta(seconds=self.options.duration_s)
         while not self._stop.is_set() and dt.datetime.now(dt.UTC) < deadline:
+            waited_from = time.monotonic()
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), timeout=1.0)
+            if not self._stop.is_set():
+                self.self_check.tick(1.0, time.monotonic() - waited_from)
             await self._periodic()
             await self._emit(
                 "metric",
@@ -744,6 +784,10 @@ class AnalysisSession:
                         "findings": len(self.collector),
                         "counts": self.collector.counts(),
                         "sampling": self.sampling_state(),
+                        "self_check": {
+                            "kept_time": self.self_check.kept_time,
+                            "lag_max_ms": round(self.self_check.lag_max_s * 1000, 1),
+                        },
                     },
                 },
             )
@@ -803,10 +847,16 @@ class AnalysisSession:
         # Every finding raised while this poll is handled names it — the segment checks
         # included, since sampling runs inside the handler.
         token = _CURRENT_POLL.set(ref)
+        started = time.monotonic()
         try:
             await self._handle_snapshot(context, snapshot)
         finally:
             _CURRENT_POLL.reset(token)
+            # The poller waits for this handler before it schedules the next poll, so a
+            # handler that outlasts the interval delays that rendition's next poll.
+            target_duration = context.target_duration_by_variant.get(snapshot.variant)
+            budget = max(MIN_POLL_INTERVAL_S, (target_duration or 6.0) / 2)
+            self.self_check.handled(snapshot.variant, time.monotonic() - started, budget)
 
     async def _handle_snapshot(self, context: LayerContext, snapshot: Snapshot) -> None:
         layer = context.layer
@@ -1551,6 +1601,21 @@ class AnalysisSession:
 
         await self._record(self._player_ratio_finding())
         await self._check_demuxed_coverage()
+        replay_summary: dict[str, Any] = {}
+        if self.replay is not None and isinstance(self._fetcher, replay_module.ReplayFetcher):
+            replay_summary = self._fetcher.stats.as_dict(self.replay)
+            await self._record(
+                R.REPLAYED_RUN.raise_finding(
+                    replay_summary["statement"],
+                    evidence={k: v for k, v in replay_summary.items() if k != "statement"},
+                )
+            )
+        if not self.self_check.kept_time:
+            await self._record(
+                R.SELF_CHECK_LATE.raise_finding(
+                    self.self_check.statement(), evidence=self.self_check.as_dict()
+                )
+            )
 
         self.incidents.close_all(self.ended_at)
         findings = self.collector.all()
@@ -1602,6 +1667,8 @@ class AnalysisSession:
             event_log=self.event_log,
             owner_summary=attribution.owner_summary(findings),
             drm=self.drm.summary() if self.drm is not None else {},
+            self_check=self.self_check.as_dict(),
+            replay=replay_summary,
         )
 
     async def _check_demuxed_coverage(self) -> None:

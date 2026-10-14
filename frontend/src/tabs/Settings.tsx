@@ -129,6 +129,9 @@ const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
       'recording_postroll_s',
       'segment_retry_attempts',
       'segment_retry_backoff_s',
+      // INFO-007: how late the analyzer's own one-second supervisor may wake before the run
+      // states that its timings carry the host's delay.
+      'selfcheck_loop_lag_ms',
     ],
   },
   {

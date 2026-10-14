@@ -2300,6 +2300,36 @@ SKIP_AV_PAIR_NUMBERING = _r(
     "HLS AV Doctor DemuxAnalyzer",
     ("av_pair_min_overlap_fraction",),
 )
+SELF_CHECK_LATE = _r(
+    "INFO-007",
+    "coverage",
+    I,
+    Owner.SAMSUNG_PLAYER,
+    "The analyzer fell behind its own polling schedule",
+    "The analyzer host held its event loop, or spent longer handling a playlist poll (segment "
+    "sampling included) than the poll interval it had to keep, so the polls and fetches behind "
+    "it went out late. Poll timestamps, playlist freshness and segment arrival times measured in "
+    "this window carry that delay as well as the stream's.",
+    "Run fewer concurrent jobs on the analyzer host, or sample fewer rungs in full, so every "
+    "poll is handled inside its interval; then repeat the run.",
+    NONE,
+    "",
+    ("selfcheck_loop_lag_ms",),
+)
+REPLAYED_RUN = _r(
+    "INFO-008",
+    "coverage",
+    I,
+    Owner.SAMSUNG_PLAYER,
+    "This run re-analysed a recorded run rather than the live stream",
+    "Every playlist response came from the original run's poll log and every segment from its "
+    "recording, served at 1x at the offset the original run received it, and measured against "
+    "the thresholds and rules in force when the replay ran. DNS, TLS and network delivery are "
+    "not re-measured, so every timing is the original run's, and a segment the original run "
+    "fetched without timing it carries none.",
+    "Analyse the live channel again to measure the network as it is now.",
+    NONE,
+)
 NO_DEFECT = _r(
     "INFO-900",
     "coverage",

@@ -25,7 +25,7 @@ from sqlalchemy.orm import undefer
 
 from app.analysis import review
 from app.analysis.engine import AnalysisResult
-from app.config import get_settings
+from app.config import PRODUCT_NAME, get_settings
 from app.db import session as db_session
 from app.db.models import Finding as FindingRow
 from app.db.models import Incident as IncidentRow
@@ -42,7 +42,7 @@ from app.reports.render_pdf import PdfUnavailable, render_pdf_bytes
 
 logger = logging.getLogger(__name__)
 
-TOOL_NAME = "StreamLens"
+TOOL_NAME = PRODUCT_NAME
 
 SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 

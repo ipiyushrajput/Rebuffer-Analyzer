@@ -1,6 +1,8 @@
-# RBA — TV Plus Rebuffer Analyzer — project memory
+# StreamLens (RBA) — Samsung TV Plus stream analyzer — project memory
 
-Internal platform for the Samsung TV Plus stream quality team. It analyses linear HLS
+Internal platform for the Samsung TV Plus stream quality team. The product name is
+**StreamLens** (`PRODUCT_NAME` in `app/config.py`, the browser tab, the rail, the reports and
+the alerts); the package, the service units, the database and the CLI keep `rba`. It analyses linear HLS
 channels end to end and produces a channel-wise report naming the exact defect, the
 evidence, the responsible party, and the fix.
 
@@ -330,6 +332,26 @@ frontend/src/
   playable file per clip, the decrypted copy, audio and video joined by ffmpeg when installed,
   and the clip's own network log. An evidence download for a run no longer in memory is built
   from the database and the poll log and says that the session's segment bytes went with it.
+- **A run states whether the analyzer kept its own time.** `app/analysis/self_check.py`
+  measures how late the session's one-second supervisor wakes (event-loop lag) and how long each
+  playlist poll takes to handle against its poll interval, because a late poll reads as a late
+  stream. Past `selfcheck_loop_lag_ms`, or a handler outlasting its interval, raises `INFO-007`
+  with the measured delay; the result's `self_check` and the report appendix state it either way.
+- **A finished run can be re-analysed from what it stored.** `POST /api/jobs/{id}/replay` starts
+  a new job (`parent_job_id`, `options.replay_of`) whose `ReplayFetcher` (`app/analysis/replay.py`)
+  answers every playlist from the poll log at the offset the original received it, at 1x, and
+  every segment from its recording with the timing the original sampler measured — or none, so
+  the delivery checks do not run on it. A request the original never stored is a `replay_gap`:
+  `check_http` reads nothing into it. DNS and TLS are not re-measured, a licence POST goes out
+  live, a replay never alerts, and `INFO-008` states what was served and what was not.
+- **Engineers' verdicts and accepted behaviours are data, not code.** `app/analysis/review.py`
+  stores confirmed / false-positive feedback per finding (summed into per-rule precision in the
+  rule catalogue) and per-channel acknowledgements with an expiry. An acknowledged finding is
+  still measured and shown, marked; it is excluded from alerts, escalation packs and the report's
+  owner sections. Alerts (`app/alerts.py`) post the first occurrence of each issue per run to a
+  webhook held server-side and reported to a page as set or not set, never returned.
+- **Across runs.** `app/api/insights.py` searches findings over a projection of findings and jobs
+  (never the evidence JSON) and compares two runs grouped by rule and layer.
 - **EME needs a secure context, and that is the page's origin, not the stream.**
   `navigator.requestMediaKeySystemAccess` is undefined on a plain `http://` origin that is not
   localhost, and hls.js turns that into `keySystemNoAccess` — a message naming nothing

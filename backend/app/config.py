@@ -116,6 +116,11 @@ class VpbMode(str, Enum):
     OUTAGE_ONLY = "OUTAGE_ONLY"
 
 
+# The product's name, as a page, a report and an alert print it. Package, service and database
+# names keep `rba`: renaming those would move a deployment's files, units and schema.
+PRODUCT_NAME = "StreamLens"
+
+
 class Thresholds(BaseModel):
     """Analysis thresholds (§6.1). Persisted in the DB, editable in the Settings tab."""
 
@@ -244,6 +249,10 @@ class Thresholds(BaseModel):
     # and the post-roll after it.
     recording_preroll_s: float = 120.0
     recording_postroll_s: float = 60.0
+
+    # The analyzer's own timing (INFO-007). A supervisor wake this much later than its one
+    # second means the event loop was held and every poll and fetch behind it was late.
+    selfcheck_loop_lag_ms: float = 1000.0
 
     # Tizen segment retry policy modelled by the Virtual Player Buffer.
     segment_retry_attempts: int = 2

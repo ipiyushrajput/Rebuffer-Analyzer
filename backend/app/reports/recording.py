@@ -36,11 +36,12 @@ from pathlib import Path
 from typing import Any
 
 from app.analysis.recorder import INCIDENTS, read_summary
+from app.config import PRODUCT_NAME
 from app.media import ffprobe
 from app.reports import network_log
 
 CHUNK = 1024 * 1024
-TOOL_NAME = "StreamLens"
+TOOL_NAME = PRODUCT_NAME
 
 
 class _Pipe:

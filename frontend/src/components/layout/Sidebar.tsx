@@ -110,10 +110,10 @@ export function Sidebar({
         {!collapsed && (
           <div className="min-w-0">
             <p className="truncate text-[15px] font-semibold leading-tight tracking-tight">
-              TV PLUS
+              StreamLens
             </p>
             <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-rail-muted">
-              Rebuffer Analyzer
+              Samsung TV Plus
             </p>
           </div>
         )}

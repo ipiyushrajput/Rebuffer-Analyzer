@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from app import alerts as alerts_module
 from app.analysis import recorder as recorder_module
+from app.analysis import replay as replay_module
 from app.analysis import review
 from app.analysis.engine import AnalysisResult, AnalysisSession, SessionOptions
 from app.config import default_ua_profile, get_settings, get_thresholds
@@ -249,11 +250,13 @@ class JobManager:
             # Alerts for this run: the first occurrence of each issue at or above the
             # configured severity is posted while the run is still going, unless the channel
             # acknowledges it.
+            # A replay re-reads a run that already alerted; it never pages anyone again.
+            replay_of = handle.options.replay_of
             job_alerts = alerts_module.JobAlerts(
                 job_id=handle.id,
                 job_type=handle.type,
                 channel=handle.channel_name,
-                settings=await alerts_module.load(),
+                settings=alerts_module.AlertSettings() if replay_of else await alerts_module.load(),
                 acknowledged=await review.matches_for(handle.urls.get("playback_url")),
             )
             handle.alerts = job_alerts
@@ -290,6 +293,11 @@ class JobManager:
                 drm=await drm_settings.load(),
                 on_event=on_event,
                 poll_log=poll_log,
+                replay=await replay_module.ReplaySource.load(
+                    replay_of, get_settings().rba_recordings_dir
+                )
+                if replay_of
+                else None,
             )
             handle.session = session
 
@@ -574,6 +582,7 @@ def _options_from_params(params: dict[str, Any]) -> SessionOptions:
         vpb_mode=params.get("vpb_mode"),
         nth_segment_sampling=params.get("nth_segment_sampling"),
         snapshot_mode=bool(params.get("snapshot_mode", False)),
+        replay_of=params.get("replay_of") or None,
     )
 
 

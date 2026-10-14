@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health
-from app.config import get_settings
+from app.config import PRODUCT_NAME, get_settings
 from app.db import session as db_session
 from app.logging_setup import configure_logging
 
@@ -112,7 +112,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="TV Plus Rebuffer Analyzer",
+        title=PRODUCT_NAME,
         version=health.VERSION,
         description=(
             "Analyses linear HLS channels end to end and reports the exact defect, its "
@@ -143,6 +143,7 @@ def create_app() -> FastAPI:
         insights,
         proxy,
         realtime,
+        replay,
         reports,
         review,
     )
@@ -161,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(reports.router, prefix="/api")
     app.include_router(review.router, prefix="/api")
     app.include_router(insights.router, prefix="/api")
+    app.include_router(replay.router, prefix="/api")
     app.include_router(proxy.router, prefix="/api")
     app.include_router(drm.router, prefix="/api")
     app.include_router(ws_routes.router)

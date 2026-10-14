@@ -357,6 +357,10 @@ def render_report(
         # reader has to be able to tell a rendition that passed every bitstream check from
         # one whose payload was never read. Empty for a clear channel, which renders nothing.
         "drm": result.drm,
+        # Whether the analyzer kept its own schedule: a late poll reads as a late stream.
+        "self_check": result.self_check,
+        # A replay states what it served from the original run and what it did not re-measure.
+        "replay": result.replay,
         "escalations": [block.as_dict() for block in escalations],
         "vpb_summary": [
             {

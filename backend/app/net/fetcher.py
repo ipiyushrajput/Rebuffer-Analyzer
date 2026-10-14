@@ -152,6 +152,9 @@ class FetchResult:
     # is answerable for it. `error` set with this False is the analyzer's own limit (the
     # redirect cap), which a rule reports differently.
     transport_error: bool = False
+    # Set only by a replay (`app/analysis/replay.py`) for a request the replayed run never
+    # stored: nothing was measured, so no rule reads it as a failed fetch.
+    replay_gap: bool = False
 
     @property
     def ok(self) -> bool:

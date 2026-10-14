@@ -171,6 +171,9 @@ def check_http(
 ) -> list[Finding]:
     """Status, redirect and header checks for one fetch."""
     findings: list[Finding] = []
+    if result.replay_gap:
+        # A replay asked for something the recorded run never stored: no response exists.
+        return findings
     evidence: dict[str, Any] = {
         "url": result.requested_url,
         "final_url": result.final_url,

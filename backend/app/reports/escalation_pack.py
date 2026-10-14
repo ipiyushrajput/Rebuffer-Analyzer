@@ -28,6 +28,7 @@ from app.analysis import review
 from app.analysis.grouping import group_findings
 from app.analysis.rules import catalogue  # noqa: F401  (registers every rule)
 from app.analysis.rules.base import Finding, Owner, Severity, StreamLayer, registry
+from app.config import PRODUCT_NAME
 from app.db import session as db_session
 from app.db.models import Finding as FindingRow
 from app.db.models import Job as JobRow
@@ -37,7 +38,7 @@ from app.net.curl import curl_command
 from app.reports import network_log
 from app.reports.email_block import build_blocks
 
-TOOL_NAME = "StreamLens"
+TOOL_NAME = PRODUCT_NAME
 
 
 async def findings_for_job(job_id: str) -> list[Finding]:

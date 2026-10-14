@@ -24,6 +24,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.analysis.review import AckMatch, is_acknowledged
+from app.config import PRODUCT_NAME
 from app.db import session as db_session
 from app.db.models import SettingRow
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_KEY = "alerts"
 SEVERITY_RANK = {"CRITICAL": 4, "ERROR": 3, "WARN": 2, "INFO": 1, "PASS": 0}
-TOOL_NAME = "StreamLens"
+TOOL_NAME = PRODUCT_NAME
 
 
 class AlertSettings(BaseModel):
