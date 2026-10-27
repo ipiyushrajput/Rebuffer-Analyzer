@@ -411,17 +411,23 @@ async def build_evidence_bundle(handle: JobHandle) -> bytes:
         bundle.writestr("README.txt", _bundle_readme(handle, decrypt_evidence=drm.decrypt_evidence))
         await _write_polls(bundle, handle.id, seqs)
         if handle.session is not None:
+            # A poll a finding names is already in the bundle from the poll log; the recent
+            # history adds the polls around it, never the same file twice.
+            written = set(bundle.namelist())
             for context in handle.session.layers.values():
                 for variant, target in context.targets.items():
                     for snapshot_obj in target.history[-20:]:
                         if not snapshot_obj.raw:
                             continue
                         stamp = snapshot_obj.at.strftime("%Y%m%dT%H%M%S%f")
-                        bundle.writestr(
+                        name = (
                             f"playlists/{_slug(context.layer.value)}/{_slug(variant)}/"
-                            f"{snapshot_obj.seq:07d}_{stamp}.m3u8",
-                            snapshot_obj.raw,
+                            f"{snapshot_obj.seq:07d}_{stamp}.m3u8"
                         )
+                        if name in written:
+                            continue
+                        written.add(name)
+                        bundle.writestr(name, snapshot_obj.raw)
             _write_segments(bundle, handle, decrypt_evidence=drm.decrypt_evidence)
     return buffer.getvalue()
 
