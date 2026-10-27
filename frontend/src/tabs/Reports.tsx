@@ -11,11 +11,13 @@ import {
   Field,
   MetricRow,
   MetricTile,
+  Pagination,
   cx,
 } from '../components/ui'
 import { IconClose, IconDownload, IconSearch } from '../components/ui/icons'
 import { OWNER_LABEL } from '../lib/constants'
 import { bytes, localDateTime, utcTitle } from '../lib/format'
+import { usePaged } from '../lib/paging'
 
 interface ReportRow {
   id: number
@@ -78,6 +80,8 @@ export function ReportsTab() {
   })
 
   const reports = (reportsQuery.data?.reports ?? []) as unknown as ReportRow[]
+  // The filters run on the server; a new filter starts on its first page.
+  const paged = usePaged(reports, query)
 
   const defects = reports.filter(
     (report) => report.verdict_status && report.verdict_status !== 'NO STREAM-SIDE DEFECT',
@@ -277,87 +281,107 @@ export function ReportsTab() {
           {reports.length === 0 ? (
             <EmptyState title="No reports" />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="table table-hover">
-                <thead>
-                  <tr>
-                    <th>Channel</th>
-                    <th>Type</th>
-                    <th>Verdict</th>
-                    <th>Responsible party</th>
-                    <th>Risk</th>
-                    <th>Format</th>
-                    <th>Size</th>
-                    <th>Generated</th>
-                    <th className="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.map((report) => (
-                    <tr key={report.id} className={cx(!report.exists && 'opacity-60')}>
-                      <td>
-                        <button
-                          type="button"
-                          onClick={() => setOpen(report)}
-                          className="text-left text-body font-semibold text-ink hover:text-brand-600 hover:underline"
-                        >
-                          {report.channel_name ?? '—'}
-                        </button>
-                      </td>
-                      <td className="text-micro capitalize text-ink-muted">{report.job_type}</td>
-                      <td>
-                        <span className={verdictChip(report.verdict_status)}>
-                          {report.verdict_status ?? '—'}
-                        </span>
-                      </td>
-                      <td className="text-micro text-ink-soft">
-                        {report.owner ? (OWNER_LABEL[report.owner] ?? report.owner) : '—'}
-                      </td>
-                      <td
-                        className={cx(
-                          'font-mono text-body font-semibold tabular-nums',
-                          (report.risk_score ?? 0) >= 70 ? 'text-pink-600' : 'text-ink',
-                        )}
-                      >
-                        {report.risk_score ?? '—'}
-                      </td>
-                      <td className="text-micro uppercase text-ink-muted">{report.format}</td>
-                      <td className="font-mono text-micro tabular-nums text-ink-soft">
-                        {bytes(report.size_bytes)}
-                      </td>
-                      <td
-                        className="font-mono text-micro text-ink-soft"
-                        title={utcTitle(report.created_at)}
-                      >
-                        {localDateTime(report.created_at)}
-                      </td>
-                      <td>
-                        <div className="flex justify-end gap-1.5">
-                          {report.exists ? (
-                            <button
-                              type="button"
-                              className="btn-ghost btn-sm"
-                              onClick={() => setOpen(report)}
-                            >
-                              Open
-                            </button>
-                          ) : (
-                            <span className="chip-violet">No content</span>
-                          )}
+            <>
+              <Pagination
+                className="border-b border-surface-line px-5 py-2.5"
+                label={paged.label}
+                hasPrevious={paged.hasPrevious}
+                hasNext={paged.hasNext}
+                onPrevious={paged.previous}
+                onNext={paged.next}
+              />
+              <div className="overflow-x-auto">
+                <table className="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>Channel</th>
+                      <th>Type</th>
+                      <th>Verdict</th>
+                      <th>Responsible party</th>
+                      <th>Risk</th>
+                      <th>Format</th>
+                      <th>Size</th>
+                      <th>Generated</th>
+                      <th className="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paged.rows.map((report) => (
+                      <tr key={report.id} className={cx(!report.exists && 'opacity-60')}>
+                        <td>
                           <button
                             type="button"
-                            className="btn-accent btn-sm"
-                            onClick={() => remove.mutate(report.id)}
+                            onClick={() => setOpen(report)}
+                            className="text-left text-body font-semibold text-ink hover:text-brand-600 hover:underline"
                           >
-                            Delete
+                            {report.channel_name ?? '—'}
                           </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        </td>
+                        <td className="text-micro capitalize text-ink-muted">{report.job_type}</td>
+                        <td>
+                          <span className={verdictChip(report.verdict_status)}>
+                            {report.verdict_status ?? '—'}
+                          </span>
+                        </td>
+                        <td className="text-micro text-ink-soft">
+                          {report.owner ? (OWNER_LABEL[report.owner] ?? report.owner) : '—'}
+                        </td>
+                        <td
+                          className={cx(
+                            'font-mono text-body font-semibold tabular-nums',
+                            (report.risk_score ?? 0) >= 70 ? 'text-pink-600' : 'text-ink',
+                          )}
+                        >
+                          {report.risk_score ?? '—'}
+                        </td>
+                        <td className="text-micro uppercase text-ink-muted">{report.format}</td>
+                        <td className="font-mono text-micro tabular-nums text-ink-soft">
+                          {bytes(report.size_bytes)}
+                        </td>
+                        <td
+                          className="font-mono text-micro text-ink-soft"
+                          title={utcTitle(report.created_at)}
+                        >
+                          {localDateTime(report.created_at)}
+                        </td>
+                        <td>
+                          <div className="flex justify-end gap-1.5">
+                            {report.exists ? (
+                              <button
+                                type="button"
+                                className="btn-ghost btn-sm"
+                                onClick={() => setOpen(report)}
+                              >
+                                Open
+                              </button>
+                            ) : (
+                              <span className="chip-violet">No content</span>
+                            )}
+                            <button
+                              type="button"
+                              className="btn-accent btn-sm"
+                              onClick={() => remove.mutate(report.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {paged.pages > 1 && (
+                <Pagination
+                  className="border-t border-surface-line px-5 py-2.5"
+                  label={paged.label}
+                  hasPrevious={paged.hasPrevious}
+                  hasNext={paged.hasNext}
+                  onPrevious={paged.previous}
+                  onNext={paged.next}
+                />
+              )}
+            </>
           )}
         </Card>
       </PageBody>

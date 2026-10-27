@@ -15,6 +15,7 @@ import { CompareRuns } from '../components/CompareRuns'
 import { FindingsList } from '../components/FindingCard'
 import { FindingSearch } from '../components/FindingSearch'
 import { groupFindings } from '../lib/findingGroups'
+import { usePaged } from '../lib/paging'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import { SessionVerdict } from '../components/SessionVerdict'
@@ -26,6 +27,7 @@ import {
   InlineAlert,
   MetricRow,
   MetricTile,
+  Pagination,
   SeverityChip,
   cx,
 } from '../components/ui'
@@ -124,6 +126,7 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
           .includes(filter.toLowerCase())
       : true,
   )
+  const paged = usePaged(visible, filter)
 
   // Opening a different channel starts from its summary, not from a stale finding.
   useEffect(() => {
@@ -240,41 +243,61 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
               }
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="table table-hover">
-                <thead>
-                  <tr>
-                    <th className="w-8">
-                      <span className="sr-only">Compare</span>
-                    </th>
-                    <th>Channel</th>
-                    <th>Verdict</th>
-                    <th>Responsible party</th>
-                    <th>Risk</th>
-                    <th>Findings</th>
-                    <th>Analysed</th>
-                    <th>Reports</th>
-                    <th className="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((channel) => (
-                    <ChannelRow
-                      key={channel.id}
-                      channel={channel}
-                      confirming={confirming === channel.id}
-                      selected={selected.includes(channel.id)}
-                      onToggleSelected={() => toggleSelected(channel.id)}
-                      onOpen={() => onOpenChange(channel.id)}
-                      onAskDelete={() => setConfirming(channel.id)}
-                      onCancelDelete={() => setConfirming(null)}
-                      onConfirmDelete={() => remove.mutate(channel.id)}
-                      deleting={remove.isPending}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <Pagination
+                className="border-b border-surface-line px-5 py-2.5"
+                label={paged.label}
+                hasPrevious={paged.hasPrevious}
+                hasNext={paged.hasNext}
+                onPrevious={paged.previous}
+                onNext={paged.next}
+              />
+              <div className="overflow-x-auto">
+                <table className="table table-hover">
+                  <thead>
+                    <tr>
+                      <th className="w-8">
+                        <span className="sr-only">Compare</span>
+                      </th>
+                      <th>Channel</th>
+                      <th>Verdict</th>
+                      <th>Responsible party</th>
+                      <th>Risk</th>
+                      <th>Findings</th>
+                      <th>Analysed</th>
+                      <th>Reports</th>
+                      <th className="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paged.rows.map((channel) => (
+                      <ChannelRow
+                        key={channel.id}
+                        channel={channel}
+                        confirming={confirming === channel.id}
+                        selected={selected.includes(channel.id)}
+                        onToggleSelected={() => toggleSelected(channel.id)}
+                        onOpen={() => onOpenChange(channel.id)}
+                        onAskDelete={() => setConfirming(channel.id)}
+                        onCancelDelete={() => setConfirming(null)}
+                        onConfirmDelete={() => remove.mutate(channel.id)}
+                        deleting={remove.isPending}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {paged.pages > 1 && (
+                <Pagination
+                  className="border-t border-surface-line px-5 py-2.5"
+                  label={paged.label}
+                  hasPrevious={paged.hasPrevious}
+                  hasNext={paged.hasNext}
+                  onPrevious={paged.previous}
+                  onNext={paged.next}
+                />
+              )}
+            </>
           )}
         </Card>
 

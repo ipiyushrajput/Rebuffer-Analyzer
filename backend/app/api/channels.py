@@ -11,48 +11,25 @@ last restart is still listed.
 
 from __future__ import annotations
 
-import shutil
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.api.job_views import TERMINAL, row_summary, stored_result
 from app.config import get_settings
 from app.db import session as db_session
-from app.db.models import Finding as FindingRow
-from app.db.models import Incident as IncidentRow
 from app.db.models import Job as JobRow
 from app.db.models import (
-    ManifestBody,
-    ManifestPoll,
-    PlayerSample,
-    PlaylistSample,
-    PlaylistSnapshot,
     Report,
-    SegmentSample,
-    VirtualBufferSample,
 )
 from app.db.paging import newest_rows
-from app.jobs.manager import job_manager
+from app.jobs import purge
 from app.reports.recording import recording_state
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
 # Sample tables keyed by job_id. A deleted channel takes its measurements with it.
-SAMPLE_TABLES = (
-    PlaylistSample,
-    SegmentSample,
-    PlayerSample,
-    VirtualBufferSample,
-    PlaylistSnapshot,
-    FindingRow,
-    IncidentRow,
-    # The poll log goes with the run it recorded.
-    ManifestPoll,
-    ManifestBody,
-)
 
 
 @router.get("")
@@ -144,46 +121,17 @@ async def read_channel(job_id: str) -> dict[str, Any]:
 @router.delete("/{job_id}")
 async def delete_channel(job_id: str) -> dict[str, Any]:
     """Delete one analysed channel: the job, its measurements and its report files."""
-    handle = job_manager.get(job_id)
-    if handle is not None and handle.status in ("RUNNING", "PENDING"):
+    if purge.is_running(job_id):
         raise HTTPException(
             status_code=409,
             detail="This analysis is still running. Stop it before deleting it.",
         )
-
-    removed_reports = 0
-    removed_files = 0
-    async with db_session.session_scope() as session:
-        row = await session.get(JobRow, job_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Analysed channel not found")
-
-        report_rows = (
-            (await session.execute(select(Report).where(Report.job_id == job_id))).scalars().all()
-        )
-        removed_reports = len(report_rows)
-        for report in report_rows:
-            # The bytes go with the row. A disk mirror, when one was configured, goes too.
-            if report.path:
-                path = Path(report.path)
-                if path.exists():
-                    path.unlink(missing_ok=True)
-                    removed_files += 1
-
-        await session.execute(delete(Report).where(Report.job_id == job_id))
-        for table in SAMPLE_TABLES:
-            await session.execute(delete(table).where(table.job_id == job_id))
-        await session.execute(delete(JobRow).where(JobRow.id == job_id))
-
-    # The handle is dropped too, so a stopped session does not reappear in any listing.
-    job_manager.jobs.pop(job_id, None)
-    # And the recording, which is the one thing a run keeps on disk.
-    recording = get_settings().rba_recordings_dir / job_id
-    if recording.is_dir():
-        shutil.rmtree(recording, ignore_errors=True)
+    purged = await purge.purge_job(job_id)
+    if purged is None:
+        raise HTTPException(status_code=404, detail="Analysed channel not found")
     return {
         "deleted": True,
         "id": job_id,
-        "reports_removed": removed_reports,
-        "files_removed": removed_files,
+        "reports_removed": purged.reports,
+        "files_removed": purged.files,
     }

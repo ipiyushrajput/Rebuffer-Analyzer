@@ -474,12 +474,18 @@ export const endpoints = {
     api.get<{ jobs: JobSummary[]; stored_error?: string | null }>('/aging/jobs'),
   readAging: (id: string) => api.get<JobSummary>(`/aging/jobs/${id}`),
   cancelAging: (id: string) => api.del<JobSummary>(`/aging/jobs/${id}`),
+  /** Delete a finished aging job and everything it wrote; a running one is refused (409). */
+  deleteAging: (id: string) =>
+    api.del<{ deleted: boolean; id: string }>(`/aging/jobs/${id}?purge=true`),
 
   createBulk: (form: FormData) => api.upload<JobSummary>('/bulk/jobs', form),
   readBulk: (id: string) =>
     api.get<JobSummary & { items: Record<string, unknown>[] }>(`/bulk/jobs/${id}`),
-  listBulk: () => api.get<{ jobs: JobSummary[] }>('/bulk/jobs'),
+  listBulk: () => api.get<{ jobs: JobSummary[] }>('/bulk/jobs?limit=500'),
   cancelBulk: (id: string) => api.del<JobSummary>(`/bulk/jobs/${id}`),
+  /** Delete a finished batch, every channel run in it and its report; refused while running. */
+  deleteBulk: (id: string) =>
+    api.del<{ deleted: boolean; id: string }>(`/bulk/jobs/${id}?purge=true`),
   validateBulk: (form: FormData) =>
     api.upload<{ rows: Record<string, unknown>[]; errors: Record<string, unknown>[] }>(
       '/bulk/validate',
