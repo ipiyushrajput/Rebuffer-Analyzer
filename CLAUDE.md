@@ -115,6 +115,21 @@ frontend/src/
   skip the missing segment's own duration reads as a gap of exactly that length. The skipped
   boundary is reported as `INFO-005` with the count, never dropped. A config-change check is
   not gated: a change observed across a skip is still a change.
+- **A ladder is compared with itself one round at a time.** `LadderPoller`
+  (`app/analysis/collectors/playlist_poller.py`) requests every rendition of a layer in the
+  same round, and the cross-variant checks (SEQ-008 to SEQ-012, AV-003) run once per round on
+  that round's snapshots — never on whatever each rendition fetched last, which was seconds
+  apart and reported a packager publishing one rung before the next as a ladder that disagrees.
+  A cross-variant finding is recorded only after `cross_variant_confirm_rounds` consecutive
+  rounds. Per-rendition transitions allow what the time between polls explains: SEQ-007 the
+  discontinuities that rolled off, SEQ-003 the advance `elapsed / target duration` accounts for,
+  and a segment is matched by `uri_path` because CDNs re-sign the query on every response.
+- **A rule judges the stream, not the sampler.** Anything sampled independently per rendition —
+  every Nth segment, a trimmed index, a decrypt that failed, the end of the run — is excluded
+  from a comparison rather than counted as absent: VID-007 compares MSNs every rung sampled,
+  AUD-007 is the skew change across matched pairs, AUD-006 skips pending and unread segments,
+  and the buffer model plays back only renditions sampled in full and stops where the sample
+  budget did. `docs/FALSE_POSITIVE_AUDIT.md` lists every rule's standing.
 - **A demuxed rung is not a rung missing its audio.** `app/analysis/layout.py` reads each
   variant's packaging off the master once, at bootstrap, and `LayerContext.layout` carries it
   to every check that asks what a segment is supposed to contain. A variant is demuxed only
