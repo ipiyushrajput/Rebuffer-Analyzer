@@ -75,6 +75,11 @@ const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
       'stale_playlist_factor',
       'cross_variant_msn_error_spread',
       'cross_variant_dsn_tolerance',
+      // Renditions are polled together in rounds; a cross-variant finding is recorded once it
+      // holds for this many rounds in a row.
+      'cross_variant_confirm_rounds',
+      'cross_variant_duration_tolerance_s',
+      'cross_variant_pdt_tolerance_s',
       'min_live_window_multiple',
       'segment_extinf_max_ratio_to_td',
       'segment_extinf_absolute_max_s',

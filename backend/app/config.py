@@ -126,10 +126,19 @@ class Thresholds(BaseModel):
 
     rebuffer_ratio_threshold: float = 0.25
     cross_variant_msn_error_spread: int = 5
-    # Renditions are polled independently, so one can carry a discontinuity the next has not
-    # published yet and the counters differ for a poll or two. Past this spread the ladder
-    # disagrees by more than poll skew can account for.
+    # A packager publishes each rendition a moment apart, so even in one poll round one rung
+    # can carry a discontinuity the next has not published yet. Past this spread the ladder
+    # disagrees by more than publication order can account for.
     cross_variant_dsn_tolerance: int = 2
+    # Renditions are polled together in rounds; a cross-variant rule (SEQ-008 to SEQ-012,
+    # AV-003) is recorded only once it has fired in this many consecutive rounds, so a rung
+    # caught mid-publication in one round is not reported as a ladder that disagrees.
+    cross_variant_confirm_rounds: int = 2
+    # Two rungs' EXTINF for the same media sequence number may differ by this much (encoder
+    # rounding, frame or audio-frame alignment) before SEQ-010 reads them as different.
+    cross_variant_duration_tolerance_s: float = 0.1
+    # SEQ-012: the most two rungs' program date time may differ at the same media sequence.
+    cross_variant_pdt_tolerance_s: float = 1.0
     stale_playlist_factor: float = 1.5
     download_ratio_warn: float = 0.5
     download_ratio_error: float = 1.0

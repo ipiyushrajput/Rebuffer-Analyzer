@@ -16,6 +16,7 @@ import contextvars
 import datetime as dt
 import logging
 import time
+import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,6 +27,7 @@ from app.analysis import recorder as recorder_module
 from app.analysis import replay as replay_module
 from app.analysis.collectors.playlist_poller import (
     MIN_POLL_INTERVAL_S,
+    LadderPoller,
     PlaylistPoller,
     PollTarget,
     Snapshot,
@@ -203,6 +205,11 @@ class LayerContext:
     master_final_url: str = ""
     targets: dict[str, PollTarget] = field(default_factory=dict)
     pollers: list[PlaylistPoller] = field(default_factory=list)
+    # Polls every rendition of this layer in the same round (see `LadderPoller`).
+    ladder: LadderPoller | None = None
+    # Consecutive rounds each cross-variant rule has fired in; a rule is recorded only once
+    # it has held for `cross_variant_confirm_rounds` rounds in a row.
+    xvar_streak: dict[str, int] = field(default_factory=dict)
     samplers: dict[str, SegmentSampler] = field(default_factory=dict)
     state_machines: dict[str, media_rules.PlaylistStateMachine] = field(default_factory=dict)
     histories: dict[str, segment_rules.RungHistory] = field(default_factory=dict)
@@ -758,13 +765,21 @@ class AnalysisSession:
         assert self._fetcher is not None
         for context in self.layers.values():
             for target in context.targets.values():
-                poller = PlaylistPoller(
-                    target,
-                    self._fetcher,
-                    on_snapshot=self._make_snapshot_handler(context),
+                context.pollers.append(
+                    PlaylistPoller(
+                        target,
+                        self._fetcher,
+                        on_snapshot=self._make_snapshot_handler(context),
+                    )
                 )
-                context.pollers.append(poller)
-                poller.start()
+            if not context.pollers:
+                continue
+            # Every rendition of the layer is requested in the same round, so the ladder is
+            # compared with itself at one moment rather than across seconds of drift.
+            context.ladder = LadderPoller(
+                context.pollers, on_round=self._make_round_handler(context)
+            )
+            context.ladder.start()
 
         deadline = self.started_at + dt.timedelta(seconds=self.options.duration_s)
         while not self._stop.is_set() and dt.datetime.now(dt.UTC) < deadline:
@@ -797,6 +812,33 @@ class AnalysisSession:
     ) -> Callable[[Snapshot], Awaitable[None]]:
         async def handler(snapshot: Snapshot) -> None:
             await self._on_snapshot(context, snapshot)
+
+        return handler
+
+    def _make_round_handler(
+        self, context: LayerContext
+    ) -> Callable[[int, list[tuple[PlaylistPoller, Snapshot]]], Awaitable[None]]:
+        async def handle_one(poller: PlaylistPoller, snapshot: Snapshot) -> None:
+            try:
+                await self._on_snapshot(context, snapshot)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A handler that raises is the analyzer's defect: counted on the rendition's
+                # poller, where `sampling_state()` names it, and logged with its traceback.
+                poller.failures += 1
+                poller.last_failure = traceback.format_exc()
+                logger.exception(
+                    "Playlist poll handling failed for %s (failure %d)",
+                    poller.target.variant,
+                    poller.failures,
+                )
+
+        async def handler(round_no: int, polled: list[tuple[PlaylistPoller, Snapshot]]) -> None:
+            await asyncio.gather(*(handle_one(poller, snapshot) for poller, snapshot in polled))
+            await self._check_cross_variant(
+                context, [snapshot for _, snapshot in polled], round_no=round_no
+            )
 
         return handler
 
@@ -980,6 +1022,7 @@ class AnalysisSession:
                     cdn_headers={
                         k.lower(): v for k, v in snapshot.result.cdn_fingerprint().items()
                     },
+                    elapsed_s=(snapshot.at - previous.at).total_seconds(),
                 )
             )
             await self._record(
@@ -1023,7 +1066,6 @@ class AnalysisSession:
             for pairing in context.pairings.values():
                 if pairing.audio_variant == variant:
                     pairing.expire()
-        await self._check_cross_variant(context, snapshot.at)
 
     async def _sample_new_segments(
         self,
@@ -1393,28 +1435,62 @@ class AnalysisSession:
                 )
             )
 
-    async def _check_cross_variant(self, context: LayerContext, at: dt.datetime) -> None:
-        snapshots: list[sequence_rules.VariantSnapshot] = []
-        for variant, target in context.targets.items():
-            latest = target.latest
-            if latest and latest.playlist:
-                snapshots.append(
-                    sequence_rules.VariantSnapshot(
-                        variant=variant, playlist=latest.playlist, at=latest.at, kind=target.kind
-                    )
-                )
+    async def _check_cross_variant(
+        self, context: LayerContext, polled: list[Snapshot], *, round_no: int
+    ) -> None:
+        """Compare the renditions of one round with each other.
+
+        Only the snapshots of this round are compared: they were requested together, so they
+        show the ladder at one moment. A rule is recorded only once it has fired in
+        `cross_variant_confirm_rounds` consecutive rounds — a packager that publishes one rung a
+        few hundred milliseconds before the next disagrees with itself for one round and agrees
+        in the next, while a ladder that genuinely disagrees still disagrees a round later.
+        """
+        snapshots = [
+            sequence_rules.VariantSnapshot(
+                variant=snapshot.variant,
+                playlist=snapshot.playlist,
+                at=snapshot.at,
+                kind=context.targets[snapshot.variant].kind,
+            )
+            for snapshot in polled
+            if snapshot.ok and snapshot.playlist is not None
+        ]
         if len(snapshots) < 2:
+            context.xvar_streak.clear()
             return
-        findings = sequence_rules.check_cross_variant(
+        at = max(s.at for s in snapshots)
+        candidates = sequence_rules.check_cross_variant(
             snapshots, layer=context.layer, thresholds=self.thresholds, at=at
         )
-        await self._record(findings)
+        fired = {finding.rule.id for finding in candidates}
+        for rule_id in list(context.xvar_streak):
+            if rule_id not in fired:
+                del context.xvar_streak[rule_id]
+        for rule_id in fired:
+            context.xvar_streak[rule_id] = context.xvar_streak.get(rule_id, 0) + 1
+
+        needed = max(1, self.thresholds.cross_variant_confirm_rounds)
+        spread_ms = (at - min(s.at for s in snapshots)).total_seconds() * 1000
+        confirmed: list[Finding] = []
+        for finding in candidates:
+            streak = context.xvar_streak.get(finding.rule.id, 0)
+            if streak < needed:
+                continue
+            for sample in finding.evidence:
+                if isinstance(sample, dict):
+                    sample.setdefault("round", round_no)
+                    sample.setdefault("confirmed_rounds", streak)
+                    sample.setdefault("round_spread_ms", round(spread_ms, 1))
+            confirmed.append(finding)
+        # The round's own polls: each finding names the poll of the rendition it was read on.
+        await self._record(confirmed)
         self.incidents.observe(
             kind="cross_variant",
             variant=None,
             at=at,
-            degraded=any(f.severity.rank >= 3 for f in findings),
-            cause_rule_ids=[f.rule.id for f in findings],
+            degraded=any(f.severity.rank >= 3 for f in confirmed),
+            cause_rule_ids=[f.rule.id for f in confirmed],
         )
 
     def _incident_windows(self) -> list[tuple[str | None, dt.datetime, dt.datetime | None]]:
@@ -1518,6 +1594,8 @@ class AnalysisSession:
 
     async def _shutdown_pollers(self) -> None:
         for context in self.layers.values():
+            if context.ladder is not None:
+                await context.ladder.stop()
             await asyncio.gather(
                 *(poller.stop() for poller in context.pollers), return_exceptions=True
             )

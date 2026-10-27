@@ -2,7 +2,10 @@
 
 The transition rules compare two consecutive polls of the same playlist. The cross-variant
 rules compare one poll of every rendition at the same moment — the check that catches the
-Tizen freeze, because the player holds one discontinuity counter for the whole ladder.
+Tizen freeze, because the player holds one discontinuity counter for the whole ladder. "The
+same moment" is one `LadderPoller` round: every rendition requested together. The engine
+records a cross-variant finding only once it holds for `cross_variant_confirm_rounds`
+consecutive rounds.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from app.analysis.rules import catalogue as R
 from app.analysis.rules.base import Finding, StreamLayer
@@ -30,6 +34,16 @@ class VariantSnapshot:
     kind: str = "video"  # video | audio | subtitles
 
 
+def _uri_path(uri: str) -> str:
+    """A segment URI without its query string.
+
+    Many CDNs sign every playlist response afresh, so the same segment comes back under a new
+    token on every poll. The path names the segment; the query authorises one request for it.
+    """
+    parts = urlsplit(uri)
+    return f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else parts.path
+
+
 def check_sequence_transition(
     previous: MediaPlaylist,
     current: MediaPlaylist,
@@ -38,8 +52,13 @@ def check_sequence_transition(
     layer: StreamLayer,
     at: dt.datetime | None = None,
     cdn_headers: dict[str, str] | None = None,
+    elapsed_s: float | None = None,
 ) -> list[Finding]:
-    """Compare two consecutive polls of the same media playlist."""
+    """Compare two consecutive polls of the same media playlist.
+
+    `elapsed_s` is the wall time between the two polls. A playlist that advanced by about as
+    many segments as that time holds was polled late, not one that jumped.
+    """
     findings: list[Finding] = []
     moment = at or dt.datetime.now(dt.UTC)
     base: dict[str, Any] = {
@@ -110,12 +129,22 @@ def check_sequence_transition(
             )
         )
 
-    if delta > max(1, len(previous.segments)):
+    target = current.target_duration or previous.target_duration or 0.0
+    # How far the live edge can honestly move in the time between the two polls, plus one
+    # segment for the publication that can land on either side of a poll.
+    explained = (elapsed_s / target + 1) if elapsed_s is not None and target > 0 else 0.0
+    if delta > max(1, len(previous.segments)) and delta > explained:
         findings.append(
             R.SEQ_MSN_JUMP.raise_finding(
                 f"{variant} advanced EXT-X-MEDIA-SEQUENCE by {delta} between polls while the "
-                f"window holds {len(previous.segments)} segment(s).",
-                evidence=base,
+                f"window holds {len(previous.segments)} segment(s)"
+                + (
+                    f" and {elapsed_s:.1f} s passed between the two polls, which accounts for "
+                    f"{explained:.0f} segment(s) of target duration {target:g} s."
+                    if elapsed_s is not None and target > 0
+                    else "."
+                ),
+                evidence={**base, "elapsed_s": elapsed_s, "explained_segments": explained},
                 stream_layer=layer,
                 variant=variant,
                 at=moment,
@@ -140,9 +169,13 @@ def check_sequence_transition(
 
 
 def _segments_rolled_off(previous: MediaPlaylist, current: MediaPlaylist) -> int | None:
-    """How many of the previous window's segments are gone from the current window."""
-    previous_uris = [s.uri for s in previous.segments]
-    current_uris = {s.uri for s in current.segments}
+    """How many of the previous window's segments are gone from the current window.
+
+    Segments are matched on their path: a query string re-signed on every response would
+    otherwise make every segment look gone.
+    """
+    previous_uris = [_uri_path(s.uri) for s in previous.segments]
+    current_uris = {_uri_path(s.uri) for s in current.segments}
     if not previous_uris:
         return None
     rolled = 0
@@ -169,6 +202,16 @@ def _check_dsn(
         "current_dsn": current.discontinuity_sequence,
     }
     delta = current.discontinuity_sequence - previous.discontinuity_sequence
+    # Every discontinuity that left the window between the two polls moves into the counter,
+    # and so may one on the segment that is now first (a packager folds that tag in as soon
+    # as the segment leads the window). Only an advance beyond those is a jump.
+    rolled_tags = sum(
+        1
+        for segment in previous.segments
+        if segment.discontinuity_before and segment.msn <= current.media_sequence
+    )
+    overlap = previous.segments and previous.last_msn >= current.media_sequence
+    evidence["discontinuities_rolled_off"] = rolled_tags
     if delta < 0:
         findings.append(
             R.SEQ_DSN_BACKWARDS.raise_finding(
@@ -180,12 +223,12 @@ def _check_dsn(
                 at=at,
             )
         )
-    elif delta > 1:
+    elif delta > max(1, rolled_tags) and overlap:
         findings.append(
             R.SEQ_DSN_JUMP.raise_finding(
                 f"{variant} advanced EXT-X-DISCONTINUITY-SEQUENCE by {delta}, from "
                 f"{previous.discontinuity_sequence} to {current.discontinuity_sequence}, "
-                "between two polls.",
+                f"between two polls while {rolled_tags} discontinuity tag(s) left the window.",
                 evidence=evidence,
                 stream_layer=layer,
                 variant=variant,
@@ -248,9 +291,13 @@ def check_cross_variant(
                     )
                 )
 
-    findings += _check_common_msn_alignment(video, layer=layer, at=moment)
+    findings += _check_common_msn_alignment(
+        video, layer=layer, at=moment, tolerance_s=thresholds.cross_variant_duration_tolerance_s
+    )
     findings += _check_discontinuity_positions(video, layer=layer, at=moment)
-    findings += _check_pdt_alignment(snapshots, layer=layer, at=moment)
+    findings += _check_pdt_alignment(
+        snapshots, layer=layer, at=moment, tolerance_s=thresholds.cross_variant_pdt_tolerance_s
+    )
     return findings
 
 
@@ -286,9 +333,10 @@ def _check_dsn_mismatch(
 ) -> list[Finding]:
     """Discontinuity counters that disagree by more than independent polling explains.
 
-    Every rendition is polled on its own clock, so one can carry a discontinuity a moment
-    before the next publishes it and the declared counters differ for a poll or two. That is
-    poll skew, not a ladder defect. Two measurements separate the defect from the skew: a
+    Even within one poll round a packager publishes each rendition a moment apart, so one can
+    carry a discontinuity before the next publishes it and the declared counters differ for a
+    round. That is publication order, not a ladder defect, and the engine's round confirmation
+    drops it. Two measurements separate the defect from the skew: a
     spread wider than the tolerance, which no poll ordering produces, and a disagreement at
     one media sequence number every rendition lists, which is the same instant of the
     timeline seen from every rung.
@@ -338,9 +386,13 @@ def _check_dsn_mismatch(
 
 
 def _check_common_msn_alignment(
-    video: list[VariantSnapshot], *, layer: StreamLayer, at: dt.datetime
+    video: list[VariantSnapshot], *, layer: StreamLayer, at: dt.datetime, tolerance_s: float
 ) -> list[Finding]:
-    """Every rung must cover the same span of the timeline for the same MSN."""
+    """Every rung must cover the same span of the timeline for the same MSN.
+
+    Durations are compared within `tolerance_s`: two encoders write the same segment as 6.006
+    and 6.0 s, and a rung cut on audio-frame boundaries lands a few milliseconds off.
+    """
     findings: list[Finding] = []
     if len(video) < 2:
         return findings
@@ -362,12 +414,13 @@ def _check_common_msn_alignment(
             segment = snapshot.playlist.segment_by_msn(msn)
             if segment:
                 durations[snapshot.variant] = round(segment.duration, 3)
-        if len(set(durations.values())) > 1:
+        if durations and max(durations.values()) - min(durations.values()) > tolerance_s:
             findings.append(
                 R.SEQ_XVAR_SEGMENT_MISMATCH.raise_finding(
-                    f"Media sequence {msn} declares different durations across the ladder: "
-                    f"{durations}.",
-                    evidence={"msn": msn, "durations": durations},
+                    f"Media sequence {msn} declares durations across the ladder that differ by "
+                    f"{max(durations.values()) - min(durations.values()):.3f} s, against a "
+                    f"tolerance of {tolerance_s} s: {durations}.",
+                    evidence={"msn": msn, "durations": durations, "tolerance_s": tolerance_s},
                     stream_layer=layer,
                     at=at,
                 )
@@ -425,30 +478,55 @@ def _check_discontinuity_positions(
     return findings
 
 
-def _check_pdt_alignment(
-    snapshots: list[VariantSnapshot], *, layer: StreamLayer, at: dt.datetime
-) -> list[Finding]:
+def _pdt_at(playlist: MediaPlaylist, msn: int) -> dt.datetime | None:
+    """The program date time of segment `msn`, carried forward from the last tag before it."""
     from app.analysis.rules.media_playlist import parse_pdt
 
+    anchor: dt.datetime | None = None
+    for segment in playlist.segments:
+        if segment.program_date_time:
+            anchor = parse_pdt(segment.program_date_time) or anchor
+        if segment.msn == msn:
+            return anchor
+        if anchor is not None:
+            anchor += dt.timedelta(seconds=segment.duration)
+    return None
+
+
+def _check_pdt_alignment(
+    snapshots: list[VariantSnapshot], *, layer: StreamLayer, at: dt.datetime, tolerance_s: float
+) -> list[Finding]:
+    """Program date times compared at one media sequence number every rendition lists.
+
+    Comparing each rendition's first segment reported a difference of one whole segment
+    every time one rung's window had slid and the next had not.
+    """
     findings: list[Finding] = []
-    firsts: dict[str, dt.datetime] = {}
-    for snapshot in snapshots:
-        for segment in snapshot.playlist.segments:
-            if segment.program_date_time:
-                moment = parse_pdt(segment.program_date_time)
-                if moment:
-                    firsts[snapshot.variant] = moment
-                break
-    if len(firsts) < 2:
+    common = comparable_msns(snapshots)
+    if not common:
         return findings
-    spread = (max(firsts.values()) - min(firsts.values())).total_seconds()
-    if spread > 1.0:
+    anchor_msn = max(common)
+    stamps: dict[str, dt.datetime] = {}
+    for snapshot in snapshots:
+        moment = _pdt_at(snapshot.playlist, anchor_msn)
+        if moment is not None:
+            stamps[snapshot.variant] = moment
+    if len(stamps) < 2:
+        return findings
+    spread = (max(stamps.values()) - min(stamps.values())).total_seconds()
+    if spread > tolerance_s:
         findings.append(
             R.SEQ_XVAR_PDT.raise_finding(
-                f"The first program date time differs by {spread:.2f} s across renditions: "
-                + ", ".join(f"{k} at {v.isoformat()}" for k, v in sorted(firsts.items()))
+                f"Media sequence {anchor_msn}, listed by every rendition, carries program date "
+                f"times {spread:.2f} s apart against a tolerance of {tolerance_s} s: "
+                + ", ".join(f"{k} at {v.isoformat()}" for k, v in sorted(stamps.items()))
                 + ".",
-                evidence={"pdt_by_variant": {k: v.isoformat() for k, v in firsts.items()}},
+                evidence={
+                    "anchor_msn": anchor_msn,
+                    "pdt_by_variant": {k: v.isoformat() for k, v in stamps.items()},
+                    "spread_s": spread,
+                    "tolerance_s": tolerance_s,
+                },
                 stream_layer=layer,
                 at=at,
             )
