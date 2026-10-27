@@ -89,3 +89,13 @@ def normalize_session_tokens(url: str) -> str:
     return urlunsplit(
         (parts.scheme, parts.netloc, path, urlencode(normalised, doseq=True), parts.fragment)
     )
+
+
+def uri_path(uri: str) -> str:
+    """A URI without its query string: the resource, not the authorisation for one request.
+
+    Many CDNs sign every playlist response afresh, so the same segment comes back under a new
+    token on every poll. Comparisons of "the same segment" are made on this.
+    """
+    parts = urlsplit(uri)
+    return f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else parts.path

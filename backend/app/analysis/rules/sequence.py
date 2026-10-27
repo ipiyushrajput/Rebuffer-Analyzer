@@ -13,12 +13,12 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
 
 from app.analysis.rules import catalogue as R
 from app.analysis.rules.base import Finding, StreamLayer
 from app.config import Thresholds
 from app.hls.playlist import MediaPlaylist
+from app.hls.uri import uri_path
 
 # Shared with the frontend's SequenceLadder: below this a spread is ordinary poll skew.
 MSN_GAP_TOLERANCE = 5
@@ -32,16 +32,6 @@ class VariantSnapshot:
     playlist: MediaPlaylist
     at: dt.datetime
     kind: str = "video"  # video | audio | subtitles
-
-
-def _uri_path(uri: str) -> str:
-    """A segment URI without its query string.
-
-    Many CDNs sign every playlist response afresh, so the same segment comes back under a new
-    token on every poll. The path names the segment; the query authorises one request for it.
-    """
-    parts = urlsplit(uri)
-    return f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else parts.path
 
 
 def check_sequence_transition(
@@ -174,8 +164,8 @@ def _segments_rolled_off(previous: MediaPlaylist, current: MediaPlaylist) -> int
     Segments are matched on their path: a query string re-signed on every response would
     otherwise make every segment look gone.
     """
-    previous_uris = [_uri_path(s.uri) for s in previous.segments]
-    current_uris = {_uri_path(s.uri) for s in current.segments}
+    previous_uris = [uri_path(s.uri) for s in previous.segments]
+    current_uris = {uri_path(s.uri) for s in current.segments}
     if not previous_uris:
         return None
     rolled = 0

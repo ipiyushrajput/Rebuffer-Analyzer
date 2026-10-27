@@ -210,6 +210,10 @@ class LayerContext:
     # Consecutive rounds each cross-variant rule has fired in; a rule is recorded only once
     # it has held for `cross_variant_confirm_rounds` rounds in a row.
     xvar_streak: dict[str, int] = field(default_factory=dict)
+    # Per rendition, the recent poll pairs as (from, to, media added), for MED-015.
+    publication: dict[str, list[tuple[dt.datetime, dt.datetime, float]]] = field(
+        default_factory=dict
+    )
     samplers: dict[str, SegmentSampler] = field(default_factory=dict)
     state_machines: dict[str, media_rules.PlaylistStateMachine] = field(default_factory=dict)
     histories: dict[str, segment_rules.RungHistory] = field(default_factory=dict)
@@ -350,6 +354,7 @@ class AnalysisSession:
         self._stop = asyncio.Event()
         self._fetcher: Fetcher | None = None
         self._sample_budget = self.options.max_segment_samples
+        self._budget_spent_at: dt.datetime | None = None
         self._last_ladder_sweep = self.started_at
         self._last_master_poll = self.started_at
         self._segment_queue: asyncio.Queue[tuple[LayerContext, str, Any]] = asyncio.Queue()
@@ -1036,16 +1041,24 @@ class AnalysisSession:
                         previous.playlist, playlist, variant=variant, layer=layer
                     )
                 )
-            added = _added_duration(previous.playlist, playlist)
-            elapsed = (snapshot.at - previous.at).total_seconds()
-            await self._record(
-                media_rules.check_publication_rate(
-                    added_duration_s=added,
-                    elapsed_wall_s=elapsed,
-                    variant=variant,
-                    layer=layer,
+            # Publication rate over a window of at least three target durations: one poll pair
+            # sees a whole segment land in half a segment's time on every ordinary refresh.
+            window = context.publication.setdefault(variant, [])
+            window.append((previous.at, snapshot.at, _added_duration(previous.playlist, playlist)))
+            horizon = 3 * target_duration
+            while len(window) > 1 and (snapshot.at - window[1][0]).total_seconds() >= horizon:
+                window.pop(0)
+            elapsed = (snapshot.at - window[0][0]).total_seconds()
+            if elapsed >= horizon:
+                await self._record(
+                    media_rules.check_publication_rate(
+                        added_duration_s=sum(added for _, _, added in window),
+                        elapsed_wall_s=elapsed,
+                        variant=variant,
+                        layer=layer,
+                        target_duration_s=target_duration,
+                    )
                 )
-            )
 
         await self._sample_new_segments(context, target, playlist, snapshot)
         if self.recorder is not None:
@@ -1128,8 +1141,14 @@ class AnalysisSession:
         history = context.histories.setdefault(
             target.variant, segment_rules.RungHistory(variant=target.variant)
         )
+        # The buffer model plays a rendition back from what was fetched, so it is only true of
+        # a rendition fetched segment by segment. A rung sampled every Nth segment would
+        # deliver a third of its media and "rebuffer" by construction, and a subtitle track
+        # does not feed the player's media queue at all.
+        modelled = sampler.sampling.full and target.kind in ("video", "audio")
         buffer = context.buffers.get(target.variant)
-        if buffer is None:
+        first_poll = buffer is None
+        if buffer is None and modelled:
             buffer = vpb.VirtualPlayerBuffer(
                 target.variant,
                 target_duration=context.target_duration_by_variant.get(target.variant, 6.0),
@@ -1148,6 +1167,10 @@ class AnalysisSession:
                 continue
             report.eligible += 1
             self._sample_budget -= 1
+            if self._sample_budget == 0:
+                # Past this moment no rendition is fed, so the buffer model ends here rather
+                # than draining through the rest of the run and calling it a stall.
+                self._budget_spent_at = dt.datetime.now(dt.UTC)
 
             sample = await sampler.fetch_segment(
                 msn=segment.msn,
@@ -1158,7 +1181,9 @@ class AnalysisSession:
             )
             context.segment_count += 1
             report.record_fetch()
-            await self._on_segment(context, target, sample, buffer, history, snapshot)
+            await self._on_segment(
+                context, target, sample, buffer, history, snapshot, backlog=first_poll
+            )
 
         if report.fetched == 0:
             policy = (
@@ -1176,9 +1201,11 @@ class AnalysisSession:
         context: LayerContext,
         target: PollTarget,
         sample: SampledSegment,
-        buffer: vpb.VirtualPlayerBuffer,
+        buffer: vpb.VirtualPlayerBuffer | None,
         history: segment_rules.RungHistory,
         snapshot: Snapshot,
+        *,
+        backlog: bool = False,
     ) -> None:
         layer = context.layer
         variant = sample.variant
@@ -1194,18 +1221,20 @@ class AnalysisSession:
             )
         )
 
-        buffer.feed(
-            vpb.SegmentDelivery(
-                msn=sample.msn,
-                completed_at=sample.completed_at,
-                duration_s=sample.declared_duration or 0.0,
-                available=sample.available,
-                download_ms=sample.download_ms,
-                uri=sample.uri,
-                # The byte cap is half the buffer model, so the measured size travels with it.
-                bytes=sample.result.bytes_received,
+        if buffer is not None:
+            buffer.feed(
+                vpb.SegmentDelivery(
+                    msn=sample.msn,
+                    completed_at=sample.completed_at,
+                    duration_s=sample.declared_duration or 0.0,
+                    available=sample.available,
+                    download_ms=sample.download_ms,
+                    uri=sample.uri,
+                    # The byte cap is half the buffer model, so the measured size travels with it.
+                    bytes=sample.result.bytes_received,
+                    backlog=backlog,
+                )
             )
-        )
 
         self.incidents.observe(
             kind="segment_delivery",
@@ -1666,7 +1695,8 @@ class AnalysisSession:
         vpb_results: dict[str, vpb.VpbResult] = {}
         for context in self.layers.values():
             for variant, buffer in context.buffers.items():
-                result = buffer.finish(self.ended_at)
+                # Fed only until the sample budget ran out; modelled up to that moment.
+                result = buffer.finish(min(self.ended_at, self._budget_spent_at or self.ended_at))
                 key = f"{context.layer.value}:{variant}" if len(self.layers) > 1 else variant
                 vpb_results[key] = result
                 await self._record(

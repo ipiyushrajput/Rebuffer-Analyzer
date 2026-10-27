@@ -30,6 +30,10 @@ class RungHistory:
     last_discontinuity_msn: int | None = None
     skews: list[tuple[int, float]] = field(default_factory=list)
     keyframe_msns: set[int] = field(default_factory=set)
+    # Every sampled MSN whose video was read, keyframe or not. Alignment is judged only on
+    # numbers every rung sampled: one rung sampled every third segment knows nothing about
+    # the other two.
+    video_msns: set[int] = field(default_factory=set)
     sps_by_msn: dict[int, dict[str, Any]] = field(default_factory=dict)
     # Boundaries where the two segments sampled either side were not consecutive, so the
     # timestamp continuity checks had nothing contiguous to measure.
@@ -94,7 +98,13 @@ def check_segment(
         )
         return findings
 
-    if analysis.byte_size <= thresholds.tiny_segment_bytes:
+    # The threshold is for a video segment. A subtitle cue file or six seconds of 64 kbit/s
+    # audio is a few kilobytes by nature, and reported every one of them as truncated.
+    if (
+        analysis.byte_size <= thresholds.tiny_segment_bytes
+        and analysis.container != "webvtt"
+        and not is_audio_only
+    ):
         raise_for(
             R.SEG_TINY,
             f"Segment {analysis.msn} on {variant} is {analysis.byte_size} bytes against a "
@@ -555,6 +565,8 @@ def check_segment_pair(
     history.last = current
     if current.sps:
         history.sps_by_msn[current.msn] = current.sps
+    if current.starts_with_keyframe is not None and current.has_video:
+        history.video_msns.add(current.msn)
     if current.starts_with_keyframe:
         history.keyframe_msns.add(current.msn)
     return findings
@@ -708,10 +720,42 @@ def _check_skew_drift(
 def check_keyframe_alignment(
     histories: dict[str, RungHistory], *, layer: StreamLayer
 ) -> list[Finding]:
-    """Every rung must place a random access point at the same media sequence numbers."""
+    """Every rung must place a random access point at the same media sequence numbers.
+
+    Judged only at numbers every video rung sampled and read: a rung sampled every Nth
+    segment, or one whose payload was not decrypted, says nothing about the numbers it did
+    not read, and counting those as "no keyframe there" reported every ladder with more
+    than three rungs.
+    """
     findings: list[Finding] = []
-    if len(histories) < 2:
+    rungs = {name: history for name, history in histories.items() if history.video_msns}
+    if len(rungs) < 2:
         return findings
+    common = set.intersection(*(history.video_msns for history in rungs.values()))
+    if not common:
+        return findings
+    detail: dict[str, list[int]] = {}
+    for msn in sorted(common):
+        starts = {name: msn in history.keyframe_msns for name, history in rungs.items()}
+        if len(set(starts.values())) > 1:
+            for name, has_keyframe in starts.items():
+                if not has_keyframe:
+                    detail.setdefault(name, []).append(msn)
+    if detail:
+        count = len({msn for msns in detail.values() for msn in msns})
+        findings.append(
+            R.VID_KEYFRAME_MISALIGNED.raise_finding(
+                f"{count} media sequence number(s) sampled on every rung start on a random "
+                f"access point on some rungs and not on others; the rungs without one: "
+                f"{ {name: msns[:5] for name, msns in detail.items()} }.",
+                evidence={
+                    "missing_by_variant": {name: msns[:5] for name, msns in detail.items()},
+                    "compared_msns": len(common),
+                },
+                stream_layer=layer,
+            )
+        )
+    return findings
     sets = {
         name: history.keyframe_msns for name, history in histories.items() if history.keyframe_msns
     }

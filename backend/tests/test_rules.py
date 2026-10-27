@@ -999,17 +999,22 @@ def test_rungs_with_different_reference_frame_counts_fire_the_tizen_dpb_rule() -
     assert segment_rules.check_dpb_across_rungs(aligned, layer=LAYER) is None
 
 
+def _rung(name: str, sampled: set[int], keyframes: set[int]) -> segment_rules.RungHistory:
+    return segment_rules.RungHistory(variant=name, video_msns=sampled, keyframe_msns=keyframes)
+
+
 def test_keyframes_misaligned_across_rungs_fire() -> None:
-    aligned = {
-        "a": segment_rules.RungHistory(variant="a", keyframe_msns={1, 2, 3}),
-        "b": segment_rules.RungHistory(variant="b", keyframe_msns={1, 2, 3}),
-    }
-    misaligned = {
-        "a": segment_rules.RungHistory(variant="a", keyframe_msns={1, 2, 3}),
-        "b": segment_rules.RungHistory(variant="b", keyframe_msns={1, 3}),
-    }
+    aligned = {"a": _rung("a", {1, 2, 3}, {1, 2, 3}), "b": _rung("b", {1, 2, 3}, {1, 2, 3})}
+    # Rung b sampled segment 2 and it does not start on a keyframe.
+    misaligned = {"a": _rung("a", {1, 2, 3}, {1, 2, 3}), "b": _rung("b", {1, 2, 3}, {1, 3})}
     assert segment_rules.check_keyframe_alignment(aligned, layer=LAYER) == []
     assert "VID-007" in ids(segment_rules.check_keyframe_alignment(misaligned, layer=LAYER))
+
+
+def test_a_rung_sampled_every_third_segment_is_not_misaligned() -> None:
+    # Rung b was sampled at 3 and 6 only; it knows nothing about 1, 2, 4 or 5.
+    rungs = {"a": _rung("a", set(range(1, 7)), set(range(1, 7))), "b": _rung("b", {3, 6}, {3, 6})}
+    assert segment_rules.check_keyframe_alignment(rungs, layer=LAYER) == []
 
 
 def test_a_video_range_with_no_covering_audio_segment_fires() -> None:
@@ -1099,24 +1104,29 @@ def test_a_cdn_serving_an_older_msn_than_the_origin_fires() -> None:
 
 
 def test_an_unbalanced_cue_out_fires_and_a_closed_break_passes() -> None:
-    open_break = parse_media(
-        render_media_playlist(PlaylistSpec(segment_count=8, cue_out_at=2)), BASE
-    )
+    # A 30 s break that has delivered 48 s (segments 2..9) with no CUE-IN has overrun.
+    overrun = parse_media(render_media_playlist(PlaylistSpec(segment_count=10, cue_out_at=2)), BASE)
+    # The same break 18 s in, at the live edge: still running, not unbalanced.
+    running = parse_media(render_media_playlist(PlaylistSpec(segment_count=5, cue_out_at=2)), BASE)
     closed = parse_media(
         render_media_playlist(
             PlaylistSpec(
                 segment_count=10,
                 cue_out_at=2,
                 cue_in_at=7,
-                # Segments 2..7 inclusive carry the break: six segments of six seconds.
-                cue_out_duration=36.0,
+                # CUE-IN precedes segment 7, the first after the break: segments 2..6 carry
+                # it, five segments of six seconds.
+                cue_out_duration=30.0,
                 discontinuity_at={2, 7},
             )
         ),
         BASE,
     )
     assert "ADS-010" in ids(
-        ads_rules.check_cue_windows(open_break, variant="720p", layer=LAYER, thresholds=T)
+        ads_rules.check_cue_windows(overrun, variant="720p", layer=LAYER, thresholds=T)
+    )
+    assert "ADS-010" not in ids(
+        ads_rules.check_cue_windows(running, variant="720p", layer=LAYER, thresholds=T)
     )
     closed_ids = ids(ads_rules.check_cue_windows(closed, variant="720p", layer=LAYER, thresholds=T))
     assert "ADS-010" not in closed_ids
