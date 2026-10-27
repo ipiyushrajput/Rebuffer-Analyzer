@@ -1262,7 +1262,13 @@ class AnalysisSession:
             )
         )
 
-        if sample.analysis.container == "webvtt":
+        if (
+            sample.analysis.container == "webvtt"
+            and not sample.analysis.encrypted
+            and "webvtt_head" in sample.analysis.raw
+        ):
+            # Judged only on text that was read. A body that was not read is INFO-001's to
+            # report, never a segment without the WEBVTT signature.
             await self._record(
                 subtitle_rules.check_webvtt(
                     sample.analysis.raw.get("webvtt_head", ""),
