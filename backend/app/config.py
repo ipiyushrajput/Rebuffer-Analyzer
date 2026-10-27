@@ -139,6 +139,10 @@ class Thresholds(BaseModel):
     cross_variant_duration_tolerance_s: float = 0.1
     # SEQ-012: the most two rungs' program date time may differ at the same media sequence.
     cross_variant_pdt_tolerance_s: float = 1.0
+    # AUD-007: how far audio may move against video across a run of matched pairs on a demuxed
+    # rung — the larger of the floor and the fraction of the span measured.
+    av_drift_min_s: float = 0.5
+    av_drift_fraction: float = 0.02
     stale_playlist_factor: float = 1.5
     download_ratio_warn: float = 0.5
     download_ratio_error: float = 1.0

@@ -622,3 +622,98 @@ def test_bases_that_really_do_differ_are_still_found_and_still_matched_by_time()
     assert pairing.shared_numbering is False
     assert [f.rule.id for f in findings] == ["INFO-006"]
     assert findings[0].evidence[0]["audio_msn"] == 5
+
+
+# ---------------------------------------------------------------------------
+# AUD-006 and AUD-007 judge the stream, not what the sampler happened to fetch
+# ---------------------------------------------------------------------------
+
+
+def test_a_video_segment_still_waiting_for_its_audio_at_the_end_is_not_missing_audio() -> None:
+    findings = segment_rules.check_demuxed_audio_coverage(
+        video_ranges=[(100, 600.0, 606.0), (101, 606.0, 612.0)],
+        audio_ranges=[(100, 600.0, 606.0)],
+        variant="v720p@2000k",
+        layer=LAYER,
+        pending={101},
+    )
+    assert findings == []
+
+
+def test_video_sampled_before_audio_sampling_began_is_not_judged() -> None:
+    findings = segment_rules.check_demuxed_audio_coverage(
+        video_ranges=[(90, 540.0, 546.0), (100, 600.0, 606.0)],
+        audio_ranges=[(100, 600.0, 606.0)],
+        variant="v720p@2000k",
+        layer=LAYER,
+    )
+    assert findings == []
+
+
+def test_an_audio_segment_that_was_fetched_and_not_decrypted_is_not_missing() -> None:
+    pairing = _pairing()
+    pairing.add_video(_seg("v720p@2000k", 100, 600.0))
+    pairing.add_video(_seg("v720p@2000k", 101, 606.0))
+    pairing.add_audio(_seg("audio_en", 100, 600.0))
+    unread = av_pairing.TrackSegment(
+        variant="audio_en", msn=101, uri="a/101.m4s", first_pts=None, last_pts=None, at=NOW
+    )
+    pairing.add_audio(unread)
+    video_ranges, audio_ranges = pairing.ranges()
+
+    findings = segment_rules.check_demuxed_audio_coverage(
+        video_ranges=video_ranges,
+        audio_ranges=audio_ranges,
+        variant=pairing.video_variant,
+        layer=LAYER,
+        unread_audio=pairing.unread_audio,
+    )
+    assert pairing.unread_audio == {101}
+    assert findings == []
+
+
+def _paired_run(skews_ms: list[float], *, every: int = 1) -> av_pairing.AvPairing:
+    pairing = _pairing()
+    for index, skew in enumerate(skews_ms):
+        msn = 100 + index * every
+        pairing.add_video(_seg("v720p@2000k", msn, msn * 6.0))
+        pairing.add_audio(_seg("audio_en", msn, msn * 6.0 + skew / 1000.0))
+    pairing.match()
+    return pairing
+
+
+def test_a_rung_sampled_every_third_segment_in_step_with_its_audio_does_not_drift() -> None:
+    # Video sampled every 3rd segment, audio in full: the sampled durations differ threefold
+    # and the tracks are in step, 20 ms apart throughout.
+    pairing = _paired_run([20.0] * 40, every=3)
+    for msn in range(100, 220):
+        pairing.add_audio(_seg("audio_en", msn, msn * 6.0 + 0.02))
+    findings = segment_rules.check_demuxed_drift(
+        pairing.pairs, variant="v720p@2000k", layer=LAYER, thresholds=T
+    )
+    assert findings == []
+
+
+def test_audio_moving_away_from_video_across_the_run_is_drift() -> None:
+    # 10 pairs over 54 s; the audio slides 150 ms further per segment, 1.35 s in all, against
+    # an allowance of 2 % of 54 s (1.08 s).
+    pairing = _paired_run([index * 150.0 for index in range(10)])
+    findings = segment_rules.check_demuxed_drift(
+        pairing.pairs, variant="v720p@2000k", layer=LAYER, thresholds=T
+    )
+    assert [f.rule.id for f in findings] == ["AUD-007"]
+    assert findings[0].evidence[0]["drift_ms"] == pytest.approx(1350.0, abs=1.0)
+
+
+def test_a_timestamp_reset_starts_a_new_run_rather_than_reading_as_drift() -> None:
+    pairing = _pairing()
+    for index in range(10):
+        msn = 100 + index
+        base = msn * 6.0 if index < 5 else (index - 5) * 6.0  # reset at a discontinuity
+        pairing.add_video(_seg("v720p@2000k", msn, base))
+        pairing.add_audio(_seg("audio_en", msn, base + 0.02))
+    pairing.match()
+    findings = segment_rules.check_demuxed_drift(
+        pairing.pairs, variant="v720p@2000k", layer=LAYER, thresholds=T
+    )
+    assert findings == []

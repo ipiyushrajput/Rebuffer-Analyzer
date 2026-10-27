@@ -124,6 +124,13 @@ class AvPairing:
     # Video segments given up on, which is what `AUD-006` reports on its own evidence.
     abandoned: int = 0
     paired: int = 0
+    # Audio segments that were fetched and whose payload was not read (a key not obtained, a
+    # decrypt that failed). Their moment is not missing from the rendition; it is unmeasured.
+    unread_audio: set[int] = field(default_factory=set)
+    # Every pair measured, oldest first, for the drift check (AUD-007). Bounded like the
+    # indexes: a live session runs for hours.
+    pairs: list[MatchedPair] = field(default_factory=list)
+    max_pairs: int = 2000
 
     # -- collection ------------------------------------------------------------
 
@@ -138,6 +145,8 @@ class AvPairing:
 
     def add_audio(self, segment: TrackSegment) -> None:
         if not segment.usable:
+            if segment.msn >= 0:
+                self.unread_audio.add(segment.msn)
             return
         self.audio_by_msn.setdefault(segment.msn, segment)
 
@@ -212,6 +221,9 @@ class AvPairing:
                     self.abandoned += 1
                 continue
             pairs.append(pair)
+            self.pairs.append(pair)
+            if len(self.pairs) > self.max_pairs:
+                del self.pairs[: len(self.pairs) - self.max_pairs]
             del self.pending_video[msn]
             self.waited.pop(msn, None)
             self.paired += 1

@@ -112,6 +112,9 @@ const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
       // it, and how far apart the two may start and still be the same moment.
       'av_pair_defer_refreshes',
       'av_pair_min_overlap_fraction',
+      // AUD-007: how far audio may move against video across a run of matched pairs.
+      'av_drift_min_s',
+      'av_drift_fraction',
     ],
   },
   {

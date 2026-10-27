@@ -1773,6 +1773,16 @@ class AnalysisSession:
                         audio_ranges=audio_ranges,
                         variant=pairing.video_variant,
                         layer=context.layer,
+                        pending=set(pairing.pending_video),
+                        unread_audio=pairing.unread_audio,
+                    )
+                )
+                await self._record(
+                    segment_rules.check_demuxed_drift(
+                        pairing.pairs,
+                        variant=pairing.video_variant,
+                        layer=context.layer,
+                        thresholds=self.thresholds,
                     )
                 )
 
