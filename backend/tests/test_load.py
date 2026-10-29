@@ -60,7 +60,10 @@ def test_twenty_concurrent_aging_jobs_all_run_and_shut_down_cleanly(
         running: set[str] = set()
         while time.time() < deadline and len(running) < CONCURRENT_JOBS:
             listing = client.get("/api/aging/jobs").json()["jobs"]
-            running = {job["id"] for job in listing if job["status"] == "RUNNING"}
+            # Only this test's jobs: another test's run resumed by a lease takeover is not one.
+            running = {
+                job["id"] for job in listing if job["status"] == "RUNNING" and job["id"] in job_ids
+            }
             time.sleep(0.5)
         assert len(running) == CONCURRENT_JOBS, f"only {len(running)} of {CONCURRENT_JOBS} started"
 

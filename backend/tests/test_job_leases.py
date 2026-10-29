@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,12 +20,32 @@ from app.main import create_app
 from tests.fixtures.server import FixtureServer, build_simple_channel
 
 OTHER = "other-instance:1:abc"
+# Every row a test writes, removed afterwards: a RUNNING row whose lease later lapses would be
+# taken over by the next test's instance, which is exactly what production does with one.
+CREATED: list[str] = []
 
 
 @pytest.fixture(autouse=True)
 def api() -> Iterator[TestClient]:
     with TestClient(create_app()) as client:
         yield client
+
+
+@pytest.fixture(autouse=True)
+async def remove_rows() -> AsyncIterator[None]:
+    yield
+    from sqlalchemy import delete
+
+    from app.jobs.manager import job_manager
+
+    for job_id in CREATED:
+        handle = job_manager.get(job_id)
+        if handle is not None and handle.status in ("RUNNING", "PENDING"):
+            await job_manager.cancel(job_id)
+        job_manager.jobs.pop(job_id, None)
+    async with db_session.session_scope() as session:
+        await session.execute(delete(Job).where(Job.id.in_(CREATED)))
+    CREATED.clear()
 
 
 def _now() -> dt.datetime:
@@ -36,6 +56,7 @@ async def _row(**values: object) -> str:
     job_id = uuid.uuid4().hex
     async with db_session.session_scope() as session:
         session.add(Job(id=job_id, type="aging", status="RUNNING", params={}, **values))
+    CREATED.append(job_id)
     return job_id
 
 
@@ -85,12 +106,14 @@ async def _start_aging(origin: FixtureServer, duration_s: float = 30.0):  # type
 
     url = build_simple_channel(origin, variant_count=1, segment_count=4, segment_duration=2.0)
     await job_manager.start()
-    return await job_manager.submit(
+    handle = await job_manager.submit(
         job_type="aging",
         playback_url=url,
         channel_name="Leased channel",
         options=JobOptionsIn().to_session_options(duration_s=duration_s, default_record=False),
     )
+    CREATED.append(handle.id)
+    return handle
 
 
 async def test_a_stop_asked_of_another_instance_reaches_the_owner(origin: FixtureServer) -> None:
