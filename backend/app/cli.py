@@ -393,6 +393,14 @@ async def _probe(args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
+def _cmd_secret_key(args: argparse.Namespace) -> int:
+    """A new Fernet key for RBA_SECRETS_KEY. Printed once; keep it in backend/.env only."""
+    from app.secret_store import generate_key
+
+    print(generate_key())
+    return 0
+
+
 def _cmd_probe(args: argparse.Namespace) -> int:
     print(json.dumps(asyncio.run(_probe(args)), indent=2, ensure_ascii=False, default=str))
     return 0
@@ -440,6 +448,11 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--country", default="US")
     probe.add_argument("--sample", type=int, default=50, help="channels to probe with")
     probe.set_defaults(func=_cmd_probe)
+
+    secret = sub.add_parser(
+        "secret-key", help="Print a new RBA_SECRETS_KEY for encrypting stored secrets"
+    )
+    secret.set_defaults(func=_cmd_secret_key)
 
     rules = sub.add_parser("rules", help="Print the rule catalogue")
     rules.add_argument("--markdown", action="store_true", help="Render docs/RULES.md")

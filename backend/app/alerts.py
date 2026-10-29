@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, Field
 
+from app import secret_store
 from app.analysis.review import AckMatch, is_acknowledged
 from app.config import PRODUCT_NAME
 from app.db import session as db_session
@@ -61,7 +62,10 @@ async def load() -> AlertSettings:
         async with db_session.session_scope() as session:
             row = await session.get(SettingRow, SETTINGS_KEY)
         if row is not None and isinstance(row.value, dict):
-            return AlertSettings(**row.value)
+            stored = dict(row.value)
+            # The webhook URL carries its own token and is stored sealed (`app/secret_store.py`).
+            stored["webhook_url"] = secret_store.unseal(str(stored.get("webhook_url") or ""))
+            return AlertSettings(**stored)
     except Exception as exc:
         logger.warning("alert settings could not be read: %s", type(exc).__name__)
     return AlertSettings()
@@ -71,6 +75,7 @@ async def save(settings: AlertSettings) -> None:
     async with db_session.session_scope() as session:
         row = await session.get(SettingRow, SETTINGS_KEY)
         value = settings.model_dump()
+        value["webhook_url"] = secret_store.seal(settings.webhook_url)
         if row is None:
             session.add(
                 SettingRow(key=SETTINGS_KEY, value=value, updated_at=dt.datetime.now(dt.UTC))

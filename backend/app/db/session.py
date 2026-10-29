@@ -57,11 +57,21 @@ def engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         settings = get_settings()
+        sized: dict[str, Any] = {}
+        if not settings.database_url.startswith("sqlite"):
+            # Every running job writes samples through this pool, so it is sized for
+            # RBA_MAX_CONCURRENT_JOBS plus the API rather than the driver's default of five.
+            sized = {
+                "pool_size": settings.rba_db_pool_size,
+                "max_overflow": settings.rba_db_max_overflow,
+                "pool_timeout": settings.rba_db_pool_timeout_s,
+            }
         _engine = create_async_engine(
             settings.database_url,
             pool_pre_ping=True,
             pool_recycle=1800,
             echo=False,
+            **sized,
         )
     return _engine
 

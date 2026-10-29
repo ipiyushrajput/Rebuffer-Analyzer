@@ -15,6 +15,10 @@ services:
       RBA_DATA_DIR: /var/lib/rba
       RBA_REPORTS_DIR: /var/lib/rba/reports
       RBA_EVIDENCE_DIR: /var/lib/rba/evidence
+      # Recordings and local object storage on the volume, so a rebuilt container keeps them.
+      # In production RBA_STORAGE_BACKEND=s3 (backend/.env) sends finished runs to S3.
+      RBA_RECORDINGS_DIR: /var/lib/rba/recordings
+      RBA_STORAGE_DIR: /var/lib/rba/storage
     volumes:
       - rba-data:/var/lib/rba
     ports:
@@ -28,7 +32,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          # The same cap as deploy/rba-backend.service (MemoryMax=6G).
+          memory: 6G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
 
   frontend:
     build:
@@ -49,6 +59,11 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
 volumes:
   rba-data:

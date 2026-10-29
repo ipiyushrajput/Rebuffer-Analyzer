@@ -47,7 +47,8 @@ id -u rba >/dev/null 2>&1 || useradd --system --home "$PREFIX" --shell /usr/sbin
 
 # --- backend ----------------------------------------------------------------
 log "Installing the backend to $PREFIX/backend"
-mkdir -p "$PREFIX/backend" "$DATA_DIR/reports" "$DATA_DIR/evidence"
+mkdir -p "$PREFIX/backend" "$DATA_DIR/reports" "$DATA_DIR/evidence" \
+  "$DATA_DIR/recordings" "$DATA_DIR/storage"
 rsync -a --delete --exclude '.venv' --exclude '__pycache__' --exclude 'var' \
   "$REPO_ROOT/backend/" "$PREFIX/backend/"
 

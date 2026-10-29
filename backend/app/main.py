@@ -141,6 +141,7 @@ def create_app() -> FastAPI:
         channels,
         drm,
         insights,
+        metrics,
         proxy,
         realtime,
         replay,
@@ -162,6 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(reports.router, prefix="/api")
     app.include_router(review.router, prefix="/api")
     app.include_router(insights.router, prefix="/api")
+    app.include_router(metrics.router, prefix="/api")
     app.include_router(replay.router, prefix="/api")
     app.include_router(proxy.router, prefix="/api")
     app.include_router(drm.router, prefix="/api")

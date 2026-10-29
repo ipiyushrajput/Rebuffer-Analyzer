@@ -28,6 +28,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app import secret_store
 from app.config import get_settings
 from app.db import session as db_session
 from app.db.models import SettingRow
@@ -189,11 +190,9 @@ async def load_stored_session() -> _CookieAuth:
             detail=f"The settings table did not answer ({type(exc).__name__}).",
         )
 
-    cookies = {
-        name: str(stored.get(name, "")).strip()
-        for name in ACCEPTED_COOKIES
-        if str(stored.get(name, "")).strip()
-    }
+    # Cookie values are stored sealed when RBA_SECRETS_KEY is set (`app/secret_store.py`).
+    opened = {name: secret_store.unseal(str(stored.get(name, ""))) for name in ACCEPTED_COOKIES}
+    cookies = {name: value.strip() for name, value in opened.items() if value.strip()}
     return _CookieAuth(
         cookies=cookies,
         source="stored",
@@ -212,7 +211,9 @@ async def save_stored_session(cookies: dict[str, str], *, valid: bool, detail: s
         )
 
     record: dict[str, Any] = {
-        **{name: cookies[name] for name in ACCEPTED_COOKIES if cookies.get(name)},
+        **{
+            name: secret_store.seal(cookies[name]) for name in ACCEPTED_COOKIES if cookies.get(name)
+        },
         "last_validated_at": dt.datetime.now(dt.UTC).isoformat(),
         "valid": valid,
         "detail": detail,
