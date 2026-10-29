@@ -84,6 +84,7 @@ async def health() -> dict[str, Any]:
         "mp4decrypt": _mp4decrypt_status(),
         "database": database,
         "schema": await _schema_status(),
+        "storage": await _storage_status(),
     }
     degraded = [name for name, value in checks.items() if not _is_ok(value)]
 
@@ -99,6 +100,34 @@ async def health() -> dict[str, Any]:
         },
         "thresholds": get_thresholds().model_dump(mode="json"),
     }
+
+
+_storage_cache: tuple[float, dict[str, Any]] | None = None
+STORAGE_CHECK_TTL_S = 60.0
+
+
+async def _storage_status() -> dict[str, Any]:
+    """Whether object storage answers: one HEAD request a minute at most.
+
+    The rail polls this endpoint; probing S3 on every poll would cost a request each time, so
+    the answer is cached. A missing object is a successful answer; an error is not.
+    """
+    global _storage_cache
+    import time
+
+    from app.storage import get_storage
+
+    now = time.monotonic()
+    if _storage_cache is not None and now - _storage_cache[0] < STORAGE_CHECK_TTL_S:
+        return _storage_cache[1]
+    try:
+        storage = get_storage()
+        status = {**storage.describe(), "ok": True}
+        await storage.size("healthcheck/probe")
+    except Exception as exc:
+        status = {"ok": False, "error": type(exc).__name__}
+    _storage_cache = (now, status)
+    return status
 
 
 def _is_ok(value: dict[str, Any]) -> bool:

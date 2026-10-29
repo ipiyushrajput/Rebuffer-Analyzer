@@ -24,6 +24,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import false as sa_false
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -87,6 +88,16 @@ class Job(Base):
     )
     verdict: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The run's folder in object storage (`app/storage/keys.py`), fixed when the run starts so a
+    # renamed channel still finds its files.
+    storage_prefix: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Which instance runs this job, and until when (`app/jobs/lease.py`). A lease that lapses
+    # is taken over by another instance; a stop asked of any instance reaches the owner here.
+    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_expires_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stop_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
 
     findings: Mapped[list[Finding]] = relationship(back_populates="job", cascade="all, delete")
 
@@ -377,6 +388,8 @@ class Report(Base):
     content: Mapped[bytes | None] = mapped_column(ReportBlob, nullable=True, deferred=True)
     # Set only when a copy was also written to disk, which is off by default.
     path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The object holding the bytes when RBA_REPORT_STORAGE=storage (local or S3).
+    storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     verdict_status: Mapped[str | None] = mapped_column(String(48), nullable=True)
     owner: Mapped[str | None] = mapped_column(String(32), nullable=True)
     risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)

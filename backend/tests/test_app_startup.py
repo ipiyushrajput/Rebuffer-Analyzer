@@ -24,7 +24,10 @@ def test_health_reports_every_dependency() -> None:
         "mp4decrypt",
         "database",
         "schema",
+        "storage",
     }
+    assert body["checks"]["storage"]["backend"] == "local"
+    assert body["checks"]["storage"]["ok"] is True
     # Bento4 is optional — cenc decrypts in process — so a host without it is a working
     # deployment, not a degraded one, and the check says so without hiding the consequence.
     assert body["checks"]["mp4decrypt"]["ok"] is True

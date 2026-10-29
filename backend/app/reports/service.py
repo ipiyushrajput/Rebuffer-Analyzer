@@ -39,6 +39,7 @@ from app.reports.manifests import report_manifests
 from app.reports.recording import recording_state
 from app.reports.render_html import render_bulk_report, render_html_for_handle
 from app.reports.render_pdf import PdfUnavailable, render_pdf_bytes
+from app.storage import KEEP, get_storage, keys, runs
 
 logger = logging.getLogger(__name__)
 
@@ -71,14 +72,26 @@ async def store_report(
 ) -> dict[str, Any]:
     """Record one rendered report and return the row as the API reports it.
 
-    The bytes go to the database. A copy is written to disk only when the deployment asks
-    for it, and the path is recorded so an existing mirror stays readable.
+    `RBA_REPORT_STORAGE` decides where the bytes go: the database row (`database`), object
+    storage — the run's folder on local disk or in S3 — with the row as its index
+    (`storage`), or a disk mirror beside the database (`both`, `disk`).
     """
     settings = get_settings()
     path: Path | None = None
     if settings.reports_on_disk:
         path = reports_dir() / f"{stem}.{fmt}"
         path.write_bytes(data)
+    storage_key: str | None = None
+    if settings.reports_in_storage:
+        prefix = await runs.prefix_for(handle_id)
+        storage_key = keys.report_key(prefix, f"{stem}.{fmt}")
+        await get_storage().put_bytes(
+            storage_key,
+            data,
+            content_type=MEDIA_TYPES.get(fmt, "application/octet-stream"),
+            retention=KEEP,
+            filename=f"{_slug(channel_name or 'report')}.{fmt}",
+        )
 
     async with db_session.session_scope() as session:
         row = Report(
@@ -88,6 +101,7 @@ async def store_report(
             format=fmt,
             content=data if settings.reports_in_database else None,
             path=str(path) if path else None,
+            storage_key=storage_key,
             verdict_status=verdict_status,
             owner=owner,
             risk_score=risk_score,
@@ -590,6 +604,8 @@ async def get_report(report_id: int) -> tuple[bytes, str, str] | None:
         if row is None:
             return None
         data = row.content
+        if data is None and row.storage_key:
+            data = await get_storage().get_bytes(row.storage_key)
         if data is None and row.path:
             path = Path(row.path)
             data = path.read_bytes() if path.exists() else None
@@ -599,6 +615,16 @@ async def get_report(report_id: int) -> tuple[bytes, str, str] | None:
         return data, media, f"{_slug(row.channel_name or 'report')}.{row.format}"
 
 
+async def report_location(report_id: int) -> tuple[str, str, str] | None:
+    """The storage key, media type and file name of a report kept in object storage."""
+    async with db_session.session_scope() as session:
+        row = await session.get(Report, report_id)
+        if row is None or not row.storage_key:
+            return None
+        media = MEDIA_TYPES.get(row.format, "application/octet-stream")
+        return row.storage_key, media, f"{_slug(row.channel_name or 'report')}.{row.format}"
+
+
 async def delete_report(report_id: int) -> bool:
     async with db_session.session_scope() as session:
         row = await session.get(Report, report_id)
@@ -606,5 +632,7 @@ async def delete_report(report_id: int) -> bool:
             return False
         if row.path:
             Path(row.path).unlink(missing_ok=True)
+        if row.storage_key:
+            await get_storage().delete(row.storage_key)
         await session.execute(delete(Report).where(Report.id == report_id))
         return True

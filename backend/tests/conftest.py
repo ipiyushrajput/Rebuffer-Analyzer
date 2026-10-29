@@ -19,6 +19,10 @@ os.environ["DB_TABLE_PREFIX"] = ""
 os.environ["RBA_DATA_DIR"] = str(_TEST_DATA_DIR)
 os.environ["RBA_REPORTS_DIR"] = str(_TEST_DATA_DIR / "reports")
 os.environ["RBA_EVIDENCE_DIR"] = str(_TEST_DATA_DIR / "evidence")
+# Object storage and recordings too: a test never writes into the working tree.
+os.environ["RBA_STORAGE_BACKEND"] = "local"
+os.environ["RBA_STORAGE_DIR"] = str(_TEST_DATA_DIR / "storage")
+os.environ["RBA_RECORDINGS_DIR"] = str(_TEST_DATA_DIR / "recordings")
 
 from tests.fixtures.server import FixtureServer  # noqa: E402
 

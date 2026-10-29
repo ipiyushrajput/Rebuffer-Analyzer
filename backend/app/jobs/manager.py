@@ -159,6 +159,7 @@ class JobManager:
         self.jobs: dict[str, JobHandle] = {}
         self._semaphore: asyncio.Semaphore | None = None
         self._started = False
+        self._archive_tasks: set[asyncio.Task[dict[str, int]]] = set()
         self._on_result: ResultHandler | None = None
         self._event_sink: Callable[[str, str, dict[str, Any]], Awaitable[None]] | None = None
         self._retention_task: asyncio.Task[None] | None = None
@@ -183,6 +184,7 @@ class JobManager:
         running = [h.task for h in self.jobs.values() if h.task and not h.task.done()]
         if running:
             await asyncio.wait(running, timeout=25)
+        await self.drain_archives(timeout_s=20)
         self._started = False
 
     def set_result_handler(self, handler: ResultHandler) -> None:
@@ -343,7 +345,22 @@ class JobManager:
             )
             if self._on_result is not None:
                 await self._on_result(handle, result)
+            # The run's archives go to object storage in the background: building a day-long
+            # network log takes a while, and the job is finished whether or not it is done.
+            self._archive(handle)
             return result
+
+    def _archive(self, handle: JobHandle) -> None:
+        from app.reports import artifacts
+
+        task = asyncio.create_task(artifacts.archive_run(handle), name=f"rba:archive:{handle.id}")
+        self._archive_tasks.add(task)
+        task.add_done_callback(self._archive_tasks.discard)
+
+    async def drain_archives(self, timeout_s: float = 120.0) -> None:
+        """Wait for archiving in flight, so a shutdown or a test does not cut an upload short."""
+        if self._archive_tasks:
+            await asyncio.wait(set(self._archive_tasks), timeout=timeout_s)
 
     def get(self, job_id: str) -> JobHandle | None:
         return self.jobs.get(job_id)
@@ -567,6 +584,18 @@ class JobManager:
             - dt.timedelta(days=settings.rba_pinned_retention_days),
             running=running,
         )
+        # Archives on local disk expire by their retention class here; in S3 the bucket's
+        # lifecycle rules do the same from the objects' `retention` tags.
+        from app.storage import get_storage
+        from app.storage.local import LocalStorage
+
+        storage = get_storage()
+        if isinstance(storage, LocalStorage):
+            removed += await storage.purge(
+                standard_before=cutoff,
+                pinned_before=dt.datetime.now(dt.UTC)
+                - dt.timedelta(days=settings.rba_pinned_retention_days),
+            )
         return removed
 
 

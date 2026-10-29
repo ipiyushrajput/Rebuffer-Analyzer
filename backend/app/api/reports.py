@@ -13,7 +13,7 @@ from app.api.realtime import _interim
 from app.hls.locate import locate
 from app.jobs.manager import job_manager
 from app.net.curl import curl_command
-from app.reports import network_log, service
+from app.reports import artifacts, network_log, service
 
 router = APIRouter(tags=["reports"])
 
@@ -140,8 +140,16 @@ async def download_report(report_id: int, inline: bool = Query(default=False)) -
     Serve a stored report, streamed from the database.
 
     ``inline=1`` drops the attachment disposition so the Reports tab renders the document in
-    place. The bytes are identical either way; only the disposition header changes.
+    place. The bytes are identical either way; only the disposition header changes. A report
+    in object storage is downloaded straight from it (a CloudFront URL on S3); viewed inline it
+    is read through the backend, which sets the inline disposition.
     """
+    if not inline:
+        # A report in object storage is downloaded straight from it (CloudFront on S3).
+        located = await service.report_location(report_id)
+        if located is not None:
+            key, media, filename = located
+            return artifacts.stored_response(key, media_type=media, filename=filename)
     found = await service.get_report(report_id)
     if found is None:
         raise HTTPException(
@@ -172,6 +180,13 @@ async def evidence_bundle(job_id: str) -> Response:
     a restart, or long after it ended) is built from the database and the poll log alone.
     """
     handle = job_manager.get(job_id)
+    running = handle is not None and handle.status in ("RUNNING", "PENDING")
+    if not running:
+        key = await artifacts.find(job_id, artifacts.EVIDENCE)
+        if key is not None:
+            return artifacts.stored_response(
+                key, media_type="application/zip", filename=f"evidence-{job_id[:8]}.zip"
+            )
     if handle is not None:
         archive = await service.build_evidence_bundle(handle)
     else:
@@ -257,14 +272,12 @@ async def job_timeline(
 @router.get("/jobs/{job_id}/recording")
 async def job_recording(job_id: str) -> dict[str, Any]:
     """Whether a run was recorded, and what its recording holds."""
-    from app.config import get_settings
-    from app.reports.recording import recording_state
-
-    return recording_state(get_settings().rba_recordings_dir, job_id)
+    # On disk while the run writes it; in object storage once it ended.
+    return await artifacts.recording_info(job_id)
 
 
 @router.get("/jobs/{job_id}/recording.zip")
-async def job_recording_archive(job_id: str) -> StreamingResponse:
+async def job_recording_archive(job_id: str) -> Response:
     """The recording: each rendition joined into one playable file per clip, the decrypted
     copy of a protected rendition, audio and video joined when ffmpeg is installed, and the
     network log of the clip's own minutes. Streamed as it is built."""
@@ -274,6 +287,11 @@ async def job_recording_archive(job_id: str) -> StreamingResponse:
     root = get_settings().rba_recordings_dir
     state = recording_state(root, job_id)
     if not state.get("available"):
+        key = await artifacts.find(job_id, artifacts.RECORDING_ZIP)
+        if key is not None:
+            return artifacts.stored_response(
+                key, media_type="application/zip", filename=f"recording-{job_id[:8]}.zip"
+            )
         raise HTTPException(
             status_code=404,
             detail="This run has no recording: start it with Record stream on.",
@@ -304,12 +322,19 @@ async def _with_curl(job_id: str, poll: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/jobs/{job_id}/network-log.zip")
-async def network_log_archive(job_id: str) -> StreamingResponse:
+async def network_log_archive(job_id: str) -> Response:
     """Every playlist poll of the run as files, a HAR and a CSV, streamed as one ZIP.
 
     Read from the database, so it is complete for the whole run and is served after the run
     has finished and after a restart.
     """
+    handle = job_manager.get(job_id)
+    if handle is None or handle.status not in ("RUNNING", "PENDING"):
+        key = await artifacts.find(job_id, artifacts.NETWORK_LOG)
+        if key is not None:
+            return artifacts.stored_response(
+                key, media_type="application/zip", filename=f"network-log-{job_id[:8]}.zip"
+            )
     if await network_log.poll_count(job_id) == 0:
         raise HTTPException(
             status_code=404,

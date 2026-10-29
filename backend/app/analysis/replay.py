@@ -60,8 +60,10 @@ class _Poll:
 
 @dataclass(slots=True)
 class _File:
-    path: Path
+    path: Path | None
     status: int
+    # The object in storage, when the recording was moved there at the end of its run.
+    key: str | None = None
 
 
 def _utc(value: dt.datetime) -> dt.datetime:
@@ -157,7 +159,40 @@ class ReplaySource:
                     source.inits[entry["map_uri"]] = _File(
                         path=directory / entry["init"], status=200
                     )
+        else:
+            await source._load_stored_recording(job_id)
         return source
+
+    async def _load_stored_recording(self, job_id: str) -> None:
+        """The recording's index from object storage; its files are read when asked for."""
+        from app.analysis import recorder as recorder_module
+        from app.storage import get_storage, keys, runs
+
+        prefix = await runs.known_prefix(job_id)
+        if not prefix:
+            return
+        storage = get_storage()
+        for mode in (recorder_module.FULL, recorder_module.INCIDENTS):
+            raw = await storage.get_bytes(keys.recording_key(prefix, mode, "index.jsonl"))
+            if raw is None:
+                continue
+            self.recorded = True
+            for line in raw.decode("utf-8", errors="replace").splitlines():
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if entry.get("file"):
+                    self.segments[(entry["uri"], entry.get("byterange"))] = _File(
+                        path=None,
+                        status=int(entry.get("status") or 200),
+                        key=keys.recording_key(prefix, mode, entry["file"]),
+                    )
+                if entry.get("map_uri") and entry.get("init"):
+                    self.inits[entry["map_uri"]] = _File(
+                        path=None, status=200, key=keys.recording_key(prefix, mode, entry["init"])
+                    )
+            return
 
     @property
     def available(self) -> bool:
@@ -326,7 +361,15 @@ class ReplayFetcher(Fetcher):
         return body
 
     async def _file(self, url: str, recorded: _File) -> FetchResult:
-        body = await asyncio.to_thread(recorded.path.read_bytes)
+        if recorded.path is not None:
+            body = await asyncio.to_thread(recorded.path.read_bytes)
+        else:
+            from app.storage import get_storage
+
+            stored = await get_storage().get_bytes(recorded.key or "")
+            if stored is None:
+                return self._gap(url)
+            body = stored
         timing = self.source.timings.get(url)
         if timing is not None:
             self.stats.segments_timed += 1

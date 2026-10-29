@@ -17,7 +17,6 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from app.api.job_views import TERMINAL, row_summary, stored_result
-from app.config import get_settings
 from app.db import session as db_session
 from app.db.models import Job as JobRow
 from app.db.models import (
@@ -25,7 +24,7 @@ from app.db.models import (
 )
 from app.db.paging import newest_rows
 from app.jobs import purge
-from app.reports.recording import recording_state
+from app.reports import artifacts
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
@@ -102,7 +101,8 @@ async def read_channel(job_id: str) -> dict[str, Any]:
         payload = {
             **row_summary(row),
             **result,
-            "recording": recording_state(get_settings().rba_recordings_dir, job_id),
+            # On disk while the run writes it; in object storage once it ended.
+            "recording": await artifacts.recording_info(job_id),
             "reports": [
                 {
                     "id": report.id,

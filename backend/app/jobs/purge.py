@@ -30,6 +30,7 @@ from app.db.models import Finding as FindingRow
 from app.db.models import Incident as IncidentRow
 from app.db.models import Job as JobRow
 from app.jobs.manager import job_manager
+from app.storage import get_storage
 
 # Every table a run writes rows to, keyed by `job_id`.
 SAMPLE_TABLES = (
@@ -74,13 +75,17 @@ async def purge_job(job_id: str) -> Purged | None:
     writing them would leave it writing to nothing.
     """
     purged = Purged()
+    stored: list[str] = []
     async with db_session.session_scope() as session:
         row = await session.get(JobRow, job_id)
         if row is None:
             return None
+        prefix = row.storage_prefix
         reports = (await session.execute(select(Report).where(Report.job_id == job_id))).scalars()
         for report in reports.all():
             purged.reports += 1
+            if report.storage_key:
+                stored.append(report.storage_key)
             # The bytes go with the row. A disk mirror, when one was configured, goes too.
             if report.path:
                 path = Path(report.path)
@@ -95,6 +100,14 @@ async def purge_job(job_id: str) -> Purged | None:
 
     # The handle is dropped too, so a stopped run does not reappear in any listing.
     job_manager.jobs.pop(job_id, None)
+    # Its folder in object storage — reports, recording and archives — goes with it.
+    storage = get_storage()
+    if prefix:
+        purged.files += await storage.delete_prefix(prefix)
+    for key in stored:
+        if not prefix or not key.startswith(prefix + "/"):
+            await storage.delete(key)
+            purged.files += 1
     # And the recording, which is the one thing a run keeps on disk.
     recording = get_settings().rba_recordings_dir / job_id
     if recording.is_dir():
