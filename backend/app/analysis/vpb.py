@@ -58,6 +58,10 @@ class SegmentDelivery:
     # Measured transfer size. Zero means the size is unknown, and the byte cap cannot bind
     # on media that never reported one.
     bytes: int = 0
+    # Part of the live window the first poll found. The sampler fetches that whole window at
+    # once; a player joining at the live edge never requests it, so media the cap turns away
+    # here is not a buffer the device would have overfilled (VPB-003).
+    backlog: bool = False
 
 
 BYTES_PER_MB = 1_000_000
@@ -289,7 +293,12 @@ class VirtualPlayerBuffer:
             self._consecutive_unavailable_from = None
             self._last_unavailable_at = None
 
-        self._enqueue(max(delivery.duration_s, 0.0), max(delivery.bytes, 0), delivery.completed_at)
+        self._enqueue(
+            max(delivery.duration_s, 0.0),
+            max(delivery.bytes, 0),
+            delivery.completed_at,
+            backlog=delivery.backlog,
+        )
 
         if self.state is BufferState.STARTUP and self._reached(*self.profile.startup):
             self.state = BufferState.PLAYING
@@ -361,7 +370,9 @@ class VirtualPlayerBuffer:
             return True
         return self.level_s >= seconds_mark
 
-    def _enqueue(self, seconds: float, size: int, at: dt.datetime) -> None:
+    def _enqueue(
+        self, seconds: float, size: int, at: dt.datetime, *, backlog: bool = False
+    ) -> None:
         """Add one downloaded segment, up to whichever cap it reaches.
 
         A real player that has filled its queue stops requesting, so media beyond the cap is
@@ -372,7 +383,8 @@ class VirtualPlayerBuffer:
             return
         capped_on_bytes = self.profile.apply_bytes and self.level_bytes >= self.profile.total_bytes
         if self.level_s >= self.profile.total_s or capped_on_bytes:
-            self.result.buffer_too_long_events.append(at)
+            if not backlog:
+                self.result.buffer_too_long_events.append(at)
             return
 
         room_s = self.profile.total_s - self.level_s
@@ -383,7 +395,7 @@ class VirtualPlayerBuffer:
             keep = min(keep, room_s / seconds)
         if self.profile.apply_bytes and size > 0 and size > room_bytes:
             keep = min(keep, room_bytes / size)
-        if keep < 1.0:
+        if keep < 1.0 and not backlog:
             self.result.buffer_too_long_events.append(at)
 
         chunk = _Chunk(seconds=seconds * keep, bytes=size * keep)

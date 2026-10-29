@@ -8,9 +8,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { endpoints } from '../api/client'
+import { endpoints, type RulePrecision } from '../api/client'
 import { BatchSettingsPanel } from '../components/BatchSettingsPanel'
 import { CascadaSession, ProviderMapPanel } from '../components/CascadaSession'
+import { AlertsPanel } from '../components/AlertsPanel'
 import { DrmSettingsPanel } from '../components/DrmSettingsPanel'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import {
@@ -45,6 +46,7 @@ type GroupId =
   | 'cascada'
   | 'batch'
   | 'drm'
+  | 'alerts'
   | 'rules'
 
 const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
@@ -73,6 +75,11 @@ const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
       'stale_playlist_factor',
       'cross_variant_msn_error_spread',
       'cross_variant_dsn_tolerance',
+      // Renditions are polled together in rounds; a cross-variant finding is recorded once it
+      // holds for this many rounds in a row.
+      'cross_variant_confirm_rounds',
+      'cross_variant_duration_tolerance_s',
+      'cross_variant_pdt_tolerance_s',
       'min_live_window_multiple',
       'segment_extinf_max_ratio_to_td',
       'segment_extinf_absolute_max_s',
@@ -105,6 +112,9 @@ const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
       // it, and how far apart the two may start and still be the same moment.
       'av_pair_defer_refreshes',
       'av_pair_min_overlap_fraction',
+      // AUD-007: how far audio may move against video across a run of matched pairs.
+      'av_drift_min_s',
+      'av_drift_fraction',
     ],
   },
   {
@@ -123,8 +133,13 @@ const GROUPS: { id: GroupId; title: string; keys: string[] }[] = [
       'evidence_window_s',
       'evidence_max_bytes',
       'evidence_segments_per_rendition',
+      'recording_preroll_s',
+      'recording_postroll_s',
       'segment_retry_attempts',
       'segment_retry_backoff_s',
+      // INFO-007: how late the analyzer's own one-second supervisor may wake before the run
+      // states that its timings carry the host's delay.
+      'selfcheck_loop_lag_ms',
     ],
   },
   {
@@ -148,6 +163,7 @@ const TABS: { id: GroupId; label: string }[] = [
   ...GROUPS.map((group) => ({ id: group.id, label: group.title })),
   { id: 'batch', label: 'Automated batches' },
   { id: 'drm', label: 'DRM' },
+  { id: 'alerts', label: 'Alerts' },
   { id: 'rules', label: 'Rule catalogue' },
 ]
 
@@ -383,6 +399,11 @@ export function SettingsTab() {
             <DrmSettingsPanel />
           </div>
 
+          {/* --- alerts: saved through their own endpoint, like DRM ------------- */}
+          <div className={tab === 'alerts' ? 'p-4 pt-2' : 'panel-hidden'}>
+            <AlertsPanel />
+          </div>
+
           {/* --- rule catalogue ------------------------------------------------ */}
           <div className={tab === 'rules' ? '' : 'panel-hidden'}>
             <RuleCatalogue />
@@ -407,7 +428,7 @@ export function SettingsTab() {
       <div
         className={cx(
           'sticky bottom-0 z-20 border-t border-rail-border bg-rail px-6 py-3',
-          (tab === 'batch' || tab === 'drm') && 'hidden',
+          (tab === 'batch' || tab === 'drm' || tab === 'alerts') && 'hidden',
         )}
       >
         <div className="flex flex-wrap items-center gap-3">
@@ -453,6 +474,8 @@ export function SettingsTab() {
 function RuleCatalogue() {
   const queryClient = useQueryClient()
   const { data } = useQuery({ queryKey: ['rules'], queryFn: endpoints.rules })
+  // Engineers' verdicts on findings, per rule: the share of reviewed findings that were real.
+  const precision = useQuery({ queryKey: ['rule-precision'], queryFn: endpoints.rulePrecision })
   const [filter, setFilter] = useState('')
   const [onlyChanged, setOnlyChanged] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -543,6 +566,7 @@ function RuleCatalogue() {
                 <th>Owner</th>
                 <th>Title, root cause and fix</th>
                 <th>Thresholds</th>
+                <th>Reviewed</th>
               </tr>
             </thead>
             <tbody>
@@ -589,6 +613,9 @@ function RuleCatalogue() {
                   <td className="font-mono text-micro text-ink-soft">
                     {rule.thresholds.join(', ') || '—'}
                   </td>
+                  <td className="whitespace-nowrap font-mono text-micro">
+                    <PrecisionCell value={precision.data?.rules[rule.id]} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -596,5 +623,19 @@ function RuleCatalogue() {
         </div>
       )}
     </div>
+  )
+}
+
+/** Confirmed / false positive, and the share that were real; a dash before any review. */
+function PrecisionCell({ value }: { value?: RulePrecision }) {
+  if (!value || value.reviewed === 0) return <span className="text-ink-faint">—</span>
+  const share = value.precision ?? 0
+  return (
+    <span
+      className={share < 0.5 ? 'text-pink-600' : share < 0.8 ? 'text-violet-600' : 'text-clean-600'}
+      title={`${value.confirmed} confirmed, ${value.false_positive} false positive`}
+    >
+      {Math.round(share * 100)}% real · {value.confirmed}✓ {value.false_positive}✗
+    </span>
   )
 }

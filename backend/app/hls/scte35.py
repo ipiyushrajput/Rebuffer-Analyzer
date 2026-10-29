@@ -226,10 +226,21 @@ class CueWindow:
 
 
 def extract_cue_windows(playlist: Any) -> list[CueWindow]:
-    """Walk a parsed media playlist and pair every CUE-OUT with its CUE-IN."""
+    """Walk a parsed media playlist and pair every CUE-OUT with its CUE-IN.
+
+    `EXT-X-CUE-OUT` precedes the first segment of the break and `EXT-X-CUE-IN` precedes the
+    first segment *after* it, so the segment carrying CUE-IN is content and is not counted
+    in the break. Counting it delivered every break one segment long, and a break declared
+    at exactly its length read as a duration mismatch (ADS-005).
+    """
     windows: list[CueWindow] = []
     current: CueWindow | None = None
     for segment in playlist.segments:
+        if segment.cue_in and current is not None:
+            current.end_msn = segment.msn
+            current.closed = True
+            current.discontinuity_at_in = segment.discontinuity_before
+            current = None
         if segment.cue_out is not None and current is None:
             current = CueWindow(
                 start_msn=segment.msn,
@@ -240,9 +251,4 @@ def extract_cue_windows(playlist: Any) -> list[CueWindow]:
         if current is not None and not current.closed:
             current.delivered_duration_s += segment.duration
             current.segment_count += 1
-        if segment.cue_in and current is not None:
-            current.end_msn = segment.msn
-            current.closed = True
-            current.discontinuity_at_in = segment.discontinuity_before
-            current = None
     return windows

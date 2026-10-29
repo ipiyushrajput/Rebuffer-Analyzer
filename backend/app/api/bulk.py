@@ -14,7 +14,7 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import case, func, select
 
@@ -24,6 +24,7 @@ from app.db import session as db_session
 from app.db.models import BulkItem
 from app.db.models import Job as JobRow
 from app.db.paging import newest_rows, sorted_rows
+from app.jobs import purge
 from app.jobs.manager import JobHandle, job_manager
 from app.reports import service
 
@@ -362,7 +363,7 @@ async def _stored_batches(limit: int) -> list[dict[str, Any]]:
 
 
 @router.get("/jobs")
-async def list_jobs(limit: int = 25) -> dict[str, Any]:
+async def list_jobs(limit: int = Query(default=25, ge=1, le=500)) -> dict[str, Any]:
     """Every batch this deployment knows about, the live ones first-hand.
 
     A batch still running in this process is reported from the job manager, which knows its
@@ -404,7 +405,24 @@ async def read_job(job_id: str) -> dict[str, Any]:
 
 
 @router.delete("/jobs/{job_id}")
-async def cancel_job(job_id: str) -> dict[str, Any]:
+async def cancel_job(
+    job_id: str, purge_record: bool = Query(default=False, alias="purge")
+) -> dict[str, Any]:
+    """Stop a running batch, or with `?purge=true` delete a finished one and every run in it."""
+    if purge_record:
+        running = purge.is_running(job_id) or any(
+            child.status in purge.RUNNING for child in job_manager.children(job_id)
+        )
+        task = _bulk_tasks.get(job_id)
+        if running or (task is not None and not task.done()):
+            raise HTTPException(
+                status_code=409, detail="This bulk analysis is still running. Stop it first."
+            )
+        purged = await purge.purge_batch(job_id)
+        if purged is None:
+            raise HTTPException(status_code=404, detail="Bulk job not found")
+        _bulk_tasks.pop(job_id, None)
+        return {"deleted": True, "id": job_id, **purged.as_dict()}
     parent = job_manager.get(job_id)
     if parent is None:
         raise HTTPException(status_code=404, detail="Bulk job not found")

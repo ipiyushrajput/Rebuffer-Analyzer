@@ -20,6 +20,7 @@ from app.api.schemas import AGING_PRESETS_MINUTES, AgingJobIn
 from app.db import session as db_session
 from app.db.models import Job as JobRow
 from app.db.paging import newest_rows
+from app.jobs import purge
 from app.jobs.manager import job_manager
 from app.reports import service
 
@@ -38,7 +39,10 @@ async def presets() -> dict[str, Any]:
 @router.post("/jobs", status_code=201)
 async def create_job(payload: AgingJobIn) -> dict[str, Any]:
     options = payload.options.to_session_options(
-        duration_s=payload.duration_minutes * 60, default_record=True
+        duration_s=payload.duration_minutes * 60,
+        default_record=True,
+        # A day of every rung is far more than a folder should hold: aging keeps clips.
+        record_mode="incidents",
     )
     handle = await job_manager.submit(
         job_type="aging",
@@ -97,7 +101,19 @@ async def read_job(job_id: str) -> dict[str, Any]:
 
 
 @router.delete("/jobs/{job_id}")
-async def cancel_job(job_id: str) -> dict[str, Any]:
+async def cancel_job(
+    job_id: str, purge_record: bool = Query(default=False, alias="purge")
+) -> dict[str, Any]:
+    """Stop a running aging job, or with `?purge=true` delete a finished one for good."""
+    if purge_record:
+        if purge.is_running(job_id):
+            raise HTTPException(
+                status_code=409, detail="This aging job is still running. Stop it first."
+            )
+        purged = await purge.purge_job(job_id)
+        if purged is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"deleted": True, "id": job_id, **purged.as_dict()}
     handle = await job_manager.cancel(job_id)
     if handle is None:
         raise HTTPException(status_code=404, detail="Job not found")

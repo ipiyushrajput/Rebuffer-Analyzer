@@ -17,11 +17,20 @@ import {
   InlineAlert,
   MetricRow,
   MetricTile,
+  Pagination,
   ProgressBar,
   Stepper,
   cx,
 } from '../components/ui'
-import { IconDownload, IconSearch, IconStop, IconUpload } from '../components/ui/icons'
+import {
+  IconClose,
+  IconDownload,
+  IconSearch,
+  IconStop,
+  IconTrash,
+  IconUpload,
+} from '../components/ui/icons'
+import { usePaged } from '../lib/paging'
 import { AGING_PRESETS, LIVE_POLL_MS, isTerminal } from '../lib/constants'
 import { ratio } from '../lib/format'
 
@@ -89,6 +98,8 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
   const [error, setError] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('risk_score')
   const [filter, setFilter] = useState('')
+  const [batchSearch, setBatchSearch] = useState('')
+  const [confirming, setConfirming] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   /* Once a batch is running its results are the page; the setup folds away until asked for. */
   const [setupOpen, setSetupOpen] = useState(true)
@@ -160,6 +171,30 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
   })
   const batches = batchesQuery.data?.jobs ?? []
   const running = batches.filter((batch) => !isTerminal(batch.status))
+  const batchNeedle = batchSearch.trim().toLowerCase()
+  const matchingBatches = batchNeedle
+    ? batches.filter((batch) =>
+        [batch.channel_name, batch.id, batch.status]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(batchNeedle),
+      )
+    : batches
+  const pagedBatches = usePaged(matchingBatches, batchNeedle, 10)
+
+  // Deleting a finished batch removes every channel run in it, its rows and its report.
+  const removeBatch = useMutation({
+    mutationFn: (id: string) => endpoints.deleteBulk(id),
+    onSuccess: (_data, id) => {
+      setError(null)
+      setConfirming(null)
+      if (jobId === id) setJobId(null)
+      void queryClient.invalidateQueries({ queryKey: ['bulk-jobs'] })
+      void queryClient.invalidateQueries({ queryKey: ['reports'] })
+    },
+    onError: (err: Error) => setError(err.message),
+  })
 
   /* Attach to a batch that is still running, once, when the tab opens with nothing chosen. */
   const attached = useRef(false)
@@ -213,6 +248,8 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
       if (sortKey === 'status') return a.status.localeCompare(b.status)
       return (b.risk_score ?? -1) - (a.risk_score ?? -1)
     })
+  // A filter or a new sort starts on the first page of what it matched.
+  const pagedItems = usePaged(visible, `${jobId}|${filter}|${sortKey}`, 25)
 
   const step = job ? 2 : validation ? 1 : 0
   const invalidRows = validation ? validation.total - validation.valid_count : 0
@@ -270,12 +307,34 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
             <CardHeader
               title="Batches"
               actions={
-                running.length > 0 ? (
-                  <span className="chip-blue">{running.length} running</span>
-                ) : (
-                  <span className="chip-neutral">none running</span>
-                )
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="relative">
+                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint">
+                      <IconSearch size={14} />
+                    </span>
+                    <input
+                      className="input max-w-[220px] pl-8"
+                      placeholder="Search batches"
+                      aria-label="Search bulk batches"
+                      value={batchSearch}
+                      onChange={(event) => setBatchSearch(event.target.value)}
+                    />
+                  </label>
+                  {running.length > 0 ? (
+                    <span className="chip-blue">{running.length} running</span>
+                  ) : (
+                    <span className="chip-neutral">none running</span>
+                  )}
+                </div>
               }
+            />
+            <Pagination
+              className="border-b border-surface-line px-5 py-2.5"
+              label={pagedBatches.label}
+              hasPrevious={pagedBatches.hasPrevious}
+              hasNext={pagedBatches.hasNext}
+              onPrevious={pagedBatches.previous}
+              onNext={pagedBatches.next}
             />
             <div className="overflow-x-auto">
               <table className="table table-hover">
@@ -289,7 +348,7 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {batches.map((batch) => {
+                  {pagedBatches.rows.map((batch) => {
                     const done = Number((batch as unknown as { completed?: number }).completed ?? 0)
                     const total = Number((batch as unknown as { total?: number }).total ?? 0)
                     return (
@@ -308,15 +367,48 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
                         <td className="font-mono text-micro text-ink-muted">
                           {(batch.started_at ?? batch.created_at).replace('T', ' ').slice(0, 19)}
                         </td>
-                        <td className="text-right">
-                          <button
-                            type="button"
-                            className="btn-ghost btn-sm"
-                            disabled={batch.id === jobId}
-                            onClick={() => openBatch(batch.id)}
-                          >
-                            Open
-                          </button>
+                        <td>
+                          <div className="flex justify-end gap-1.5">
+                            <button
+                              type="button"
+                              className="btn-ghost btn-sm"
+                              disabled={batch.id === jobId}
+                              onClick={() => openBatch(batch.id)}
+                            >
+                              Open
+                            </button>
+                            {/* A running batch is cancelled first; only a finished one is deleted. */}
+                            {isTerminal(batch.status) &&
+                              (confirming === batch.id ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn-accent btn-sm"
+                                    disabled={removeBatch.isPending}
+                                    onClick={() => removeBatch.mutate(batch.id)}
+                                  >
+                                    Delete for good
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn-ghost btn-sm"
+                                    aria-label="Keep this batch"
+                                    onClick={() => setConfirming(null)}
+                                  >
+                                    <IconClose size={12} />
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-ghost btn-sm text-pink-600"
+                                  onClick={() => setConfirming(batch.id)}
+                                >
+                                  <IconTrash size={12} />
+                                  Delete
+                                </button>
+                              ))}
+                          </div>
                         </td>
                       </tr>
                     )
@@ -324,6 +416,16 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
                 </tbody>
               </table>
             </div>
+            {pagedBatches.pages > 1 && (
+              <Pagination
+                className="border-t border-surface-line px-5 py-2.5"
+                label={pagedBatches.label}
+                hasPrevious={pagedBatches.hasPrevious}
+                hasNext={pagedBatches.hasNext}
+                onPrevious={pagedBatches.previous}
+                onNext={pagedBatches.next}
+              />
+            )}
           </Card>
         )}
 
@@ -596,57 +698,77 @@ export function BulkTab({ prefill }: { prefill?: BulkPrefill | null }) {
               {visible.length === 0 ? (
                 <EmptyState title="No channel matches the filter" />
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="table table-hover">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Channel</th>
-                        <th>Status</th>
-                        <th>Verdict</th>
-                        <th>Responsible party</th>
-                        <th>Risk</th>
-                        <th>Worst ratio</th>
-                        <th>Incidents</th>
-                        <th>Primary root cause</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visible.map((item) => (
-                        <tr key={item.row_index}>
-                          <td className="font-mono text-micro text-ink-faint">{item.row_index}</td>
-                          <td className="text-body font-semibold text-ink">{item.channel_name}</td>
-                          <td className="text-micro text-ink-muted">{item.status}</td>
-                          <td className="text-micro text-ink-soft">{item.verdict_status ?? '—'}</td>
-                          <td>
-                            {item.owner_label ? (
-                              <span className="chip-blue">{item.owner_label}</span>
-                            ) : (
-                              <span className="text-micro text-ink-faint">—</span>
-                            )}
-                          </td>
-                          <td
-                            className={cx(
-                              'font-mono text-body font-semibold tabular-nums',
-                              riskTone(item.risk_score),
-                            )}
-                          >
-                            {item.risk_score ?? '—'}
-                          </td>
-                          <td className="font-mono text-micro tabular-nums text-ink-soft">
-                            {ratio(item.worst_ratio)}
-                          </td>
-                          <td className="font-mono text-micro tabular-nums text-ink-soft">
-                            {item.incident_count ?? '—'}
-                          </td>
-                          <td className="max-w-[420px] text-micro text-ink-muted">
-                            {item.headline ?? item.error ?? '—'}
-                          </td>
+                <>
+                  <Pagination
+                    className="border-b border-surface-line px-5 py-2.5"
+                    label={pagedItems.label}
+                    hasPrevious={pagedItems.hasPrevious}
+                    hasNext={pagedItems.hasNext}
+                    onPrevious={pagedItems.previous}
+                    onNext={pagedItems.next}
+                  />
+                  <div className="overflow-x-auto">
+                    <table className="table table-hover">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Channel</th>
+                          <th>Status</th>
+                          <th>Verdict</th>
+                          <th>Responsible party</th>
+                          <th>Risk</th>
+                          <th>Worst ratio</th>
+                          <th>Incidents</th>
+                          <th>Primary root cause</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {pagedItems.rows.map((item) => (
+                          <tr key={item.row_index}>
+                            <td className="font-mono text-micro text-ink-faint">{item.row_index}</td>
+                            <td className="text-body font-semibold text-ink">{item.channel_name}</td>
+                            <td className="text-micro text-ink-muted">{item.status}</td>
+                            <td className="text-micro text-ink-soft">{item.verdict_status ?? '—'}</td>
+                            <td>
+                              {item.owner_label ? (
+                                <span className="chip-blue">{item.owner_label}</span>
+                              ) : (
+                                <span className="text-micro text-ink-faint">—</span>
+                              )}
+                            </td>
+                            <td
+                              className={cx(
+                                'font-mono text-body font-semibold tabular-nums',
+                                riskTone(item.risk_score),
+                              )}
+                            >
+                              {item.risk_score ?? '—'}
+                            </td>
+                            <td className="font-mono text-micro tabular-nums text-ink-soft">
+                              {ratio(item.worst_ratio)}
+                            </td>
+                            <td className="font-mono text-micro tabular-nums text-ink-soft">
+                              {item.incident_count ?? '—'}
+                            </td>
+                            <td className="max-w-[420px] text-micro text-ink-muted">
+                              {item.headline ?? item.error ?? '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {pagedItems.pages > 1 && (
+                    <Pagination
+                      className="border-t border-surface-line px-5 py-2.5"
+                      label={pagedItems.label}
+                      hasPrevious={pagedItems.hasPrevious}
+                      hasNext={pagedItems.hasNext}
+                      onPrevious={pagedItems.previous}
+                      onNext={pagedItems.next}
+                    />
+                  )}
+                </>
               )}
             </Card>
           </>

@@ -1,4 +1,7 @@
-# TV Plus Rebuffer Analyzer (RBA)
+# StreamLens
+
+StreamLens is the product name of what was the TV Plus Rebuffer Analyzer (RBA). Package,
+service, database and command names keep `rba`, so an existing deployment upgrades in place.
 
 Internal platform for the Samsung TV Plus stream quality team.
 

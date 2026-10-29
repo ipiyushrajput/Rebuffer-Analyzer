@@ -199,9 +199,19 @@ async def read_snapshots(
     import datetime as dt
     import difflib
 
+    moment: dt.datetime | None = None
+    if at:
+        try:
+            moment = dt.datetime.fromisoformat(at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="at must be ISO-8601") from exc
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=dt.UTC)
+
     handle = job_manager.get(session_id)
     if handle is None or handle.session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        # The run is over or the process restarted: the poll log still has every poll.
+        return await _logged_snapshot(session_id, variant, moment)
 
     target = None
     for context in handle.session.layers.values():
@@ -214,15 +224,12 @@ async def read_snapshots(
     history = [s for s in target.history if s.raw]
     if not history:
         raise HTTPException(status_code=404, detail="No snapshot has been captured yet")
+    if moment is not None and moment < history[0].at - dt.timedelta(seconds=1):
+        # Older than the poller's in-memory window, which holds the last few hundred polls.
+        return await _logged_snapshot(session_id, variant, moment)
 
     index = len(history) - 1
-    if at:
-        try:
-            moment = dt.datetime.fromisoformat(at.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="at must be ISO-8601") from exc
-        if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=dt.UTC)
+    if moment is not None:
         index = min(
             range(len(history)), key=lambda i: abs((history[i].at - moment).total_seconds())
         )
@@ -250,4 +257,51 @@ async def read_snapshots(
         "summary": chosen.summary(),
         "diff": diff,
         "available": [s.at.isoformat() for s in history],
+    }
+
+
+async def _logged_snapshot(job_id: str, variant: str, moment: Any) -> dict[str, Any]:
+    """The same answer as `read_snapshots`, from the poll log rather than memory."""
+    import difflib
+
+    from app.reports import network_log
+
+    poll = await network_log.poll_with_context(job_id, variant=variant, at=moment)
+    if poll is None:
+        raise HTTPException(status_code=404, detail=f"No poll of {variant} is recorded")
+    previous = poll.get("previous")
+    diff = (
+        list(
+            difflib.unified_diff(
+                (previous.get("raw") or "").splitlines(),
+                (poll.get("raw") or "").splitlines(),
+                fromfile=f"{variant} @ {previous['at']}",
+                tofile=f"{variant} @ {poll['at']}",
+                lineterm="",
+            )
+        )
+        if previous
+        else []
+    )
+    return {
+        "variant": variant,
+        "at": poll["at"],
+        "url": poll.get("final_url") or poll["url"],
+        "raw": poll.get("raw") or "",
+        "summary": {
+            "seq": poll["seq"],
+            "at": poll["at"],
+            "variant": variant,
+            "url": poll["url"],
+            "status": poll["status"],
+            "msn": poll["msn"],
+            "last_msn": poll["last_msn"],
+            "ttfb_ms": poll["ttfb_ms"],
+            "total_ms": poll["total_ms"],
+            "bytes": poll["bytes"],
+            "error": poll["error"],
+        },
+        "diff": diff,
+        "available": [],
+        "source": "poll_log",
     }

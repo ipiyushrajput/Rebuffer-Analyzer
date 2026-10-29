@@ -152,6 +152,12 @@ class FetchResult:
     # is answerable for it. `error` set with this False is the analyzer's own limit (the
     # redirect cap), which a rule reports differently.
     transport_error: bool = False
+    # Set only by a replay (`app/analysis/replay.py`) for a request the replayed run never
+    # stored: nothing was measured, so no rule reads it as a failed fetch.
+    replay_gap: bool = False
+    # Bytes as they crossed the wire. `body` is decoded: a gzip-encoded playlist arrives
+    # smaller than it reads, and Content-Length describes the encoded size.
+    wire_bytes: int = 0
 
     @property
     def ok(self) -> bool:
@@ -334,6 +340,7 @@ class Fetcher:
                 response = await self._client.send(request, stream=True)
                 try:
                     body = await response.aread()
+                    wire_bytes = response.num_bytes_downloaded
                 finally:
                     await response.aclose()
             except (TimeoutError, httpx.HTTPError, OSError) as exc:
@@ -404,6 +411,7 @@ class Fetcher:
                 started_at=started,
                 finished_at=time.time(),
                 http_version=response.http_version,
+                wire_bytes=wire_bytes,
             )
 
         return FetchResult(

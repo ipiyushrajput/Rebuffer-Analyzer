@@ -10,6 +10,7 @@ unwraps it first, so a rollover is never mistaken for a backwards jump.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -69,6 +70,8 @@ class TrackInfo:
     first_pts: int | None = None
     last_pts: int | None = None
     first_dts: int | None = None
+    # Every PES timestamp seen, unwrapped across a rollover, in stream (decode) order.
+    pts_values: list[int] = field(default_factory=list)
     pts_count: int = 0
     continuity_errors: int = 0
     bytes_seen: int = 0
@@ -92,9 +95,24 @@ class TrackInfo:
 
     @property
     def duration_s(self) -> float | None:
+        """The media this track carries: its presentation span plus its last frame.
+
+        The span runs from the smallest presentation timestamp to the largest, not from the
+        first PES to the last. With B-frames the last frame in decode order is not the last on
+        screen, and a PES timestamp marks where a frame *starts*: last-minus-first measured a
+        6.000 s segment two to four frames short, past the SEG-007 tolerance. The frame added
+        on top is the typical gap between consecutive timestamps, which for packed audio is
+        one PES of several frames.
+        """
         if self.first_pts is None or self.last_pts is None:
             return None
-        return pts_diff(self.last_pts, self.first_pts) / PTS_HZ
+        ordered = sorted(set(self.pts_values))
+        if len(ordered) < 3:
+            # Two timestamps bound a span and say nothing about a frame's length.
+            return pts_diff(self.last_pts, self.first_pts) / PTS_HZ
+        gaps = sorted(b - a for a, b in itertools.pairwise(ordered) if b > a)
+        frame = gaps[len(gaps) // 2] if gaps else 0
+        return (ordered[-1] - ordered[0] + frame) / PTS_HZ
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -275,6 +293,7 @@ def parse(data: bytes, *, collect_nal: bool = True, head_bytes: int = 65536) -> 
                     track.last_pts = pts
                 else:
                     track.last_pts = unwrap_pts(pts, track.last_pts)
+                track.pts_values.append(track.last_pts)
                 track.pts_count += 1
             es_offset = 9 + header_length
             if collect_nal and len(track.payload_head) < head_bytes:

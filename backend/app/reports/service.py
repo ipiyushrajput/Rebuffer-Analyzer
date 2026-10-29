@@ -23,16 +23,26 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import undefer
 
+from app.analysis import review
 from app.analysis.engine import AnalysisResult
-from app.config import get_settings
+from app.config import PRODUCT_NAME, get_settings
 from app.db import session as db_session
-from app.db.models import PlaylistSnapshot, Report
+from app.db.models import Finding as FindingRow
+from app.db.models import Incident as IncidentRow
+from app.db.models import Job as JobRow
+from app.db.models import ManifestPoll, Report
 from app.drm import settings as drm_settings
+from app.jobs import manifest_log
 from app.jobs.manager import JobHandle
+from app.reports import network_log
+from app.reports.manifests import report_manifests
+from app.reports.recording import recording_state
 from app.reports.render_html import render_bulk_report, render_html_for_handle
 from app.reports.render_pdf import PdfUnavailable, render_pdf_bytes
 
 logger = logging.getLogger(__name__)
+
+TOOL_NAME = PRODUCT_NAME
 
 SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -94,6 +104,18 @@ async def store_report(
         }
 
 
+async def _manifests_for(handle: JobHandle, analysis: AnalysisResult) -> dict[str, Any] | None:
+    """The playlists the report shows, read from the poll log; none rather than no report."""
+    try:
+        if handle.poll_log is not None:
+            # A report on a running session reads polls the log has not flushed yet.
+            await handle.poll_log.flush()
+        return await report_manifests(handle.id, analysis)
+    except Exception as exc:
+        logger.warning("report manifests for %s were not read: %s", handle.id, exc)
+        return None
+
+
 async def generate(
     handle: JobHandle,
     *,
@@ -105,7 +127,12 @@ async def generate(
     if analysis is None:
         raise ValueError("This job has produced no result to report on yet")
 
-    html = render_html_for_handle(handle, analysis)
+    html = render_html_for_handle(
+        handle,
+        analysis,
+        await _manifests_for(handle, analysis),
+        await review.matches_for(handle.urls.get("playback_url")),
+    )
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
     stem = f"{_slug(handle.channel_name)}-{handle.type}-{stamp}-{handle.id[:8]}"
 
@@ -156,7 +183,9 @@ async def generate_bulk(
         if child.result is None:
             continue
         try:
-            html = render_html_for_handle(child, child.result)
+            html = render_html_for_handle(
+                child, child.result, await _manifests_for(child, child.result)
+            )
         except Exception as exc:
             logger.warning("per-channel report failed for %s: %s", child.id, type(exc).__name__)
             continue
@@ -233,7 +262,7 @@ def _bundle_readme(handle: JobHandle, *, decrypt_evidence: bool) -> str:
     store = handle.session.evidence if handle.session is not None else None
 
     lines = [
-        "RBA evidence bundle",
+        f"{TOOL_NAME} evidence bundle",
         "",
         f"Job:       {handle.id}",
         f"Channel:   {handle.channel_name}",
@@ -325,31 +354,52 @@ def _write_segments(bundle: zipfile.ZipFile, handle: JobHandle, *, decrypt_evide
         bundle.writestr("decrypted/manifest.json", json.dumps(manifest, indent=2, default=str))
 
 
-async def build_evidence_bundle(handle: JobHandle) -> bytes:
-    """Segments and playlist snapshots recorded during the run, as ZIP bytes.
+async def _write_polls(bundle: zipfile.ZipFile, job_id: str, seqs: set[int]) -> int:
+    """The playlists this run's findings name, and every pinned poll, from the poll log."""
+    from sqlalchemy import or_
 
-    Built in memory from the database rows and the session's own evidence store, and streamed
-    to the caller, so an evidence download leaves nothing behind on the analyzer host.
-
-    The segments are the part that was missing: this function wrote `result.json` and the
-    playlists and claimed in its docstring to write segments, and wrote none — for a clear
-    channel as much as a protected one. A protected segment goes in twice when the setting
-    allows it, as served and as decrypted, because the two answer different questions: what
-    the CDN sent, and what a decoder reads.
-    """
-    drm = await drm_settings.load()
+    clauses: list[Any] = [ManifestPoll.pinned.is_(True)]
+    if seqs:
+        clauses.append(ManifestPoll.seq.in_(sorted(seqs)))
     async with db_session.session_scope() as session:
-        snapshots = (
+        rows = (
             (
                 await session.execute(
-                    select(PlaylistSnapshot)
-                    .where(PlaylistSnapshot.job_id == handle.id)
-                    .order_by(PlaylistSnapshot.ts)
+                    select(ManifestPoll)
+                    .where(ManifestPoll.job_id == job_id, or_(*clauses))
+                    .order_by(ManifestPoll.seq)
                 )
             )
             .scalars()
             .all()
         )
+    for row in rows:
+        stamp = row.ts.strftime("%Y%m%dT%H%M%S%f")
+        body = await network_log.read_body(job_id, row.body_hash)
+        bundle.writestr(
+            f"playlists/{_slug(row.stream_layer)}/{_slug(row.variant)}/{row.seq:07d}_{stamp}.m3u8",
+            body,
+        )
+    return len(rows)
+
+
+async def build_evidence_bundle(handle: JobHandle) -> bytes:
+    """Segments and playlists recorded during the run, as ZIP bytes.
+
+    Built in memory from the database rows and the session's own evidence store, and streamed
+    to the caller, so an evidence download leaves nothing behind on the analyzer host. The
+    playlists are the polls the findings name and the polls pinned around incidents, read from
+    the poll log, plus the last twenty of each rendition while the session is still live.
+    """
+    drm = await drm_settings.load()
+    if handle.poll_log is not None:
+        await handle.poll_log.flush()
+    findings = (
+        handle.result.findings
+        if handle.result is not None
+        else (handle.session.collector.all() if handle.session is not None else [])
+    )
+    seqs = manifest_log.poll_seqs_of(findings)
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
@@ -359,23 +409,127 @@ async def build_evidence_bundle(handle: JobHandle) -> bytes:
                 json.dumps(handle.result.as_dict(), indent=2, default=str),
             )
         bundle.writestr("README.txt", _bundle_readme(handle, decrypt_evidence=drm.decrypt_evidence))
-        for snapshot in snapshots:
-            stamp = snapshot.ts.strftime("%Y%m%dT%H%M%S%f")
-            bundle.writestr(
-                f"playlists/{_slug(snapshot.variant)}/{stamp}.m3u8",
-                snapshot.raw,
-            )
+        await _write_polls(bundle, handle.id, seqs)
         if handle.session is not None:
+            # A poll a finding names is already in the bundle from the poll log; the recent
+            # history adds the polls around it, never the same file twice.
+            written = set(bundle.namelist())
             for context in handle.session.layers.values():
                 for variant, target in context.targets.items():
                     for snapshot_obj in target.history[-20:]:
                         if not snapshot_obj.raw:
                             continue
                         stamp = snapshot_obj.at.strftime("%Y%m%dT%H%M%S%f")
-                        bundle.writestr(
-                            f"playlists/{_slug(variant)}/{stamp}.m3u8", snapshot_obj.raw
+                        name = (
+                            f"playlists/{_slug(context.layer.value)}/{_slug(variant)}/"
+                            f"{snapshot_obj.seq:07d}_{stamp}.m3u8"
                         )
+                        if name in written:
+                            continue
+                        written.add(name)
+                        bundle.writestr(name, snapshot_obj.raw)
             _write_segments(bundle, handle, decrypt_evidence=drm.decrypt_evidence)
+    return buffer.getvalue()
+
+
+async def build_stored_evidence_bundle(job_id: str) -> bytes | None:
+    """The evidence of a run no longer in memory — after a restart, or long after it ended.
+
+    Everything durable is here: the findings and incidents from the database and the
+    playlists from the poll log. The sampled segment bytes are not: those were held in memory
+    for the life of the session, and the README says so and points at the recording, which is
+    on disk, and the network log.
+    """
+    async with db_session.session_scope() as session:
+        job = await session.get(JobRow, job_id)
+        if job is None:
+            return None
+        findings = (
+            (await session.execute(select(FindingRow).where(FindingRow.job_id == job_id)))
+            .scalars()
+            .all()
+        )
+        incidents = (
+            (await session.execute(select(IncidentRow).where(IncidentRow.job_id == job_id)))
+            .scalars()
+            .all()
+        )
+    finding_rows = [
+        {
+            "rule_id": f.rule_id,
+            "severity": f.severity,
+            "owner": f.owner,
+            "stream_layer": f.stream_layer,
+            "variant": f.variant,
+            "title": f.title,
+            "detail": f.detail,
+            "root_cause": f.root_cause,
+            "fix": f.fix,
+            "count": f.count,
+            "first_seen": f.first_seen.isoformat() if f.first_seen else None,
+            "last_seen": f.last_seen.isoformat() if f.last_seen else None,
+            "evidence": f.evidence or [],
+        }
+        for f in findings
+    ]
+    incident_rows = [
+        {
+            "kind": i.kind,
+            "variant": i.variant,
+            "started_at": i.started_at.isoformat() if i.started_at else None,
+            "ended_at": i.ended_at.isoformat() if i.ended_at else None,
+            "duration_s": i.duration_s,
+            "cause_rule_ids": i.cause_finding_ids,
+            "cause_chain": i.cause_chain,
+        }
+        for i in incidents
+    ]
+    seqs: set[int] = set()
+    for stored in findings:
+        for sample in stored.evidence or []:
+            poll = sample.get("poll") if isinstance(sample, dict) else None
+            if isinstance(poll, dict) and isinstance(poll.get("seq"), int):
+                seqs.add(poll["seq"])
+    recording = recording_state(get_settings().rba_recordings_dir, job_id)
+    params = job.params or {}
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
+        bundle.writestr("findings.json", json.dumps(finding_rows, indent=2, default=str))
+        bundle.writestr("incidents.json", json.dumps(incident_rows, indent=2, default=str))
+        polls = await _write_polls(bundle, job_id, seqs)
+        lines = [
+            f"{TOOL_NAME} evidence bundle",
+            "",
+            f"Job:       {job_id}",
+            f"Channel:   {job.channel_name}",
+            "",
+            "findings.json   every finding of the run, each occurrence naming its poll",
+            "incidents.json  every incident and its cause chain",
+            f"playlists/      {polls} playlist(s): the polls the findings name and the polls",
+            "                around each incident, exactly as served",
+            "",
+            "This run is no longer held in memory, so the sampled segment bytes it held for",
+            "this bundle are not included; they lived for the life of the session.",
+        ]
+        if recording.get("available"):
+            lines.append(
+                f"The run was recorded: {recording['segments']} segment(s) are on disk — "
+                "download the recording for the media."
+            )
+        else:
+            lines.append("The run was not recorded, so no media is kept for it.")
+        lines += [
+            "The network log download carries every playlist poll and segment fetch.",
+            "",
+            "Requests in this run were made with:",
+            f"  User-Agent profile  {params.get('ua_profile', 'unknown')}",
+            f"  User-Agent          {params.get('user_agent', 'unknown')}",
+            "",
+            "No content key, private key or CPIX credential is in this bundle.",
+            "",
+        ]
+        bundle.writestr("README.txt", "\n".join(lines))
     return buffer.getvalue()
 
 

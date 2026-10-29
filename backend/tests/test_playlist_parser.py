@@ -122,9 +122,11 @@ def test_cue_out_and_cue_in_pair_into_one_window() -> None:
     assert len(windows) == 1
     assert windows[0].closed is True
     assert windows[0].declared_duration_s == 24.0
-    assert windows[0].segment_count == 5
-    assert windows[0].delivered_duration_s == 30.0
-    assert windows[0].duration_delta_s == 6.0
+    # CUE-OUT precedes segment 2 and CUE-IN precedes segment 6, the first one after the
+    # break: segments 2..5 are the break, 24 s as declared.
+    assert windows[0].segment_count == 4
+    assert windows[0].delivered_duration_s == 24.0
+    assert windows[0].duration_delta_s == 0.0
 
 
 def test_an_unclosed_cue_out_is_reported_as_open() -> None:

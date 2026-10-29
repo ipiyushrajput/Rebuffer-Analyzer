@@ -346,3 +346,40 @@ async def test_skew_between_a_video_rung_and_its_audio_rendition_is_measured(
     evidence = skew[0].evidence[0]
     assert evidence["audio_variant"] != evidence["video_variant"]
     assert round(evidence["av_skew_ms"]) == 400
+
+
+async def test_a_demuxed_channel_in_step_raises_no_coverage_or_drift_finding(
+    origin: FixtureServer,
+) -> None:
+    """AUD-006 and AUD-007 judge the stream: the newest video segment waiting for its audio
+    when the run ends, and sampled totals that differ, are not a channel out of step."""
+    url = build_demuxed_channel(origin, variant_count=3, segment_count=6)
+
+    result = await _run(url)
+
+    assert not rule_ids(result) & {"AUD-006", "AUD-007"}
+
+
+async def test_a_demuxed_channel_whose_audio_drifts_still_trips_aud_007(
+    origin: FixtureServer,
+) -> None:
+    url = build_demuxed_channel(origin, variant_count=1, segment_count=6)
+    # Rewrite the audio segments so each starts 300 ms further from its video segment.
+    from tests.fixtures.synth import SegmentSpec, build_ts_segment
+
+    for index in range(6):
+        origin.add_bytes(
+            f"audio-seg{index}.ts",
+            build_ts_segment(
+                SegmentSpec(
+                    duration=6.0,
+                    pts_offset_s=index * 6.0,
+                    audio_pts_offset_ms=index * 300.0,
+                    with_video=False,
+                )
+            ),
+        )
+
+    result = await _run(url)
+
+    assert "AUD-007" in rule_ids(result)

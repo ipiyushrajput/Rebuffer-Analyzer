@@ -170,7 +170,7 @@ export function SegmentedControl<T extends string | number>({
   onChange,
   ariaLabel,
 }: {
-  options: { value: T; label: string }[]
+  options: { value: T; label: string; disabled?: boolean }[]
   value: T
   onChange: (value: T) => void
   ariaLabel?: string
@@ -184,9 +184,10 @@ export function SegmentedControl<T extends string | number>({
             key={String(option.value)}
             type="button"
             aria-pressed={active}
+            disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={cx(
-              'rounded-tile border px-3 py-1.5 text-small font-semibold transition-colors duration-150',
+              'rounded-tile border px-3 py-1.5 text-small font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50',
               active
                 ? 'border-brand-600 bg-brand-50 text-brand-600'
                 : 'border-surface-line bg-white text-ink-muted hover:border-surface-lineStrong hover:text-ink',

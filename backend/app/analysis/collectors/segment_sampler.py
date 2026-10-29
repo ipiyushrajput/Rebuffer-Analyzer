@@ -15,7 +15,7 @@ from typing import Any
 
 from app.drm.context import DrmContext
 from app.media.fmp4 import Fmp4Analysis, parse_init
-from app.media.segment import SegmentAnalysis, analyse
+from app.media.segment import SegmentAnalysis, analyse, is_webvtt
 from app.net.fetcher import Fetcher, FetchResult
 
 log = logging.getLogger(__name__)
@@ -225,7 +225,9 @@ class SegmentSampler:
         engine states as a finding rather than letting the rendition read as one that passed
         every bitstream check.
         """
-        if not self.encrypted:
+        if not self.encrypted or is_webvtt(body):
+            # WebVTT is text in the clear on a protected ladder too: nothing to decrypt, and
+            # nothing to count against the key server.
             return DecryptedBody(body=body, encrypted=False)
         if self.drm is None or not body:
             return DecryptedBody(body=body, encrypted=True)

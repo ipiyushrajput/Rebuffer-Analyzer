@@ -30,6 +30,10 @@ class RungHistory:
     last_discontinuity_msn: int | None = None
     skews: list[tuple[int, float]] = field(default_factory=list)
     keyframe_msns: set[int] = field(default_factory=set)
+    # Every sampled MSN whose video was read, keyframe or not. Alignment is judged only on
+    # numbers every rung sampled: one rung sampled every third segment knows nothing about
+    # the other two.
+    video_msns: set[int] = field(default_factory=set)
     sps_by_msn: dict[int, dict[str, Any]] = field(default_factory=dict)
     # Boundaries where the two segments sampled either side were not consecutive, so the
     # timestamp continuity checks had nothing contiguous to measure.
@@ -94,7 +98,13 @@ def check_segment(
         )
         return findings
 
-    if analysis.byte_size <= thresholds.tiny_segment_bytes:
+    # The threshold is for a video segment. A subtitle cue file or six seconds of 64 kbit/s
+    # audio is a few kilobytes by nature, and reported every one of them as truncated.
+    if (
+        analysis.byte_size <= thresholds.tiny_segment_bytes
+        and analysis.container != "webvtt"
+        and not is_audio_only
+    ):
         raise_for(
             R.SEG_TINY,
             f"Segment {analysis.msn} on {variant} is {analysis.byte_size} bytes against a "
@@ -555,6 +565,8 @@ def check_segment_pair(
     history.last = current
     if current.sps:
         history.sps_by_msn[current.msn] = current.sps
+    if current.starts_with_keyframe is not None and current.has_video:
+        history.video_msns.add(current.msn)
     if current.starts_with_keyframe:
         history.keyframe_msns.add(current.msn)
     return findings
@@ -708,10 +720,42 @@ def _check_skew_drift(
 def check_keyframe_alignment(
     histories: dict[str, RungHistory], *, layer: StreamLayer
 ) -> list[Finding]:
-    """Every rung must place a random access point at the same media sequence numbers."""
+    """Every rung must place a random access point at the same media sequence numbers.
+
+    Judged only at numbers every video rung sampled and read: a rung sampled every Nth
+    segment, or one whose payload was not decrypted, says nothing about the numbers it did
+    not read, and counting those as "no keyframe there" reported every ladder with more
+    than three rungs.
+    """
     findings: list[Finding] = []
-    if len(histories) < 2:
+    rungs = {name: history for name, history in histories.items() if history.video_msns}
+    if len(rungs) < 2:
         return findings
+    common = set.intersection(*(history.video_msns for history in rungs.values()))
+    if not common:
+        return findings
+    detail: dict[str, list[int]] = {}
+    for msn in sorted(common):
+        starts = {name: msn in history.keyframe_msns for name, history in rungs.items()}
+        if len(set(starts.values())) > 1:
+            for name, has_keyframe in starts.items():
+                if not has_keyframe:
+                    detail.setdefault(name, []).append(msn)
+    if detail:
+        count = len({msn for msns in detail.values() for msn in msns})
+        findings.append(
+            R.VID_KEYFRAME_MISALIGNED.raise_finding(
+                f"{count} media sequence number(s) sampled on every rung start on a random "
+                f"access point on some rungs and not on others; the rungs without one: "
+                f"{ {name: msns[:5] for name, msns in detail.items()} }.",
+                evidence={
+                    "missing_by_variant": {name: msns[:5] for name, msns in detail.items()},
+                    "compared_msns": len(common),
+                },
+                stream_layer=layer,
+            )
+        )
+    return findings
     sets = {
         name: history.keyframe_msns for name, history in histories.items() if history.keyframe_msns
     }
@@ -764,17 +808,35 @@ def check_demuxed_audio_coverage(
     audio_ranges: list[tuple[int, float, float]],
     variant: str,
     layer: StreamLayer,
+    pending: set[int] | frozenset[int] = frozenset(),
+    unread_audio: set[int] | frozenset[int] = frozenset(),
 ) -> list[Finding]:
     """Every video segment's time range must be covered by an audio segment (DemuxAnalyzer).
 
     Ranges are ``(msn, start_s, end_s)`` on a shared timeline. Pairing is by overlap, which
     survives audio and video being segmented on different boundaries.
+
+    Only video segments the audio sampling could have covered are judged. Excluded, because
+    nothing about the stream is known from them:
+
+    * a video segment still waiting for its audio when the run ended (`pending`) — the audio
+      segment for the newest moment is routinely published a poll later;
+    * a video segment that ends before the first audio segment sampled starts — audio
+      sampling began later, or the oldest audio entries were trimmed from the index;
+    * a video segment whose audio segment was fetched and not read (`unread_audio`) — on a
+      protected rendition a decrypt that failed is not audio that is missing.
     """
     findings: list[Finding] = []
     if not video_ranges or not audio_ranges:
         return findings
 
-    for msn, start, end in video_ranges:
+    audio_from = min(a_start for _, a_start, _ in audio_ranges)
+    judged = [
+        (msn, start, end)
+        for msn, start, end in video_ranges
+        if msn not in pending and msn not in unread_audio and end > audio_from
+    ]
+    for msn, start, end in judged:
         covered = any(a_start < end and a_end > start for _, a_start, a_end in audio_ranges)
         if not covered:
             findings.append(
@@ -793,23 +855,82 @@ def check_demuxed_audio_coverage(
                 )
             )
             break
+    return findings
 
-    video_total = sum(end - start for _, start, end in video_ranges)
-    audio_total = sum(end - start for _, start, end in audio_ranges)
-    drift = abs(video_total - audio_total)
-    if video_total > 0 and drift > max(0.5, video_total * 0.02):
-        findings.append(
-            R.AUD_DURATION_DRIFT.raise_finding(
-                f"{variant} carries {video_total:.2f} s of video and {audio_total:.2f} s of "
-                f"audio across the same window, a drift of {drift:.2f} s.",
-                evidence={
-                    "variant": variant,
-                    "video_total_s": video_total,
-                    "audio_total_s": audio_total,
-                    "drift_s": drift,
-                },
-                stream_layer=layer,
-                variant=variant,
+
+def check_demuxed_drift(
+    pairs: list[Any],
+    *,
+    variant: str,
+    layer: StreamLayer,
+    thresholds: Thresholds,
+) -> list[Finding]:
+    """AUD-007: audio and video timestamps moving apart across the run, on matched pairs.
+
+    Each pair is a video segment and the audio segment covering the same moment, and its skew
+    is where the audio starts against where the video starts. A constant skew is AV-001's to
+    judge; drift is that skew *changing*. It is measured from the first pair to the last of
+    each run of pairs whose timestamps only move forward — a discontinuity or a timestamp
+    reset starts a new run, because across it the two tracks restart on new values.
+
+    Summing every sampled video duration against every sampled audio duration measured the
+    sampling, not the stream: a rung sampled every third segment, an index trimmed to its
+    latest entries or an audio segment whose decrypt failed changed one total and not the
+    other, and a ladder in step read as seconds of drift.
+    """
+    findings: list[Finding] = []
+    ordered = sorted(pairs, key=lambda pair: pair.video.msn)
+    runs: list[list[Any]] = []
+    for pair in ordered:
+        if runs:
+            last = runs[-1][-1]
+            forward = (
+                pair.video.first_pts is not None
+                and last.video.first_pts is not None
+                and pair.audio.first_pts is not None
+                and last.audio.first_pts is not None
+                and pair.video.first_pts > last.video.first_pts
+                and pair.audio.first_pts > last.audio.first_pts
             )
+            if forward:
+                runs[-1].append(pair)
+                continue
+        runs.append([pair])
+
+    worst: tuple[float, list[Any]] | None = None
+    for run in runs:
+        if len(run) < 2:
+            continue
+        drift_ms = run[-1].skew_ms - run[0].skew_ms
+        if worst is None or abs(drift_ms) > abs(worst[0]):
+            worst = (drift_ms, run)
+    if worst is None:
+        return findings
+
+    drift_ms, run = worst
+    span_s = (run[-1].video.start_s or 0.0) - (run[0].video.start_s or 0.0)
+    allowed_s = max(thresholds.av_drift_min_s, span_s * thresholds.av_drift_fraction)
+    if abs(drift_ms) / 1000.0 <= allowed_s:
+        return findings
+    findings.append(
+        R.AUD_DURATION_DRIFT.raise_finding(
+            f"Across {len(run)} matched pairs on {variant} spanning {span_s:.1f} s, the audio "
+            f"moved {drift_ms:+.0f} ms against the video: it starts {run[0].skew_ms:+.0f} ms "
+            f"from video segment {run[0].video.msn} and {run[-1].skew_ms:+.0f} ms from video "
+            f"segment {run[-1].video.msn}, against an allowance of {allowed_s * 1000:.0f} ms.",
+            evidence={
+                "variant": variant,
+                "pairs": len(run),
+                "span_s": span_s,
+                "drift_ms": drift_ms,
+                "allowed_ms": allowed_s * 1000,
+                "first_pair": run[0].evidence(),
+                "last_pair": run[-1].evidence(),
+                "first_skew_ms": run[0].skew_ms,
+                "last_skew_ms": run[-1].skew_ms,
+            },
+            stream_layer=layer,
+            variant=variant,
         )
+    )
     return findings

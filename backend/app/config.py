@@ -116,15 +116,33 @@ class VpbMode(str, Enum):
     OUTAGE_ONLY = "OUTAGE_ONLY"
 
 
+# The product's name, as a page, a report and an alert print it. Package, service and database
+# names keep `rba`: renaming those would move a deployment's files, units and schema.
+PRODUCT_NAME = "StreamLens"
+
+
 class Thresholds(BaseModel):
     """Analysis thresholds (§6.1). Persisted in the DB, editable in the Settings tab."""
 
     rebuffer_ratio_threshold: float = 0.25
     cross_variant_msn_error_spread: int = 5
-    # Renditions are polled independently, so one can carry a discontinuity the next has not
-    # published yet and the counters differ for a poll or two. Past this spread the ladder
-    # disagrees by more than poll skew can account for.
+    # A packager publishes each rendition a moment apart, so even in one poll round one rung
+    # can carry a discontinuity the next has not published yet. Past this spread the ladder
+    # disagrees by more than publication order can account for.
     cross_variant_dsn_tolerance: int = 2
+    # Renditions are polled together in rounds; a cross-variant rule (SEQ-008 to SEQ-012,
+    # AV-003) is recorded only once it has fired in this many consecutive rounds, so a rung
+    # caught mid-publication in one round is not reported as a ladder that disagrees.
+    cross_variant_confirm_rounds: int = 2
+    # Two rungs' EXTINF for the same media sequence number may differ by this much (encoder
+    # rounding, frame or audio-frame alignment) before SEQ-010 reads them as different.
+    cross_variant_duration_tolerance_s: float = 0.1
+    # SEQ-012: the most two rungs' program date time may differ at the same media sequence.
+    cross_variant_pdt_tolerance_s: float = 1.0
+    # AUD-007: how far audio may move against video across a run of matched pairs on a demuxed
+    # rung — the larger of the floor and the fraction of the span measured.
+    av_drift_min_s: float = 0.5
+    av_drift_fraction: float = 0.02
     stale_playlist_factor: float = 1.5
     download_ratio_warn: float = 0.5
     download_ratio_error: float = 1.0
@@ -239,6 +257,16 @@ class Thresholds(BaseModel):
     # long enough to carry an incident and its approach.
     evidence_segments_per_rendition: int = 12
 
+    # Stream recording. Aging records incident clips only: segments older than the pre-roll
+    # are deleted unless an incident spans them, and an incident keeps the pre-roll before it
+    # and the post-roll after it.
+    recording_preroll_s: float = 120.0
+    recording_postroll_s: float = 60.0
+
+    # The analyzer's own timing (INFO-007). A supervisor wake this much later than its one
+    # second means the event loop was held and every poll and fetch behind it was late.
+    selfcheck_loop_lag_ms: float = 1000.0
+
     # Tizen segment retry policy modelled by the Virtual Player Buffer.
     segment_retry_attempts: int = 2
     segment_retry_backoff_s: float = 0.5
@@ -280,6 +308,18 @@ class Settings(BaseSettings):
     rba_bulk_default_concurrency: int = 5
     rba_per_host_connections: int = 8
     rba_sample_retention_days: int = 30
+    # The poll log: every playlist fetch of every run, bodies compressed and stored once per
+    # distinct content. Ordinary polls follow the sample retention; a poll a finding fired on
+    # or an incident spanned is pinned and kept this long.
+    rba_manifest_log: bool = True
+    rba_pinned_retention_days: int = 180
+
+    # Stream recordings: segment files written to disk, the one thing the analyzer host
+    # keeps, because video does not belong in a database row. Bounded by a quota and purged
+    # with the samples; a recording that was pinned (an aging incident clip) follows the
+    # pinned retention.
+    rba_recordings_dir: Path = BACKEND_ROOT / "var" / "recordings"
+    rba_recordings_quota_gb: float = 200.0
 
     rba_log_level: str = "INFO"
 

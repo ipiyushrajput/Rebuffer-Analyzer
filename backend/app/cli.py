@@ -401,7 +401,7 @@ def _cmd_probe(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rba",
-        description="TV Plus Rebuffer Analyzer — headless analysis and rule catalogue.",
+        description="StreamLens for Samsung TV Plus — headless analysis and rule catalogue.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

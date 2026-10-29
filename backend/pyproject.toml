@@ -1,7 +1,7 @@
 [project]
 name = "rba"
 version = "1.0.0"
-description = "TV Plus Rebuffer Analyzer — HLS stream defect analysis and root-cause attribution"
+description = "StreamLens for Samsung TV Plus — HLS stream defect analysis and root-cause attribution"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

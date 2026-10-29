@@ -11,10 +11,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api, endpoints, type AnalysedChannel, type ChannelReport } from '../api/client'
+import { CompareRuns } from '../components/CompareRuns'
 import { FindingsList } from '../components/FindingCard'
+import { FindingSearch } from '../components/FindingSearch'
+import { groupFindings } from '../lib/findingGroups'
+import { usePaged } from '../lib/paging'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import { SessionVerdict } from '../components/SessionVerdict'
+import { Timeline } from '../components/Timeline'
 import {
   Card,
   CardHeader,
@@ -22,6 +27,7 @@ import {
   InlineAlert,
   MetricRow,
   MetricTile,
+  Pagination,
   SeverityChip,
   cx,
 } from '../components/ui'
@@ -84,6 +90,9 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null)
   const [openFinding, setOpenFinding] = useState<FindingData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Two runs picked for a side-by-side comparison, in the order they were picked.
+  const [selected, setSelected] = useState<string[]>([])
+  const [comparing, setComparing] = useState(false)
   const queryClient = useQueryClient()
 
   /*
@@ -117,11 +126,23 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
           .includes(filter.toLowerCase())
       : true,
   )
+  const paged = usePaged(visible, filter)
 
   // Opening a different channel starts from its summary, not from a stale finding.
   useEffect(() => {
     setOpenFinding(null)
   }, [openId])
+
+  const toggleSelected = (id: string) =>
+    setSelected((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id].slice(-2),
+    )
+
+  if (comparing && selected.length === 2) {
+    return <CompareRuns a={selected[0]} b={selected[1]} onBack={() => setComparing(false)} />
+  }
 
   if (openId) {
     return (
@@ -190,6 +211,16 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
           <CardHeader
             title="Channels"
             actions={
+              <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={selected.length !== 2}
+                title="Tick two runs to compare them"
+                onClick={() => setComparing(true)}
+              >
+                Compare {selected.length}/2
+              </button>
               <label className="relative">
                 <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint">
                   <IconSearch size={14} />
@@ -201,6 +232,7 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
                   onChange={(event) => setFilter(event.target.value)}
                 />
               </label>
+              </div>
             }
           />
 
@@ -211,38 +243,65 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
               }
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="table table-hover">
-                <thead>
-                  <tr>
-                    <th>Channel</th>
-                    <th>Verdict</th>
-                    <th>Responsible party</th>
-                    <th>Risk</th>
-                    <th>Findings</th>
-                    <th>Analysed</th>
-                    <th>Reports</th>
-                    <th className="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((channel) => (
-                    <ChannelRow
-                      key={channel.id}
-                      channel={channel}
-                      confirming={confirming === channel.id}
-                      onOpen={() => onOpenChange(channel.id)}
-                      onAskDelete={() => setConfirming(channel.id)}
-                      onCancelDelete={() => setConfirming(null)}
-                      onConfirmDelete={() => remove.mutate(channel.id)}
-                      deleting={remove.isPending}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <Pagination
+                className="border-b border-surface-line px-5 py-2.5"
+                label={paged.label}
+                hasPrevious={paged.hasPrevious}
+                hasNext={paged.hasNext}
+                onPrevious={paged.previous}
+                onNext={paged.next}
+              />
+              <div className="overflow-x-auto">
+                <table className="table table-hover">
+                  <thead>
+                    <tr>
+                      <th className="w-8">
+                        <span className="sr-only">Compare</span>
+                      </th>
+                      <th>Channel</th>
+                      <th>Verdict</th>
+                      <th>Responsible party</th>
+                      <th>Risk</th>
+                      <th>Findings</th>
+                      <th>Analysed</th>
+                      <th>Reports</th>
+                      <th className="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paged.rows.map((channel) => (
+                      <ChannelRow
+                        key={channel.id}
+                        channel={channel}
+                        confirming={confirming === channel.id}
+                        selected={selected.includes(channel.id)}
+                        onToggleSelected={() => toggleSelected(channel.id)}
+                        onOpen={() => onOpenChange(channel.id)}
+                        onAskDelete={() => setConfirming(channel.id)}
+                        onCancelDelete={() => setConfirming(null)}
+                        onConfirmDelete={() => remove.mutate(channel.id)}
+                        deleting={remove.isPending}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {paged.pages > 1 && (
+                <Pagination
+                  className="border-t border-surface-line px-5 py-2.5"
+                  label={paged.label}
+                  hasPrevious={paged.hasPrevious}
+                  hasNext={paged.hasNext}
+                  onPrevious={paged.previous}
+                  onNext={paged.next}
+                />
+              )}
+            </>
           )}
         </Card>
+
+        <FindingSearch onOpen={(id) => onOpenChange(id)} />
       </PageBody>
     </>
   )
@@ -251,6 +310,8 @@ export function ChannelsTab({ thresholds, openId, onOpenChange }: Props) {
 function ChannelRow({
   channel,
   confirming,
+  selected,
+  onToggleSelected,
   deleting,
   onOpen,
   onAskDelete,
@@ -259,6 +320,8 @@ function ChannelRow({
 }: {
   channel: AnalysedChannel
   confirming: boolean
+  selected: boolean
+  onToggleSelected: () => void
   deleting: boolean
   onOpen: () => void
   onAskDelete: () => void
@@ -273,6 +336,15 @@ function ChannelRow({
 
   return (
     <tr>
+      <td>
+        <input
+          type="checkbox"
+          className="h-4 w-4 accent-brand-600"
+          checked={selected}
+          onChange={onToggleSelected}
+          aria-label={`Compare ${channel.channel_name}`}
+        />
+      </td>
       <td>
         <button
           type="button"
@@ -358,9 +430,17 @@ function ChannelDetail({
   onDelete: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
+  const [openIncident, setOpenIncident] = useState<number | null>(null)
   const { data, isLoading, error } = useQuery({
     queryKey: ['channel', channelId],
     queryFn: () => endpoints.readChannel(channelId),
+  })
+  // Re-analyse from the poll log and recording with the thresholds and rules in force now.
+  const replay = useMutation({
+    mutationFn: () =>
+      api.post<{ job_id: string; duration_s: number; recorded: boolean; playlists: number }>(
+        `/jobs/${channelId}/replay`,
+      ),
   })
 
   if (isLoading) {
@@ -410,7 +490,7 @@ function ChannelDetail({
           status={<SeverityChip severity={openFinding.severity as Severity} />}
         />
         <PageBody>
-          <FindingInvestigation finding={openFinding} />
+          <FindingInvestigation finding={openFinding} findings={findings} jobId={channelId} />
         </PageBody>
       </>
     )
@@ -446,6 +526,29 @@ function ChannelDetail({
           ) : (
             <>
               <ReportLinks reports={reports} />
+              <a className="btn-ghost btn-sm" href={endpoints.networkLogUrl(channelId)}>
+                <IconDownload size={13} />
+                Network log
+              </a>
+              {data.recording?.available && (
+                <a
+                  className="btn-ghost btn-sm"
+                  href={endpoints.recordingUrl(channelId)}
+                  title={`${data.recording.segments} segment(s), ${bytes(data.recording.bytes ?? 0)}`}
+                >
+                  <IconDownload size={13} />
+                  {data.recording.mode === 'incidents' ? 'Clips' : 'Recording'}
+                </a>
+              )}
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={replay.isPending || data.status === 'RUNNING' || data.status === 'PENDING'}
+                title="Run the analysis again on what this run stored, with the current settings"
+                onClick={() => replay.mutate()}
+              >
+                Re-analyse
+              </button>
               <button
                 type="button"
                 className="btn-ghost btn-sm text-pink-600"
@@ -460,6 +563,15 @@ function ChannelDetail({
       />
 
       <PageBody>
+        {replay.error && <InlineAlert tone="error">{String(replay.error)}</InlineAlert>}
+        {replay.data && (
+          <InlineAlert tone="info">
+            Replaying {replay.data.playlists} stored playlist response(s)
+            {replay.data.recorded ? ' and the recording' : ' (no recording, so playlist checks only)'}{' '}
+            at 1× with the current settings — {duration(replay.data.duration_s)}. It is filed under
+            Analysed channels as “{data.channel_name.replace(/ — replay$/, '')} — replay” when it ends.
+          </InlineAlert>
+        )}
         <SessionVerdict
           verdict={verdict}
           threshold={thresholds.rebuffer_ratio_threshold ?? REBUFFER_RATIO_THRESHOLD_DEFAULT}
@@ -496,10 +608,11 @@ function ChannelDetail({
         <Card>
           <CardHeader
             title="Findings"
-            actions={<span className="chip-neutral">{findings.length}</span>}
+            actions={<span className="chip-neutral">{groupFindings(findings).length}</span>}
           />
           <div className="px-4 pb-4">
             <FindingsList
+              jobId={channelId}
               findings={findings}
               onOpen={onOpenFinding}
               emptyTitle="No findings"
@@ -521,6 +634,7 @@ function ChannelDetail({
                     <th>Started</th>
                     <th>Duration</th>
                     <th>Cause</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -539,8 +653,20 @@ function ChannelDetail({
                       <td className="font-mono text-micro tabular-nums text-ink-soft">
                         {duration(Number(incident.duration_s))}
                       </td>
-                      <td className="max-w-[420px] text-micro text-ink-muted">
-                        {String(incident.detail ?? '—')}
+                      <td className="max-w-[420px] break-words text-micro text-ink-muted">
+                        {typeof incident.detail === 'object'
+                          ? JSON.stringify(incident.detail)
+                          : String(incident.detail ?? '—')}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-ghost btn-sm"
+                          aria-pressed={openIncident === index}
+                          onClick={() => setOpenIncident(openIncident === index ? null : index)}
+                        >
+                          Timeline
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -548,6 +674,15 @@ function ChannelDetail({
               </table>
             </div>
           </Card>
+        )}
+
+        {openIncident !== null && incidents[openIncident] && (
+          <Timeline
+            jobId={channelId}
+            {...incidentWindow(incidents[openIncident])}
+            variant={(incidents[openIncident].variant as string | null) ?? null}
+            title={`Timeline of the ${String(incidents[openIncident].kind)} incident`}
+          />
         )}
 
         {Object.keys(vpb).length > 0 && (
@@ -587,4 +722,14 @@ function ChannelDetail({
       </PageBody>
     </>
   )
+}
+
+/** An incident and the two minutes that led into it, and the minute after it closed. */
+function incidentWindow(incident: Record<string, unknown>): { start: string; end: string } {
+  const started = new Date(String(incident.started_at)).valueOf()
+  const ended = incident.ended_at ? new Date(String(incident.ended_at)).valueOf() : started
+  return {
+    start: new Date(started - 120_000).toISOString(),
+    end: new Date(Math.max(ended, started) + 60_000).toISOString(),
+  }
 }

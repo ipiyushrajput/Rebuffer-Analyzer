@@ -22,6 +22,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -290,6 +291,78 @@ class PlaylistSnapshot(Base):
     )
 
 
+class ManifestPoll(Base):
+    """One fetch of one playlist — every poll of every rendition, the master included.
+
+    The poll log is the network record of a run: what was asked for, what came back, how long
+    it took and which body it carried. The body itself lives in `ManifestBody`, once per
+    distinct content, because a live playlist polled at half its target duration repeats
+    itself on roughly every other poll. `seq` numbers the polls of a job in the order they
+    completed, across every rendition, and is how a finding names the poll it fired on.
+    """
+
+    __tablename__ = _t("manifest_polls")
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+    ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    stream_layer: Mapped[str] = mapped_column(String(16), default="PLAYBACK")
+    variant: Mapped[str] = mapped_column(String(64))
+    # master | video | audio | subtitles
+    kind: Mapped[str] = mapped_column(String(16), default="video")
+    url: Mapped[str] = mapped_column(Text)
+    final_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ttfb_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    bytes: Mapped[int] = mapped_column(Integer, default=0)
+    msn: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), nullable=True
+    )
+    last_msn: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), nullable=True
+    )
+    # Response headers in full, the redirect chain hop by hop, and the timing split: what a
+    # HAR file and a "copy as cURL" are built from.
+    headers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    hops: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    timings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # sha256 of the body as served; empty for a poll that carried none.
+    body_hash: Mapped[str] = mapped_column(String(64), default="")
+    # Kept past the sample retention: a poll a finding fired on or an incident spanned.
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        Index(f"ix_{_t('manifest_polls')}_job_seq", "job_id", "seq"),
+        Index(f"ix_{_t('manifest_polls')}_job_variant_ts", "job_id", "variant", "ts"),
+        # A body is looked up by the polls that carried it, and the purge asks whether any
+        # poll still does.
+        Index(f"ix_{_t('manifest_polls')}_job_hash", "job_id", "body_hash"),
+    )
+
+
+class ManifestBody(Base):
+    """A distinct playlist body of a job, zlib-compressed, stored once."""
+
+    __tablename__ = _t("manifest_bodies")
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    body_hash: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    body: Mapped[bytes] = mapped_column(ReportBlob)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "body_hash", name=f"uq_{_t('manifest_bodies')}_job_hash"),
+    )
+
+
 class Report(Base):
     __tablename__ = _t("reports")
 
@@ -534,6 +607,48 @@ class CascadaErrorSample(Base):
     __table_args__ = (
         Index("ix_cascada_error_window", "service_id", "window_from", "window_to", unique=True),
     )
+
+
+class FindingFeedback(Base):
+    """An engineer's verdict on a finding: confirmed, or a false positive.
+
+    Kept per rule, layer and rendition of one run, and summed per rule into its precision —
+    the share of reviewed findings that were real — so the rules that raise noise are named
+    by the people who read them rather than guessed at.
+    """
+
+    __tablename__ = _t("finding_feedback")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    rule_id: Mapped[str] = mapped_column(String(16), index=True)
+    stream_layer: Mapped[str] = mapped_column(String(16), default="PLAYBACK")
+    variant: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # confirmed | false_positive
+    verdict: Mapped[str] = mapped_column(String(16))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Acknowledgement(Base):
+    """A known, accepted behaviour of one channel: the rule still fires, it no longer alarms.
+
+    Keyed by the channel's playback URL without its query, so a new token is the same
+    channel. An acknowledged finding is still measured, stored and shown — marked — and is
+    left out of alerts and escalations; the verdict is computed from every finding as before.
+    """
+
+    __tablename__ = _t("acknowledgements")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    channel_key: Mapped[str] = mapped_column(String(255), index=True)
+    channel_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rule_id: Mapped[str] = mapped_column(String(16))
+    # None acknowledges the rule on every rendition of the channel.
+    variant: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SettingRow(Base):

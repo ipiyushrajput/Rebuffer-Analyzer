@@ -10,7 +10,9 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Any
 
+from app.analysis.grouping import group_findings
 from app.analysis.rules.base import Finding, Owner, Severity
+from app.net.curl import curl_command
 
 MAX_FINDINGS_PER_BLOCK = 8
 MAX_EVIDENCE_LINES = 3
@@ -54,6 +56,15 @@ def _evidence_lines(finding: Finding) -> list[str]:
     return lines
 
 
+def _reproduce(finding: Finding, user_agent: str) -> str:
+    """A cURL of the latest request the finding measured, for the owner to run themselves."""
+    for sample in reversed(finding.evidence):
+        url = sample.get("url") or sample.get("uri") if isinstance(sample, dict) else None
+        if isinstance(url, str) and url.startswith(("http://", "https://")):
+            return curl_command(url, user_agent)
+    return ""
+
+
 def build_blocks(
     findings: list[Finding],
     *,
@@ -63,6 +74,7 @@ def build_blocks(
     playback_url: str,
     rebuffer_ratio: float | None,
     threshold: float,
+    user_agent: str = "",
 ) -> list[EscalationBlock]:
     """One block per owner that holds at least one actionable finding."""
     by_owner: dict[Owner, list[Finding]] = {}
@@ -73,12 +85,13 @@ def build_blocks(
 
     blocks: list[EscalationBlock] = []
     for owner, owned in by_owner.items():
-        owned.sort(key=lambda f: (-f.severity.rank, -f.count, f.rule.id))
-        worst = owned[0].severity
+        # One entry per issue: the same rule on four renditions is one defect to fix.
+        groups = group_findings(owned)
+        worst = groups[0].severity
 
         subject = (
-            f"[TV Plus] {worst.value} — {channel_name} — {owned[0].rule.title} "
-            f"({len(owned)} finding(s))"
+            f"[TV Plus] {worst.value} — {channel_name} — {groups[0].lead.rule.title} "
+            f"({len(groups)} finding(s))"
         )
 
         body_lines = [
@@ -87,6 +100,8 @@ def build_blocks(
             f"Analysis window: {window_start.isoformat()} to {window_end.isoformat()} "
             f"({(window_end - window_start).total_seconds():.0f} s)",
         ]
+        if user_agent:
+            body_lines.append(f"Requested as User-Agent: {user_agent}")
         if rebuffer_ratio is not None:
             body_lines.append(
                 f"Measured rebuffering ratio: {rebuffer_ratio:.3f} against a threshold of "
@@ -94,30 +109,37 @@ def build_blocks(
             )
         body_lines += [
             "",
-            f"The following {len(owned)} defect(s) are owned by {owner.label}.",
+            f"The following {len(groups)} defect(s) are owned by {owner.label}.",
             "",
         ]
 
-        for index, finding in enumerate(owned[:MAX_FINDINGS_PER_BLOCK], start=1):
+        for index, group in enumerate(groups[:MAX_FINDINGS_PER_BLOCK], start=1):
+            lead = group.lead
+            label = "Renditions" if len(group.members) > 1 else "Rendition"
             body_lines += [
-                f"{index}. [{finding.severity.value}] {finding.rule.id} — {finding.rule.title}",
-                f"   Rendition: {finding.variant or 'the whole ladder'}",
-                f"   Occurrences: {finding.count}, first {finding.first_seen.isoformat()}, "
-                f"last {finding.last_seen.isoformat()}",
-                f"   Measured: {finding.detail}",
-                f"   Root cause: {finding.rule.root_cause}",
-                f"   Required fix: {finding.rule.fix}",
+                f"{index}. [{group.severity.value}] {lead.rule.id} — {lead.rule.title}",
+                f"   {label}: {group.rendition_label()}",
+                f"   Occurrences: {group.count}, first {group.first_seen.isoformat()}, "
+                f"last {group.last_seen.isoformat()}",
+                f"   Measured: {lead.detail}",
+                f"   Root cause: {lead.rule.root_cause}",
+                f"   Required fix: {lead.rule.fix}",
             ]
-            evidence = _evidence_lines(finding)
+            evidence: list[str] = []
+            for member in group.members:
+                evidence += _evidence_lines(member)
             if evidence:
                 body_lines.append("   Evidence:")
-                body_lines += evidence
+                body_lines += evidence[: MAX_EVIDENCE_LINES * 2]
+            reproduce = _reproduce(lead, user_agent)
+            if reproduce:
+                body_lines.append(f"   Reproduce: {reproduce}")
             body_lines.append("")
 
-        if len(owned) > MAX_FINDINGS_PER_BLOCK:
+        if len(groups) > MAX_FINDINGS_PER_BLOCK:
             body_lines.append(
-                f"A further {len(owned) - MAX_FINDINGS_PER_BLOCK} finding(s) for this owner are "
-                "listed in the attached report."
+                f"A further {len(groups) - MAX_FINDINGS_PER_BLOCK} finding(s) for this owner "
+                "are listed in the attached report."
             )
             body_lines.append("")
 
@@ -132,7 +154,7 @@ def build_blocks(
                 owner_label=owner.label,
                 subject=subject,
                 body="\n".join(body_lines),
-                finding_count=len(owned),
+                finding_count=len(groups),
                 worst_severity=worst.value,
             )
         )

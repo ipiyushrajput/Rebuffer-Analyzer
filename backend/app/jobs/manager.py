@@ -18,6 +18,10 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app import alerts as alerts_module
+from app.analysis import recorder as recorder_module
+from app.analysis import replay as replay_module
+from app.analysis import review
 from app.analysis.engine import AnalysisResult, AnalysisSession, SessionOptions
 from app.config import default_ua_profile, get_settings, get_thresholds
 from app.db import session as db_session
@@ -26,6 +30,9 @@ from app.db.models import Incident as IncidentRow
 from app.db.models import Job as JobRow
 from app.db.models import PlaylistSample, PlaylistSnapshot, SegmentSample, VirtualBufferSample
 from app.drm import settings as drm_settings
+from app.jobs import manifest_log
+from app.jobs.manifest_log import ManifestLog
+from app.jobs.manifest_log import last_seq as manifest_last_seq
 from app.jobs.samples import SampleRecorder
 
 logger = logging.getLogger(__name__)
@@ -53,6 +60,8 @@ class JobHandle:
     task: asyncio.Task[AnalysisResult] | None = None
     # Set for a run that records its samples; None for one that draws them live instead.
     recorder: SampleRecorder | None = None
+    poll_log: ManifestLog | None = None
+    alerts: Any = None
     status: str = "PENDING"
     created_at: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
     started_at: dt.datetime | None = None
@@ -226,13 +235,43 @@ class JobManager:
             handle.started_at = dt.datetime.now(dt.UTC)
             handle.ends_at = handle.started_at + dt.timedelta(seconds=handle.options.duration_s)
 
-            # A run nobody is watching has to write its polls and fetches down, or it leaves
-            # behind findings and nothing to look at. `record_evidence` is already true for
-            # aging and false for realtime, which draws its charts from the socket instead.
-            recorder = SampleRecorder(handle.id) if handle.options.record_evidence else None
+            # Every run writes its polls and fetches down. An aging run nobody is watching
+            # would otherwise leave findings and nothing to look at, and a realtime run that
+            # is stopped is filed under Analysed channels and downloaded as a network log —
+            # both read these rows, not the socket the realtime charts were drawn from.
+            recorder: SampleRecorder | None = SampleRecorder(handle.id)
             handle.recorder = recorder
+            poll_log = ManifestLog(job_id=handle.id, enabled=get_settings().rba_manifest_log)
+            # A run resumed after a restart carries its numbering on, so the polls of the run
+            # before the restart and after it never share a number.
+            poll_log.resume_from(await manifest_last_seq(handle.id))
+            handle.poll_log = poll_log
+
+            # Alerts for this run: the first occurrence of each issue at or above the
+            # configured severity is posted while the run is still going, unless the channel
+            # acknowledges it.
+            # A replay re-reads a run that already alerted; it never pages anyone again.
+            replay_of = handle.options.replay_of
+            job_alerts = alerts_module.JobAlerts(
+                job_id=handle.id,
+                job_type=handle.type,
+                channel=handle.channel_name,
+                settings=alerts_module.AlertSettings() if replay_of else await alerts_module.load(),
+                acknowledged=await review.matches_for(handle.urls.get("playback_url")),
+            )
+            handle.alerts = job_alerts
+            pending_alerts: set[asyncio.Task[bool]] = set()
 
             async def on_event(kind: str, payload: dict[str, Any]) -> None:
+                if (
+                    kind == "finding"
+                    and job_alerts.active
+                    and isinstance(payload.get("data"), dict)
+                ):
+                    # Never awaited here: a slow webhook must not hold up the poll handler.
+                    task = asyncio.create_task(job_alerts.observe(payload["data"]))
+                    pending_alerts.add(task)
+                    task.add_done_callback(pending_alerts.discard)
                 if recorder is not None:
                     await recorder.observe(kind, payload)
                 if self._event_sink is not None:
@@ -253,6 +292,12 @@ class JobManager:
                 # same DRM configuration without any of them asking for it.
                 drm=await drm_settings.load(),
                 on_event=on_event,
+                poll_log=poll_log,
+                replay=await replay_module.ReplaySource.load(
+                    replay_of, get_settings().rba_recordings_dir
+                )
+                if replay_of
+                else None,
             )
             handle.session = session
 
@@ -282,9 +327,20 @@ class JobManager:
                 # part of the run, and a cancelled or failed one keeps what it got to.
                 if recorder is not None:
                     await recorder.flush()
+                await poll_log.flush()
                 await self._persist_job(handle)
 
             await self._persist_result(handle, result)
+            # The polls a finding fired on and the polls an incident spanned outlive the
+            # sample retention: they are the evidence a report and an escalation point at.
+            await manifest_log.pin_polls(
+                handle.id,
+                seqs=manifest_log.poll_seqs_of(result.findings),
+                windows=[
+                    (i.variant, i.started_at, i.ended_at or result.ended_at)
+                    for i in result.incidents
+                ],
+            )
             if self._on_result is not None:
                 await self._on_result(handle, result)
             return result
@@ -491,6 +547,26 @@ class JobManager:
                 )
             )
             removed += int(getattr(snapshot_result, "rowcount", 0) or 0)
+
+        running = {
+            job_id
+            for job_id, h in self.jobs.items()
+            if h.status not in ("COMPLETED", "CANCELLED", "FAILED")
+        }
+        removed += await manifest_log.purge(
+            cutoff=cutoff,
+            pinned_cutoff=dt.datetime.now(dt.UTC)
+            - dt.timedelta(days=settings.rba_pinned_retention_days),
+            running=running,
+        )
+        removed += await asyncio.to_thread(
+            recorder_module.purge,
+            settings.rba_recordings_dir,
+            cutoff=cutoff,
+            pinned_cutoff=dt.datetime.now(dt.UTC)
+            - dt.timedelta(days=settings.rba_pinned_retention_days),
+            running=running,
+        )
         return removed
 
 
@@ -501,9 +577,12 @@ def _options_from_params(params: dict[str, Any]) -> SessionOptions:
         check_sets=tuple(params.get("check_sets") or ("baseline",)),
         renditions=tuple(params["renditions"]) if params.get("renditions") else None,
         record_evidence=bool(params.get("record_evidence", False)),
+        record_stream=bool(params.get("record_stream", False)),
+        record_mode=str(params.get("record_mode") or "full"),
         vpb_mode=params.get("vpb_mode"),
         nth_segment_sampling=params.get("nth_segment_sampling"),
         snapshot_mode=bool(params.get("snapshot_mode", False)),
+        replay_of=params.get("replay_of") or None,
     )
 
 

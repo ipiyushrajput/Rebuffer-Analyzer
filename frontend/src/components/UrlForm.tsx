@@ -16,6 +16,8 @@ export interface JobOptions {
   check_sets: string[]
   renditions: string[] | null
   record_evidence: boolean
+  /** Write every segment of every analysed rendition to the recordings folder. */
+  record_stream: boolean
   clear_keys: Record<string, string>
   vpb_mode: string | null
 }
@@ -40,6 +42,7 @@ export const emptyForm = (recordEvidence = false): UrlFormValue => ({
     check_sets: [],
     renditions: null,
     record_evidence: recordEvidence,
+    record_stream: false,
     clear_keys: {},
     vpb_mode: null,
   },
@@ -58,6 +61,7 @@ export function toPayload(value: UrlFormValue): Record<string, unknown> {
       check_sets: value.options.check_sets,
       renditions: value.options.renditions,
       record_evidence: value.options.record_evidence,
+      record_stream: value.options.record_stream,
       clear_keys: value.options.clear_keys,
       vpb_mode: value.options.vpb_mode,
     },
@@ -101,9 +105,16 @@ interface Props {
   value: UrlFormValue
   onChange: (value: UrlFormValue) => void
   disabled?: boolean
+  /** What "Record stream" keeps: the whole run, or clips around each incident. */
+  recordLabel?: string
 }
 
-export function UrlForm({ value, onChange, disabled }: Props) {
+export function UrlForm({
+  value,
+  onChange,
+  disabled,
+  recordLabel = 'Record stream — every segment of every rendition',
+}: Props) {
   const uaProfiles = useUaProfiles()
   const [expanded, setExpanded] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
@@ -153,6 +164,24 @@ export function UrlForm({ value, onChange, disabled }: Props) {
         <button type="button" className="btn-quiet" onClick={() => setShowOptions((v) => !v)}>
           {showOptions ? 'Hide' : 'Show'} job options
         </button>
+        <label
+          className={cx(
+            'flex cursor-pointer items-center gap-2 rounded-tile border px-2.5 py-1 text-small',
+            value.options.record_stream
+              ? 'border-pink-200 bg-pink-50 text-pink-600'
+              : 'border-surface-line bg-white text-ink-soft',
+            disabled && 'cursor-not-allowed opacity-50',
+          )}
+        >
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 accent-pink-500"
+            checked={value.options.record_stream ?? false}
+            onChange={(event) => setOptions({ record_stream: event.target.checked })}
+            disabled={disabled}
+          />
+          {recordLabel}
+        </label>
         {value.options.check_sets.length > 0 && (
           <span className="chip-blue">{value.options.check_sets.length} extra check sets</span>
         )}

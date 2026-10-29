@@ -138,8 +138,19 @@ export interface ChannelReport {
 }
 
 /** A finished analysis, read back from the database rather than the job manager. */
+export interface RecordingState {
+  available: boolean
+  mode?: 'full' | 'incidents' | 'unknown'
+  segments?: number
+  bytes?: number
+  clips?: number
+  decrypted?: number
+  stopped_reason?: string
+}
+
 export interface AnalysedChannel extends JobSummary {
   reports: ChannelReport[]
+  recording?: RecordingState
 }
 
 /** One country the channel catalogue serves, and the data set its channels come from. */
@@ -367,6 +378,68 @@ function cascadaChannelQuery(params: CascadaChannelQuery & { refresh?: boolean }
   return query.toString()
 }
 
+/** One playlist fetch from the poll log, with the lines a finding points at. */
+export interface PollData {
+  seq: number
+  at: string
+  layer: string
+  variant: string
+  kind: string
+  url: string
+  final_url: string | null
+  status: number
+  error: string | null
+  ttfb_ms: number | null
+  total_ms: number
+  bytes: number
+  msn: number | null
+  last_msn: number | null
+  headers: Record<string, string>
+  hops: { url: string; status: number; location: string | null }[]
+  raw: string
+  previous: (Omit<PollData, 'previous' | 'highlights' | 'curl' | 'exact'> & { raw: string }) | null
+  highlights?: { line: number; reason: string }[]
+  curl?: string
+  exact?: boolean
+}
+
+export interface LocateRequest {
+  seq?: number | null
+  variant?: string | null
+  at?: string | null
+  evidence?: Record<string, unknown>
+  text?: string
+}
+
+export interface FeedbackData {
+  id: number
+  job_id: string
+  rule_id: string
+  stream_layer: string
+  variant: string | null
+  verdict: 'confirmed' | 'false_positive'
+  note: string | null
+  created_at: string | null
+}
+
+export interface AcknowledgementData {
+  id: number
+  channel_key: string
+  channel_name: string | null
+  rule_id: string
+  variant: string | null
+  note: string
+  created_at: string | null
+  expires_at: string | null
+}
+
+export interface RulePrecision {
+  confirmed: number
+  false_positive: number
+  reviewed: number
+  precision: number | null
+}
+
 export const endpoints = {
   health: () => api.get<Record<string, unknown>>('/health'),
 
@@ -401,12 +474,18 @@ export const endpoints = {
     api.get<{ jobs: JobSummary[]; stored_error?: string | null }>('/aging/jobs'),
   readAging: (id: string) => api.get<JobSummary>(`/aging/jobs/${id}`),
   cancelAging: (id: string) => api.del<JobSummary>(`/aging/jobs/${id}`),
+  /** Delete a finished aging job and everything it wrote; a running one is refused (409). */
+  deleteAging: (id: string) =>
+    api.del<{ deleted: boolean; id: string }>(`/aging/jobs/${id}?purge=true`),
 
   createBulk: (form: FormData) => api.upload<JobSummary>('/bulk/jobs', form),
   readBulk: (id: string) =>
     api.get<JobSummary & { items: Record<string, unknown>[] }>(`/bulk/jobs/${id}`),
-  listBulk: () => api.get<{ jobs: JobSummary[] }>('/bulk/jobs'),
+  listBulk: () => api.get<{ jobs: JobSummary[] }>('/bulk/jobs?limit=500'),
   cancelBulk: (id: string) => api.del<JobSummary>(`/bulk/jobs/${id}`),
+  /** Delete a finished batch, every channel run in it and its report; refused while running. */
+  deleteBulk: (id: string) =>
+    api.del<{ deleted: boolean; id: string }>(`/bulk/jobs/${id}?purge=true`),
   validateBulk: (form: FormData) =>
     api.upload<{ rows: Record<string, unknown>[]; errors: Record<string, unknown>[] }>(
       '/bulk/validate',
@@ -477,6 +556,34 @@ export const endpoints = {
   rerunBatch: (id: string) => api.post<Batch>(`/batch/batches/${id}/rerun`),
   batchLog: (id: string) => api.get<{ lines: BatchLogLine[] }>(`/batch/batches/${id}/log`),
   batchLogUrl: (id: string) => api.url(`/batch/batches/${id}/log?download=true`),
+  /** Every playlist poll of a run as files, a HAR and a CSV. Read from the database. */
+  networkLogUrl: (jobId: string) => api.url(`/jobs/${jobId}/network-log.zip`),
+  evidenceUrl: (jobId: string) => api.url(`/jobs/${jobId}/evidence.zip`),
+  /** Every recorded rendition joined per clip, decrypted copies, and the clip's network log. */
+  recordingUrl: (jobId: string) => api.url(`/jobs/${jobId}/recording.zip`),
+  jobFeedback: (jobId: string) => api.get<{ feedback: FeedbackData[] }>(`/jobs/${jobId}/feedback`),
+  giveFeedback: (
+    jobId: string,
+    body: { rule_id: string; stream_layer: string; variant: string | null; verdict: string; note?: string },
+  ) => api.post<FeedbackData>(`/jobs/${jobId}/feedback`, body),
+  rulePrecision: () => api.get<{ rules: Record<string, RulePrecision> }>('/rules/precision'),
+  jobAcknowledged: (jobId: string) =>
+    api.get<{ channel_key: string; acknowledgements: AcknowledgementData[] }>(`/jobs/${jobId}/acknowledged`),
+  acknowledge: (body: {
+    job_id?: string
+    playback_url?: string
+    rule_id: string
+    variant: string | null
+    note: string
+    expires_days?: number | null
+  }) => api.post<AcknowledgementData>('/acknowledgements', body),
+  unacknowledge: (id: number) => api.del<{ deleted: boolean }>(`/acknowledgements/${id}`),
+  /** One owner's escalation: text, findings, marked playlists and a cURL per request. */
+  escalationPackUrl: (jobId: string, owner: string) =>
+    api.url(`/jobs/${jobId}/escalation.zip?owner=${encodeURIComponent(owner)}`),
+  /** The poll a finding fired on (or the rendition's poll at a moment), lines marked. */
+  locatePoll: (jobId: string, body: LocateRequest) =>
+    api.post<PollData>(`/jobs/${jobId}/polls/locate`, body),
   batchReportUrl: (id: string, fmt: 'csv' | 'xlsx') =>
     api.url(`/batch/batches/${id}/report.${fmt}`),
   batchColumns: () =>

@@ -165,6 +165,66 @@ async def _store(key: str, value: dict[str, Any]) -> None:
             row.updated_at = dt.datetime.now(dt.UTC)
 
 
+# -- alerts --------------------------------------------------------------------
+
+
+class AlertSettingsIn(BaseModel):
+    enabled: bool = False
+    # None keeps the stored URL; "" clears it. The URL is never returned to a page.
+    webhook_url: str | None = None
+    min_severity: str = "CRITICAL"
+    job_types: list[str] = ["aging"]
+    public_origin: str = ""
+
+
+@router.get("/settings/alerts")
+async def read_alerts() -> dict[str, Any]:
+    from app import alerts
+
+    return (await alerts.load()).describe()
+
+
+@router.put("/settings/alerts")
+async def write_alerts(body: AlertSettingsIn) -> dict[str, Any]:
+    from app import alerts
+
+    current = await alerts.load()
+    url = current.webhook_url if body.webhook_url is None else body.webhook_url.strip()
+    if url and not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="The webhook must be an http(s) URL")
+    try:
+        updated = alerts.AlertSettings(
+            enabled=body.enabled,
+            webhook_url=url,
+            min_severity=body.min_severity,
+            job_types=[t for t in body.job_types if t in ("aging", "realtime", "bulk", "batch")],
+            public_origin=body.public_origin.strip(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await alerts.save(updated)
+    return updated.describe()
+
+
+@router.post("/settings/alerts/test")
+async def test_alert() -> dict[str, Any]:
+    """Send one message to the configured webhook, so a deployment knows it arrives."""
+    from app import alerts
+
+    settings = await alerts.load()
+    if not settings.webhook_url:
+        raise HTTPException(status_code=422, detail="No webhook is set")
+    ok, problem = await alerts.post(
+        settings.webhook_url,
+        {
+            "text": f"[{alerts.TOOL_NAME}] Test alert: this webhook receives StreamLens alerts.",
+            "tool": alerts.TOOL_NAME,
+            "test": True,
+        },
+    )
+    return {"delivered": ok, "problem": problem}
+
+
 @router.get("/settings/rules")
 async def rule_catalogue() -> dict[str, Any]:
     """The full rule catalogue, so the UI can explain any finding it renders.

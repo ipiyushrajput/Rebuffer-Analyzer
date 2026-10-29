@@ -13,13 +13,23 @@ from typing import Any
 from app.media import adts, fmp4, ts
 
 
+def is_webvtt(data: bytes) -> bool:
+    """Whether the bytes carry the WebVTT signature, with or without a UTF-8 byte order mark.
+
+    The signature is plain text. A body that carries it was served in the clear, whatever the
+    ladder's protection: CENC and SAMPLE-AES apply to media samples, and a whole-segment
+    AES-128 body would not start with readable text.
+    """
+    return data[:6] == b"WEBVTT" or data[:9] == b"\xef\xbb\xbfWEBVTT"
+
+
 def detect_container(data: bytes, uri: str = "") -> str:
     """Identify the container from the bytes, falling back to the URI extension."""
     if not data:
         return "empty"
     if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and (data[1] & 0xF0) == 0xF0):
         return "aac"
-    if data[:6] == b"WEBVTT" or data[:9] == b"\xef\xbb\xbfWEBVTT":
+    if is_webvtt(data):
         return "webvtt"
     if (
         data[0] == ts.SYNC_BYTE
@@ -166,6 +176,13 @@ def analyse(
         declared_duration=declared_duration,
         encrypted=encrypted,
     )
+
+    if encrypted and container == "webvtt" and is_webvtt(data):
+        # A subtitle rendition inherits the ladder's protection flag, and its WebVTT is text
+        # served in the clear. Treating it as encrypted left the cue checks an empty string,
+        # which SUB-001 reported as a segment without the WEBVTT signature.
+        encrypted = False
+        analysis.encrypted = False
 
     if encrypted:
         # Bitstream checks do not run on an encrypted payload; the caller records that as a

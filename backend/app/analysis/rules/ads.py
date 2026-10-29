@@ -36,11 +36,20 @@ def check_cue_windows(
             "segment_count": window.segment_count,
         }
         if not window.closed:
+            # A break that is still running at the live edge has not reached its CUE-IN yet.
+            # It is unbalanced only once it has delivered more than it declared, with one
+            # segment of allowance for the segment that ends it.
+            overrun = (
+                window.declared_duration_s is not None
+                and window.delivered_duration_s > window.declared_duration_s + target
+            )
+            if not overrun:
+                continue
             findings.append(
                 R.ADS_CUE_UNBALANCED.raise_finding(
                     f"{variant} opened EXT-X-CUE-OUT at media sequence {window.start_msn} with "
-                    f"DURATION={window.declared_duration_s} and the window ends without an "
-                    "EXT-X-CUE-IN.",
+                    f"DURATION={window.declared_duration_s} and has delivered "
+                    f"{window.delivered_duration_s:.1f} s of break without an EXT-X-CUE-IN.",
                     evidence=evidence,
                     stream_layer=layer,
                     variant=variant,
@@ -80,8 +89,13 @@ def check_cue_windows(
 
         if target:
             for segment in playlist.segments:
-                in_break = window.start_msn <= segment.msn <= (window.end_msn or window.start_msn)
-                if in_break and segment.duration > target:
+                # The segment carrying CUE-IN is the first one after the break.
+                in_break = window.start_msn <= segment.msn and (
+                    window.end_msn is None or segment.msn < window.end_msn
+                )
+                # RFC 8216 4.3.3.1: the EXTINF *rounded to the nearest integer* may not exceed
+                # the target duration, so 6.006 s under TARGETDURATION:6 is conformant.
+                if in_break and round(segment.duration) > target:
                     findings.append(
                         R.ADS_EXTINF_OVER_TD.raise_finding(
                             f"Ad segment {segment.msn} on {variant} declares EXTINF "

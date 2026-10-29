@@ -32,6 +32,7 @@ import {
 } from '../components/charts'
 import { EventFeed } from '../components/EventFeed'
 import { FindingsList } from '../components/FindingCard'
+import { groupFindings } from '../lib/findingGroups'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { LadderTable, type LadderRow } from '../components/LadderTable'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
@@ -252,15 +253,6 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
   const variantManifests = manifests.filter((m) => m.variant !== 'master')
   const masterManifest = manifests.find((m) => m.variant === 'master')
 
-  /* The manifest the investigation shows is the one from the finding's own rendition. */
-  const investigationManifest = useMemo(() => {
-    if (!openFinding) return null
-    const match =
-      manifests.find((m) => m.variant === openFinding.variant) ??
-      (openFinding.variant ? undefined : masterManifest)
-    return match ? { title: match.variant, raw: match.raw, url: match.url } : null
-  }, [openFinding, manifests, masterManifest])
-
   const activeFindings = findings.filter((finding) => finding.severity !== 'PASS')
   const latestBuffer = store.playerSamples.at(-1)?.buffer_s ?? null
   const windowSeconds = store.verdict?.window_seconds ?? store.snapshots.at(-1)?.window_s ?? null
@@ -287,7 +279,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
               status={<SeverityChip severity={openFinding.severity as Severity} />}
             />
             <PageBody>
-              <FindingInvestigation finding={openFinding} manifest={investigationManifest} />
+              <FindingInvestigation finding={openFinding} findings={findings} jobId={store.sessionId} />
             </PageBody>
           </>
         )}
@@ -326,6 +318,24 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
                 <IconDownload size={14} />
                 PDF report
               </button>
+              <a
+                className={cx('btn-ghost btn-sm', !store.sessionId && 'pointer-events-none opacity-50')}
+                href={store.sessionId ? endpoints.networkLogUrl(store.sessionId) : undefined}
+                title="Every playlist poll of every rendition, as files, a HAR and a CSV"
+              >
+                <IconDownload size={14} />
+                Network log
+              </a>
+              {form.options.record_stream && (
+                <a
+                  className={cx('btn-ghost btn-sm', !store.sessionId && 'pointer-events-none opacity-50')}
+                  href={store.sessionId ? endpoints.recordingUrl(store.sessionId) : undefined}
+                  title="Every segment of every rendition recorded so far, joined into playable files"
+                >
+                  <IconDownload size={14} />
+                  Recording
+                </a>
+              )}
               <button
                 type="button"
                 className="btn-accent btn-sm"
@@ -402,7 +412,7 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
             />
             <MetricTile
               label="Active findings"
-              value={activeFindings.length}
+              value={groupFindings(activeFindings).length}
               note={
                 SEVERITIES.filter((severity) => (store.counts[severity] ?? 0) > 0)
                   .map((severity) => `${severity.toLowerCase()} ${store.counts[severity]}`)
@@ -447,12 +457,12 @@ export function RealtimeTab({ thresholds, onArchived, prefill = null }: Props) {
                   title="Findings"
                   actions={
                     activeFindings.length > 0 && (
-                      <span className="chip-neutral">{activeFindings.length}</span>
+                      <span className="chip-neutral">{groupFindings(activeFindings).length}</span>
                     )
                   }
                 />
                 <div className="max-h-[62vh] space-y-2.5 overflow-y-auto px-4 pb-4">
-                  <FindingsList findings={findings} onOpen={setOpenFinding} />
+                  <FindingsList findings={findings} onOpen={setOpenFinding} jobId={store.sessionId} />
                 </div>
               </Card>
             </div>

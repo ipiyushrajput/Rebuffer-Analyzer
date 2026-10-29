@@ -6,11 +6,14 @@ import datetime as dt
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.api.realtime import _interim
+from app.hls.locate import locate
 from app.jobs.manager import job_manager
-from app.reports import service
+from app.net.curl import curl_command
+from app.reports import network_log, service
 
 router = APIRouter(tags=["reports"])
 
@@ -163,16 +166,298 @@ async def remove_report(report_id: int) -> dict[str, bool]:
 
 @router.get("/jobs/{job_id}/evidence.zip")
 async def evidence_bundle(job_id: str) -> Response:
-    """The evidence archive, built in memory from the stored rows and streamed."""
+    """The evidence archive, built in memory from the stored rows and streamed.
+
+    A run still in memory includes the segment bytes its session held; one that is not (after
+    a restart, or long after it ended) is built from the database and the poll log alone.
+    """
     handle = job_manager.get(job_id)
-    if handle is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    archive = await service.build_evidence_bundle(handle)
+    if handle is not None:
+        archive = await service.build_evidence_bundle(handle)
+    else:
+        stored = await service.build_stored_evidence_bundle(job_id)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        archive = stored
     return Response(
         content=archive,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="evidence-{job_id[:8]}.zip"'},
     )
+
+
+@router.get("/jobs/{job_id}/request-profile")
+async def job_request_profile(job_id: str) -> dict[str, Any]:
+    """The User-Agent a run went out as, so a copied cURL asks exactly what the run asked."""
+    handle = job_manager.get(job_id)
+    if handle is not None:
+        options = handle.options.public()
+        return {"ua_profile": options["ua_profile"], "user_agent": options["user_agent"]}
+    return {"ua_profile": "", "user_agent": await network_log.job_user_agent(job_id)}
+
+
+@router.get("/jobs/{job_id}/escalation.zip")
+async def escalation_pack(job_id: str, owner: str = Query(...)) -> Response:
+    """Everything one owner needs: the escalation text, their findings, the playlists the
+    findings fired on with the lines marked, and a cURL per request."""
+    from app.reports.escalation_pack import build_pack
+
+    pack = await build_pack(job_id, owner)
+    filename = f"escalation-{owner.lower()}-{job_id[:8]}.zip"
+    if pack is None:
+        raise HTTPException(
+            status_code=404, detail=f"This run has no actionable finding for {owner}"
+        )
+    return Response(
+        content=pack,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# -- the timeline --------------------------------------------------------------
+
+
+@router.get("/jobs/{job_id}/timeline")
+async def job_timeline(
+    job_id: str,
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    variant: str | None = Query(default=None),
+    limit: int = Query(default=1500, ge=10, le=10000),
+) -> dict[str, Any]:
+    """Polls, segment fetches, player events, findings and incidents of a window, in order."""
+    from app.reports.timeline import build_timeline
+
+    handle = job_manager.get(job_id)
+    live_findings = None
+    live_incidents = None
+    if handle is not None and handle.session is not None and handle.result is None:
+        # A running job: what is buffered is written first, and its findings are in memory.
+        if handle.poll_log is not None:
+            await handle.poll_log.flush()
+        if handle.recorder is not None:
+            await handle.recorder.flush()
+        live_findings = [f.as_dict() for f in handle.session.collector.all()]
+        live_incidents = [i.as_dict() for i in handle.session.incidents.incidents]
+    return await build_timeline(
+        job_id,
+        start=_moment(start, "start"),
+        end=_moment(end, "end"),
+        variant=variant,
+        live_findings=live_findings,
+        live_incidents=live_incidents,
+        limit=limit,
+    )
+
+
+# -- the recording -------------------------------------------------------------
+
+
+@router.get("/jobs/{job_id}/recording")
+async def job_recording(job_id: str) -> dict[str, Any]:
+    """Whether a run was recorded, and what its recording holds."""
+    from app.config import get_settings
+    from app.reports.recording import recording_state
+
+    return recording_state(get_settings().rba_recordings_dir, job_id)
+
+
+@router.get("/jobs/{job_id}/recording.zip")
+async def job_recording_archive(job_id: str) -> StreamingResponse:
+    """The recording: each rendition joined into one playable file per clip, the decrypted
+    copy of a protected rendition, audio and video joined when ffmpeg is installed, and the
+    network log of the clip's own minutes. Streamed as it is built."""
+    from app.config import get_settings
+    from app.reports.recording import recording_state, stream_recording
+
+    root = get_settings().rba_recordings_dir
+    state = recording_state(root, job_id)
+    if not state.get("available"):
+        raise HTTPException(
+            status_code=404,
+            detail="This run has no recording: start it with Record stream on.",
+        )
+    return StreamingResponse(
+        stream_recording(root, job_id),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="recording-{job_id[:8]}.zip"'},
+    )
+
+
+# -- the poll log --------------------------------------------------------------
+
+
+def _moment(value: str | None, name: str) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        moment = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{name} must be ISO-8601") from exc
+    return moment if moment.tzinfo else moment.replace(tzinfo=dt.UTC)
+
+
+async def _with_curl(job_id: str, poll: dict[str, Any]) -> dict[str, Any]:
+    poll["curl"] = curl_command(poll["url"], await network_log.job_user_agent(job_id))
+    return poll
+
+
+@router.get("/jobs/{job_id}/network-log.zip")
+async def network_log_archive(job_id: str) -> StreamingResponse:
+    """Every playlist poll of the run as files, a HAR and a CSV, streamed as one ZIP.
+
+    Read from the database, so it is complete for the whole run and is served after the run
+    has finished and after a restart.
+    """
+    if await network_log.poll_count(job_id) == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="This run has no poll log: it ran before the poll log existed, or wrote none.",
+        )
+    return StreamingResponse(
+        network_log.stream_archive(job_id),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="network-log-{job_id[:8]}.zip"'},
+    )
+
+
+@router.get("/jobs/{job_id}/polls")
+async def job_polls(
+    job_id: str,
+    variant: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    after_seq: int = Query(default=0, ge=0),
+    limit: int = Query(default=500, ge=1, le=5000),
+) -> dict[str, Any]:
+    """The poll log in poll order, a page at a time."""
+    polls = await network_log.list_polls(
+        job_id,
+        variant=variant,
+        start=_moment(start, "start"),
+        end=_moment(end, "end"),
+        after_seq=after_seq,
+        limit=limit,
+    )
+    return {"polls": polls, "total": await network_log.poll_count(job_id)}
+
+
+@router.get("/jobs/{job_id}/polls/{seq}")
+async def job_poll(job_id: str, seq: int) -> dict[str, Any]:
+    """One poll with its body and the rendition's previous poll, as a finding names it."""
+    poll = await network_log.poll_with_context(job_id, seq=seq)
+    if poll is None:
+        raise HTTPException(status_code=404, detail=f"Poll {seq} is not in this run's log")
+    return await _with_curl(job_id, poll)
+
+
+@router.get("/jobs/{job_id}/poll-at")
+async def job_poll_at(
+    job_id: str, variant: str = Query(...), at: str | None = Query(default=None)
+) -> dict[str, Any]:
+    """The poll of a rendition current at a moment: the latest at or before it."""
+    poll = await network_log.poll_with_context(job_id, variant=variant, at=_moment(at, "at"))
+    if poll is None:
+        raise HTTPException(status_code=404, detail=f"No poll of {variant} is in this run's log")
+    return await _with_curl(job_id, poll)
+
+
+class LocateIn(BaseModel):
+    """What a finding knows about where it fired: its poll, or its rendition and moment."""
+
+    seq: int | None = None
+    variant: str | None = None
+    at: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    # The finding's title and sentence, for the tags they name.
+    text: str = ""
+
+
+def _snapshot_payload(snapshot: Any, layer: str, variant: str, kind: str) -> dict[str, Any]:
+    """An in-memory poll in the shape the poll log serves."""
+    return {
+        "seq": snapshot.seq,
+        "at": snapshot.at.isoformat(),
+        "layer": layer,
+        "variant": variant,
+        "kind": kind,
+        "url": snapshot.url,
+        "final_url": snapshot.result.final_url,
+        "status": snapshot.result.status,
+        "error": snapshot.result.error,
+        "ttfb_ms": snapshot.result.timings.ttfb_ms,
+        "total_ms": snapshot.result.timings.total_ms,
+        "bytes": snapshot.result.bytes_received,
+        "msn": snapshot.playlist.media_sequence if snapshot.playlist else None,
+        "last_msn": snapshot.playlist.last_msn if snapshot.playlist else None,
+        "headers": dict(snapshot.result.headers),
+        "hops": [hop.as_dict() for hop in snapshot.result.hops],
+        "timings": snapshot.result.timings.as_dict(),
+        "body_hash": "",
+        "pinned": False,
+        "raw": snapshot.raw or snapshot.result.text,
+    }
+
+
+def _memory_poll(job_id: str, body: LocateIn) -> dict[str, Any] | None:
+    """A poll the log has not flushed yet, from the live session's own history."""
+    handle = job_manager.get(job_id)
+    if handle is None or handle.session is None:
+        return None
+    moment = _moment(body.at, "at")
+    for context in handle.session.layers.values():
+        for variant, target in context.targets.items():
+            history = [s for s in target.history if s.raw or s.result.body]
+            if not history:
+                continue
+            chosen = None
+            if body.seq is not None:
+                chosen = next((s for s in history if s.seq == body.seq), None)
+            elif body.variant == variant:
+                before = [s for s in history if moment is None or s.at <= moment]
+                chosen = (before or history)[-1]
+            if chosen is None:
+                continue
+            index = history.index(chosen)
+            previous = history[index - 1] if index > 0 else None
+
+            layer = context.layer.value
+            payload = _snapshot_payload(chosen, layer, variant, target.kind)
+            payload["previous"] = (
+                _snapshot_payload(previous, layer, variant, target.kind)
+                if previous is not None
+                else None
+            )
+            return payload
+    return None
+
+
+@router.post("/jobs/{job_id}/polls/locate")
+async def locate_poll(job_id: str, body: LocateIn) -> dict[str, Any]:
+    """The playlist a finding fired on, with the lines its evidence points at highlighted.
+
+    The poll the finding names when it carries one; otherwise the rendition's poll current
+    at the moment given. Never the live window: a finding is shown against the playlist as it
+    stood when the rule fired.
+    """
+    poll = await network_log.poll_with_context(
+        job_id, seq=body.seq, variant=body.variant, at=_moment(body.at, "at")
+    )
+    if poll is None or (body.seq is not None and poll.get("seq") != body.seq):
+        poll = _memory_poll(job_id, body) or poll
+    if poll is None:
+        raise HTTPException(status_code=404, detail="No poll of this rendition is recorded")
+    highlights = locate(
+        poll.get("raw") or "",
+        evidence=body.evidence,
+        text=body.text,
+        base_url=poll.get("final_url") or poll.get("url") or "",
+    )
+    poll["highlights"] = [h.as_dict() for h in highlights]
+    # Whether this is the poll the finding named, or the nearest one to its moment.
+    poll["exact"] = body.seq is not None and poll.get("seq") == body.seq
+    return await _with_curl(job_id, poll)
 
 
 @router.get("/jobs/{job_id}/snapshots")

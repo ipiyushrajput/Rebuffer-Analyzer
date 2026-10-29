@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { api, endpoints, type JobSummary } from '../api/client'
 import { AgingAnalytics } from '../components/AgingAnalytics'
 import { FindingsList } from '../components/FindingCard'
+import { groupFindings } from '../lib/findingGroups'
 import { FindingInvestigation } from '../components/FindingInvestigation'
 import { PageBody, PageHeader } from '../components/layout/PageHeader'
 import { SessionVerdict } from '../components/SessionVerdict'
@@ -23,12 +24,21 @@ import {
   InlineAlert,
   MetricRow,
   MetricTile,
+  Pagination,
   ProgressBar,
   SegmentedControl,
   SeverityChip,
   cx,
 } from '../components/ui'
-import { IconDownload, IconFile, IconPulse, IconStop } from '../components/ui/icons'
+import {
+  IconClose,
+  IconDownload,
+  IconFile,
+  IconPulse,
+  IconSearch,
+  IconStop,
+  IconTrash,
+} from '../components/ui/icons'
 import {
   AGING_PRESETS,
   LIVE_POLL_MS,
@@ -37,6 +47,7 @@ import {
   type Severity,
 } from '../lib/constants'
 import { duration, localDateTime, utcTitle } from '../lib/format'
+import { usePaged } from '../lib/paging'
 import { usePrefill, type ChannelPrefill } from '../lib/prefill'
 import type { FindingData, VerdictData } from '../ws/messages'
 
@@ -68,7 +79,10 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
   const [custom, setCustom] = useState('')
   const [openJob, setOpenJob] = useState<JobSummary | null>(null)
   const [openFinding, setOpenFinding] = useState<FindingData | null>(null)
+  const [openSiblings, setOpenSiblings] = useState<FindingData[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [confirming, setConfirming] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const jobsQuery = useQuery({
@@ -102,8 +116,34 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['aging-jobs'] }),
   })
 
+  // Deleting removes the run and everything it wrote; it appears under Analysed channels and
+  // Reports too, so both are refreshed with this list.
+  const remove = useMutation({
+    mutationFn: (id: string) => endpoints.deleteAging(id),
+    onSuccess: (_data, id) => {
+      setError(null)
+      setConfirming(null)
+      if (openJob?.id === id) setOpenJob(null)
+      void queryClient.invalidateQueries({ queryKey: ['aging-jobs'] })
+      void queryClient.invalidateQueries({ queryKey: ['channels'] })
+      void queryClient.invalidateQueries({ queryKey: ['reports'] })
+    },
+    onError: (err: Error) => setError(err.message),
+  })
+
   const jobs = jobsQuery.data?.jobs ?? []
   const active = jobs.filter((job) => ACTIVE.has(job.status))
+  const needle = search.trim().toLowerCase()
+  const matching = needle
+    ? jobs.filter((job) =>
+        [job.channel_name, job.id, job.status, (job.verdict as VerdictData | null)?.status]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(needle),
+      )
+    : jobs
+  const paged = usePaged(matching, needle)
 
   if (openFinding && openJob) {
     return (
@@ -116,7 +156,7 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
           status={<SeverityChip severity={openFinding.severity as Severity} />}
         />
         <PageBody>
-          <FindingInvestigation finding={openFinding} />
+          <FindingInvestigation finding={openFinding} findings={openSiblings} jobId={openJob.id} />
         </PageBody>
       </>
     )
@@ -162,7 +202,10 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
             status={openJob.status}
             threshold={thresholds.rebuffer_ratio_threshold ?? REBUFFER_RATIO_THRESHOLD_DEFAULT}
             thresholds={thresholds}
-            onOpenFinding={setOpenFinding}
+            onOpenFinding={(finding, siblings) => {
+              setOpenSiblings(siblings)
+              setOpenFinding(finding)
+            }}
           />
         </PageBody>
       </>
@@ -192,7 +235,12 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
 
         <Card>
           <div className="px-5 pb-4 pt-4">
-            <UrlForm value={form} onChange={setForm} disabled={create.isPending} />
+            <UrlForm
+              value={form}
+              onChange={setForm}
+              disabled={create.isPending}
+              recordLabel="Record incident clips — every rendition around each incident"
+            />
 
             <div className="mt-4 grid gap-3 border-t border-surface-line pt-4 lg:grid-cols-[1fr_160px]">
               <Field label="Duration">
@@ -246,37 +294,82 @@ export function AgingTab({ thresholds, prefill = null }: Props) {
         <Card>
           <CardHeader
             title="Jobs"
-            actions={<span className="chip-neutral">{jobs.length}</span>}
+            actions={
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="relative">
+                  <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint">
+                    <IconSearch size={14} />
+                  </span>
+                  <input
+                    className="input max-w-[240px] pl-8"
+                    placeholder="Search jobs"
+                    aria-label="Search aging jobs"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                </label>
+                <span className="chip-neutral">
+                  {matching.length === jobs.length
+                    ? jobs.length
+                    : `${matching.length} of ${jobs.length}`}
+                </span>
+              </div>
+            }
           />
-          {jobs.length === 0 ? (
-            <EmptyState title="No aging jobs yet" />
+          {matching.length === 0 ? (
+            <EmptyState title={jobs.length === 0 ? 'No aging jobs yet' : 'No job matches the search'} />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="table table-hover">
-                <thead>
-                  <tr>
-                    <th>Channel</th>
-                    <th>Status</th>
-                    <th className="w-52">Progress</th>
-                    <th>Remaining</th>
-                    <th>Severity counts</th>
-                    <th>Verdict</th>
-                    <th>Started</th>
-                    <th className="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobs.map((job) => (
-                    <JobRow
-                      key={job.id}
-                      job={job}
-                      onCancel={() => cancel.mutate(job.id)}
-                      onOpen={() => setOpenJob(job)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <Pagination
+                className="border-b border-surface-line px-5 py-2.5"
+                label={paged.label}
+                hasPrevious={paged.hasPrevious}
+                hasNext={paged.hasNext}
+                onPrevious={paged.previous}
+                onNext={paged.next}
+              />
+              <div className="overflow-x-auto">
+                <table className="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>Channel</th>
+                      <th>Status</th>
+                      <th className="w-52">Progress</th>
+                      <th>Remaining</th>
+                      <th>Severity counts</th>
+                      <th>Verdict</th>
+                      <th>Started</th>
+                      <th className="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paged.rows.map((job) => (
+                      <JobRow
+                        key={job.id}
+                        job={job}
+                        onCancel={() => cancel.mutate(job.id)}
+                        onOpen={() => setOpenJob(job)}
+                        confirming={confirming === job.id}
+                        deleting={remove.isPending}
+                        onAskDelete={() => setConfirming(job.id)}
+                        onCancelDelete={() => setConfirming(null)}
+                        onConfirmDelete={() => remove.mutate(job.id)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {paged.pages > 1 && (
+                <Pagination
+                  className="border-t border-surface-line px-5 py-2.5"
+                  label={paged.label}
+                  hasPrevious={paged.hasPrevious}
+                  hasNext={paged.hasNext}
+                  onPrevious={paged.previous}
+                  onNext={paged.next}
+                />
+              )}
+            </>
           )}
         </Card>
       </PageBody>
@@ -288,10 +381,20 @@ function JobRow({
   job,
   onCancel,
   onOpen,
+  confirming,
+  deleting,
+  onAskDelete,
+  onCancelDelete,
+  onConfirmDelete,
 }: {
   job: JobSummary
   onCancel: () => void
   onOpen: () => void
+  confirming: boolean
+  deleting: boolean
+  onAskDelete: () => void
+  onCancelDelete: () => void
+  onConfirmDelete: () => void
 }) {
   const verdict = job.verdict as VerdictData | null
   const counts = Object.entries(job.counts ?? {}).filter(([, count]) => count > 0)
@@ -341,10 +444,49 @@ function JobRow({
               Cancel
             </button>
           ) : (
-            <a className="btn-ghost btn-sm" href={api.url(`/jobs/${job.id}/evidence.zip`)}>
+            <a className="btn-ghost btn-sm" href={endpoints.evidenceUrl(job.id)}>
               Evidence
             </a>
           )}
+          <a className="btn-ghost btn-sm" href={endpoints.networkLogUrl(job.id)}>
+            Network log
+          </a>
+          {Boolean(job.options?.record_stream) && !ACTIVE.has(job.status) && (
+            <a className="btn-ghost btn-sm" href={endpoints.recordingUrl(job.id)}>
+              Clips
+            </a>
+          )}
+          {/* A running job is stopped first; only a finished one is deleted. */}
+          {!ACTIVE.has(job.status) &&
+            (confirming ? (
+              <>
+                <button
+                  type="button"
+                  className="btn-accent btn-sm"
+                  onClick={onConfirmDelete}
+                  disabled={deleting}
+                >
+                  Delete for good
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost btn-sm"
+                  onClick={onCancelDelete}
+                  aria-label="Keep this job"
+                >
+                  <IconClose size={12} />
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn-ghost btn-sm text-pink-600"
+                onClick={onAskDelete}
+              >
+                <IconTrash size={12} />
+                Delete
+              </button>
+            ))}
         </div>
       </td>
     </tr>
@@ -378,7 +520,7 @@ function JobDetail({
   status: string
   threshold: number
   thresholds: Record<string, number>
-  onOpenFinding: (finding: FindingData) => void
+  onOpenFinding: (finding: FindingData, siblings: FindingData[]) => void
 }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['aging-result', jobId],
@@ -446,12 +588,13 @@ function JobDetail({
       <Card>
         <CardHeader
           title="Findings"
-          actions={<span className="chip-neutral">{findings.length}</span>}
+          actions={<span className="chip-neutral">{groupFindings(findings).length}</span>}
         />
         <div className="px-4 pb-4">
           <FindingsList
+            jobId={jobId}
             findings={findings}
-            onOpen={onOpenFinding}
+            onOpen={(finding) => onOpenFinding(finding, findings)}
             emptyTitle={settled ? 'No findings' : 'No findings yet'}
           />
         </div>

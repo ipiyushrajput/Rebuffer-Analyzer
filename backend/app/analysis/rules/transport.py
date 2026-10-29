@@ -171,6 +171,9 @@ def check_http(
 ) -> list[Finding]:
     """Status, redirect and header checks for one fetch."""
     findings: list[Finding] = []
+    if result.replay_gap:
+        # A replay asked for something the recorded run never stored: no response exists.
+        return findings
     evidence: dict[str, Any] = {
         "url": result.requested_url,
         "final_url": result.final_url,
@@ -239,7 +242,10 @@ def check_http(
         )
 
     dropped = result.dropped_query_keys
-    if dropped:
+    # A CDN that redirects to an edge URL it signs itself drops the original token by design,
+    # and the request that follows succeeds. Only a redirected request that is then refused
+    # shows the parameters were needed.
+    if dropped and not result.ok and not result.transport_error:
         findings.append(
             R.HTTP_QUERY_DROPPED.raise_finding(
                 f"The redirect chain for {result.requested_url} drops "
@@ -250,7 +256,13 @@ def check_http(
             )
         )
 
-    if result.hops and host_of(result.requested_url) != host_of(result.final_url):
+    # A playlist's child URIs resolve against the host it ended on; a segment has none, so a
+    # redirected segment is reported by the redirect checks above and not here.
+    if (
+        kind == "playlist"
+        and result.hops
+        and host_of(result.requested_url) != host_of(result.final_url)
+    ):
         findings.append(
             R.HTTP_HOST_CHANGE.raise_finding(
                 f"{result.requested_url} redirects to {result.final_url}; child URIs resolve "
@@ -277,11 +289,14 @@ def check_http(
     declared_length = result.header("content-length")
     if declared_length and declared_length.isdigit() and result.ok:
         declared = int(declared_length)
-        if declared != result.bytes_received:
+        # Compared with the bytes that crossed the wire: a gzip-encoded body is declared at
+        # its encoded size and reads larger once decoded.
+        received = result.wire_bytes or result.bytes_received
+        if received < declared:
             findings.append(
                 R.HTTP_TRUNCATED.raise_finding(
                     f"{result.final_url} declares Content-Length {declared} and delivered "
-                    f"{result.bytes_received} bytes.",
+                    f"{received} bytes.",
                     evidence=evidence,
                     stream_layer=layer,
                     variant=variant,

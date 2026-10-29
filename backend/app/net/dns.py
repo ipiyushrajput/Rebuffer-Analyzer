@@ -26,6 +26,9 @@ class DnsResult:
     error: str | None = None
     ipv4_reachable: bool | None = None
     ipv6_reachable: bool | None = None
+    # Why IPv6 reachability was not measured. Set when the analyzer host itself has no IPv6
+    # route: a connection that cannot leave this host says nothing about the edge.
+    ipv6_unmeasured: str = ""
 
     @property
     def cname_depth(self) -> int:
@@ -41,6 +44,7 @@ class DnsResult:
             "resolve_ms": self.resolve_ms,
             "ipv4_reachable": self.ipv4_reachable,
             "ipv6_reachable": self.ipv6_reachable,
+            "ipv6_unmeasured": self.ipv6_unmeasured,
             "error": self.error,
         }
 
@@ -56,6 +60,22 @@ async def _tcp_reachable(address: str, port: int, family: int, timeout: float = 
         return True
     except (TimeoutError, OSError):
         return False
+
+
+def host_has_ipv6_route(address: str) -> bool:
+    """Whether this host has a route to `address` over IPv6.
+
+    A UDP connect sends nothing; it asks the kernel for a route and a source address. No route,
+    or only a link-local source, means the analyzer host cannot reach any IPv6 edge, and a
+    failed connection is the host's, not the CDN's.
+    """
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as probe:
+            probe.connect((address, 9))
+            local = str(probe.getsockname()[0])
+    except OSError:
+        return False
+    return local not in ("::", "::1") and not local.lower().startswith("fe80")
 
 
 async def resolve(url_or_host: str, *, probe_reachability: bool = True) -> DnsResult:
@@ -100,7 +120,13 @@ async def resolve(url_or_host: str, *, probe_reachability: bool = True) -> DnsRe
         if result.a_records:
             result.ipv4_reachable = await _tcp_reachable(result.a_records[0], port, socket.AF_INET)
         if result.aaaa_records:
-            result.ipv6_reachable = await _tcp_reachable(
-                result.aaaa_records[0], port, socket.AF_INET6
-            )
+            if host_has_ipv6_route(result.aaaa_records[0]):
+                result.ipv6_reachable = await _tcp_reachable(
+                    result.aaaa_records[0], port, socket.AF_INET6
+                )
+            else:
+                result.ipv6_unmeasured = (
+                    "The analyzer host has no IPv6 route, so whether the edge answers on its "
+                    "AAAA address was not measured."
+                )
     return result

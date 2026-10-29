@@ -17,10 +17,13 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.analysis.engine import AnalysisResult
+from app.analysis.grouping import group_findings
+from app.analysis.review import AckMatch, is_acknowledged
 from app.analysis.rules.base import Finding, Severity
 from app.api.health import VERSION
 from app.jobs.manager import _mask
 from app.reports.email_block import build_blocks
+from app.reports.manifests import finding_key as manifest_finding_key
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 ASSET_DIR = Path(__file__).parent / "assets"
@@ -229,26 +232,74 @@ def render_report(
     country: str | None = None,
     snapshots: list[dict[str, Any]] | None = None,
     player_ratio: float | None = None,
+    manifests: dict[str, Any] | None = None,
+    user_agent: str = "",
+    acknowledged: list[AckMatch] | None = None,
 ) -> str:
-    """Render the channel report to a self-contained HTML string."""
+    """Render the channel report to a self-contained HTML string.
+
+    `manifests` is what `app.reports.manifests.report_manifests` read from the poll log: an
+    excerpt per finding and per incident. A report rendered without it (the CLI, a run before
+    the poll log existed) states that no poll was recorded rather than showing a live window.
+    """
     verdict = result.verdict.as_dict()
     findings = [f.as_dict() for f in result.findings]
+    manifests = manifests or {}
+    by_finding_manifest: dict[str, Any] = manifests.get("findings") or {}
 
+    acks = acknowledged or []
     actionable: list[Finding] = [
         f for f in result.findings if f.severity not in (Severity.PASS, Severity.INFO)
     ]
+    # A channel's accepted behaviours are still reported, under their own heading, and are
+    # left out of the escalation text; the verdict is computed from every finding as before.
+    escalated = [f for f in actionable if not is_acknowledged(acks, f.rule.id, f.variant)]
+    acknowledged_groups: list[dict[str, Any]] = []
+    # One entry per issue: the same rule on the same layer is one defect, with each rendition
+    # it was measured on beneath it — its own sentence, evidence and playlist at the time.
     by_owner: dict[str, list[dict[str, Any]]] = {}
-    for finding in sorted(actionable, key=lambda f: (-f.severity.rank, -f.count, f.rule.id)):
-        by_owner.setdefault(finding.owner.label, []).append(finding.as_dict())
+    for group in group_findings(actionable):
+        lead = group.lead
+        if all(is_acknowledged(acks, m.rule.id, m.variant) for m in group.members):
+            acknowledged_groups.append(
+                {
+                    "rule_id": group.rule_id,
+                    "title": lead.rule.title,
+                    "severity": group.severity.value,
+                    "count": group.count,
+                    "renditions": group.rendition_label(),
+                    "owner_label": lead.owner.label,
+                }
+            )
+            continue
+        by_owner.setdefault(lead.owner.label, []).append(
+            {
+                **lead.as_dict(),
+                "severity": group.severity.value,
+                "count": group.count,
+                "first_seen": group.first_seen.isoformat(),
+                "last_seen": group.last_seen.isoformat(),
+                "renditions": group.rendition_label(),
+                "members": [
+                    {
+                        **member.as_dict(),
+                        "manifest": by_finding_manifest.get(manifest_finding_key(member)),
+                    }
+                    for member in group.members
+                ],
+            }
+        )
+    incident_manifests: list[Any] = manifests.get("incidents") or []
 
     escalations = build_blocks(
-        result.findings,
+        escalated,
         channel_name=channel_name,
         window_start=result.started_at,
         window_end=result.ended_at,
         playback_url=urls.get("playback_url") or "",
         rebuffer_ratio=verdict.get("measured_rebuffer_ratio"),
         threshold=result.thresholds.rebuffer_ratio_threshold,
+        user_agent=user_agent or str(result.options.get("user_agent") or ""),
     )
 
     ref_frames = {
@@ -278,7 +329,15 @@ def render_report(
         "findings": findings,
         "findings_by_owner": by_owner,
         "passes": [f for f in findings if f["severity"] == "PASS"],
-        "incidents": [i.as_dict() for i in result.incidents],
+        "incidents": [
+            {
+                **incident.as_dict(),
+                "manifests": incident_manifests[index] if index < len(incident_manifests) else [],
+            }
+            for index, incident in enumerate(result.incidents)
+        ],
+        "poll_log": bool(manifests),
+        "acknowledged_groups": acknowledged_groups,
         "chains": [c.as_dict() for c in result.chains],
         "layer_diffs": [d.as_dict() for d in result.layer_diffs],
         "ladder": result.ladder,
@@ -298,6 +357,10 @@ def render_report(
         # reader has to be able to tell a rendition that passed every bitstream check from
         # one whose payload was never read. Empty for a clear channel, which renders nothing.
         "drm": result.drm,
+        # Whether the analyzer kept its own schedule: a late poll reads as a late stream.
+        "self_check": result.self_check,
+        # A replay states what it served from the original run and what it did not re-measure.
+        "replay": result.replay,
         "escalations": [block.as_dict() for block in escalations],
         "vpb_summary": [
             {
@@ -319,11 +382,18 @@ def render_report(
     return _environment().get_template("report.html.j2").render(**context)
 
 
-def render_html_for_handle(handle: Any, result: AnalysisResult) -> str:
+def render_html_for_handle(
+    handle: Any,
+    result: AnalysisResult,
+    manifests: dict[str, Any] | None = None,
+    acknowledged: list[AckMatch] | None = None,
+) -> str:
     """Render a report for a job handle, taking the channel identity from the job."""
     extra = handle.extra or {}
     return render_report(
         result,
+        manifests=manifests,
+        acknowledged=acknowledged,
         channel_name=handle.channel_name,
         job_type=handle.type,
         urls=dict(handle.urls),

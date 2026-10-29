@@ -22,6 +22,8 @@ class JobOptionsIn(BaseModel):
     check_sets: list[str] = Field(default_factory=list)
     renditions: list[str] | None = None
     record_evidence: bool | None = None
+    # Write every segment of every analysed rendition to the recordings folder.
+    record_stream: bool = False
     clear_keys: dict[str, str] = Field(default_factory=dict)
     vpb_mode: Literal["STRICT", "NORMAL", "OUTAGE_ONLY"] | None = None
     nth_segment_sampling: int | None = Field(default=None, ge=1, le=50)
@@ -41,7 +43,9 @@ class JobOptionsIn(BaseModel):
             raise ValueError(f"Unknown check set(s): {unknown}")
         return value
 
-    def to_session_options(self, *, duration_s: float, default_record: bool) -> SessionOptions:
+    def to_session_options(
+        self, *, duration_s: float, default_record: bool, record_mode: str = "full"
+    ) -> SessionOptions:
         return SessionOptions(
             duration_s=duration_s,
             ua_profile=self.ua_profile or default_ua_profile(),
@@ -54,6 +58,8 @@ class JobOptionsIn(BaseModel):
             vpb_mode=self.vpb_mode,
             nth_segment_sampling=self.nth_segment_sampling,
             snapshot_mode=duration_s <= 300,
+            record_stream=self.record_stream,
+            record_mode=record_mode,
         )
 
 

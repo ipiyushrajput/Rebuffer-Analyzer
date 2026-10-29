@@ -78,7 +78,7 @@ class PdfUnavailable(RuntimeError):
 PDF_FOOTER = (
     '<div style="width:100%;font-size:8px;color:#667085;padding:0 10mm;'
     'display:flex;justify-content:space-between">'
-    "<span>TV Plus Rebuffer Analyzer</span>"
+    "<span>StreamLens</span>"
     '<span class="pageNumber"></span>/<span class="totalPages"></span></div>'
 )
 

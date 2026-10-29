@@ -1,6 +1,8 @@
-# RBA — TV Plus Rebuffer Analyzer — project memory
+# StreamLens (RBA) — Samsung TV Plus stream analyzer — project memory
 
-Internal platform for the Samsung TV Plus stream quality team. It analyses linear HLS
+Internal platform for the Samsung TV Plus stream quality team. The product name is
+**StreamLens** (`PRODUCT_NAME` in `app/config.py`, the browser tab, the rail, the reports and
+the alerts); the package, the service units, the database and the CLI keep `rba`. It analyses linear HLS
 channels end to end and produces a channel-wise report naming the exact defect, the
 evidence, the responsible party, and the fix.
 
@@ -113,6 +115,21 @@ frontend/src/
   skip the missing segment's own duration reads as a gap of exactly that length. The skipped
   boundary is reported as `INFO-005` with the count, never dropped. A config-change check is
   not gated: a change observed across a skip is still a change.
+- **A ladder is compared with itself one round at a time.** `LadderPoller`
+  (`app/analysis/collectors/playlist_poller.py`) requests every rendition of a layer in the
+  same round, and the cross-variant checks (SEQ-008 to SEQ-012, AV-003) run once per round on
+  that round's snapshots — never on whatever each rendition fetched last, which was seconds
+  apart and reported a packager publishing one rung before the next as a ladder that disagrees.
+  A cross-variant finding is recorded only after `cross_variant_confirm_rounds` consecutive
+  rounds. Per-rendition transitions allow what the time between polls explains: SEQ-007 the
+  discontinuities that rolled off, SEQ-003 the advance `elapsed / target duration` accounts for,
+  and a segment is matched by `uri_path` because CDNs re-sign the query on every response.
+- **A rule judges the stream, not the sampler.** Anything sampled independently per rendition —
+  every Nth segment, a trimmed index, a decrypt that failed, the end of the run — is excluded
+  from a comparison rather than counted as absent: VID-007 compares MSNs every rung sampled,
+  AUD-007 is the skew change across matched pairs, AUD-006 skips pending and unread segments,
+  and the buffer model plays back only renditions sampled in full and stops where the sample
+  budget did. `docs/FALSE_POSITIVE_AUDIT.md` lists every rule's standing.
 - **A demuxed rung is not a rung missing its audio.** `app/analysis/layout.py` reads each
   variant's packaging off the master once, at bootstrap, and `LayerContext.layout` carries it
   to every check that asks what a segment is supposed to contain. A variant is demuxed only
@@ -177,6 +194,20 @@ frontend/src/
   migrating. `tests/test_schema_drift.py` builds a database from the revisions alone and
   requires it to match the models exactly, and a revision that alters a column does so on
   SQLite as well (`batch_alter_table`) so that comparison holds.
+- **Every playlist poll is written down, and a finding names the poll it fired on.**
+  `app/jobs/manifest_log.py` numbers every playlist fetch of a run (`seq`, across every
+  rendition and the master) and writes it to `manifest_polls` — URL, final URL, status, full
+  response headers, the redirect chain, the timing split — with the body in `manifest_bodies`,
+  zlib-compressed and stored once per distinct content per job. It runs for every job,
+  realtime included, independent of `record_evidence`; the poller's in-memory history (400
+  polls) is for its own comparisons only and is never the record. The engine sets the poll
+  being handled in a per-task `ContextVar`, and `_record` stamps it into each evidence sample
+  as `poll`, so a finding from hour three of an aging run opens on the window as it stood
+  then. When a run ends, the polls a finding names and every poll inside an incident window
+  (±30 s) are pinned: ordinary polls follow `rba_sample_retention_days`, pinned ones
+  `rba_pinned_retention_days`, a running job is never purged, and orphaned bodies go with the
+  last poll that carried them. `GET /api/jobs/{id}/network-log.zip` streams every poll as a
+  file, `polls.csv` and a HAR 1.2 (playlists and segment fetches) from a spooled temp file.
 - **A listing sorts keys, never rows.** MySQL's filesort packs every selected column into
   `sort_buffer_size`, and a `jobs` row carries two JSON columns and five TEXT ones, so
   `select(Model).order_by(...)` over a table with history fails with error 1038, "Out of sort
@@ -302,6 +333,40 @@ frontend/src/
   `mp4decrypt` — a bundle that is short of something never leaves a reader guessing.
   `cbcs` is decrypted only by Bento4's `mp4decrypt`, reported by `/api/health`; `cenc` stays
   in process. No key, private key or credential reaches a bundle.
+- **A recording is the one thing the analyzer host keeps.** "Record stream" on a run starts
+  `app/analysis/recorder.py`: a worker per rendition downloads every segment its playlist lists
+  (reusing the bytes the sampler already fetched), writes it under
+  `RBA_RECORDINGS_DIR/<job>/`, and — for a protected rung whose key the run holds — a decrypted
+  copy through the run's `DrmContext`. It is queued from the poll handler and never waits on a
+  download. Realtime records `full`; aging records `incidents`: a rolling pre-roll
+  (`recording_preroll_s`) is deleted as it ages unless an incident spans it, and an incident
+  keeps the pre-roll before it and the post-roll after it. Every recorder shares one byte count
+  against `rba_recordings_quota_gb` and stops with a stated reason at the quota. The purge
+  removes full recordings with the samples and incident clips with the pinned retention, never
+  a running job's. `GET /api/jobs/{id}/recording.zip` streams each rendition joined into one
+  playable file per clip, the decrypted copy, audio and video joined by ffmpeg when installed,
+  and the clip's own network log. An evidence download for a run no longer in memory is built
+  from the database and the poll log and says that the session's segment bytes went with it.
+- **A run states whether the analyzer kept its own time.** `app/analysis/self_check.py`
+  measures how late the session's one-second supervisor wakes (event-loop lag) and how long each
+  playlist poll takes to handle against its poll interval, because a late poll reads as a late
+  stream. Past `selfcheck_loop_lag_ms`, or a handler outlasting its interval, raises `INFO-007`
+  with the measured delay; the result's `self_check` and the report appendix state it either way.
+- **A finished run can be re-analysed from what it stored.** `POST /api/jobs/{id}/replay` starts
+  a new job (`parent_job_id`, `options.replay_of`) whose `ReplayFetcher` (`app/analysis/replay.py`)
+  answers every playlist from the poll log at the offset the original received it, at 1x, and
+  every segment from its recording with the timing the original sampler measured — or none, so
+  the delivery checks do not run on it. A request the original never stored is a `replay_gap`:
+  `check_http` reads nothing into it. DNS and TLS are not re-measured, a licence POST goes out
+  live, a replay never alerts, and `INFO-008` states what was served and what was not.
+- **Engineers' verdicts and accepted behaviours are data, not code.** `app/analysis/review.py`
+  stores confirmed / false-positive feedback per finding (summed into per-rule precision in the
+  rule catalogue) and per-channel acknowledgements with an expiry. An acknowledged finding is
+  still measured and shown, marked; it is excluded from alerts, escalation packs and the report's
+  owner sections. Alerts (`app/alerts.py`) post the first occurrence of each issue per run to a
+  webhook held server-side and reported to a page as set or not set, never returned.
+- **Across runs.** `app/api/insights.py` searches findings over a projection of findings and jobs
+  (never the evidence JSON) and compares two runs grouped by rule and layer.
 - **EME needs a secure context, and that is the page's origin, not the stream.**
   `navigator.requestMediaKeySystemAccess` is undefined on a plain `http://` origin that is not
   localhost, and hls.js turns that into `keySystemNoAccess` — a message naming nothing

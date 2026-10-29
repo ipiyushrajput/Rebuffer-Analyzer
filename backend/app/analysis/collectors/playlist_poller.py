@@ -1,9 +1,15 @@
 """Playlist poller.
 
-Every child playlist — video, audio and subtitles — is polled in parallel at
-`TARGETDURATION / 2`, the cadence the A-Sequence Detector validated. Each snapshot is kept
-so a later poll can be compared against it and so the UI can show the playlist exactly as it
-was at any moment.
+Every child playlist — video, audio and subtitles — is polled at `TARGETDURATION / 2`, the
+cadence the A-Sequence Detector validated. Each snapshot is kept so a later poll can be
+compared against it and so the UI can show the playlist exactly as it was at any moment.
+
+A session polls a ladder through `LadderPoller`: every rendition of one layer is requested in
+the same **round**, concurrently, so the snapshots a cross-variant check compares were taken
+within one request latency of each other. Polling each rendition on its own clock left them
+seconds apart — segment sampling runs between polls and every loop drifted on its own — and a
+packager that published one rung a moment before the next read as a ladder whose media and
+discontinuity sequence numbers disagreed.
 """
 
 from __future__ import annotations
@@ -39,6 +45,12 @@ class Snapshot:
     # Set when the body arrived and the analyzer's own parser raised on it. That is the
     # analyzer's defect, not the stream's, so it is logged rather than charged to the origin.
     parse_error: str = ""
+    # The poll's number in the job's poll log, set by the engine when it handles the poll.
+    seq: int = 0
+    # The ladder round this poll belongs to (`LadderPoller`); 0 for a poll made on its own.
+    round: int = 0
+    # When the request went out. `at` is when the response was complete.
+    requested_at: dt.datetime | None = None
 
     @property
     def ok(self) -> bool:
@@ -46,6 +58,7 @@ class Snapshot:
 
     def summary(self) -> dict[str, Any]:
         return {
+            "seq": self.seq,
             "at": self.at.isoformat(),
             "variant": self.variant,
             "url": self.url,
@@ -118,6 +131,7 @@ class PlaylistPoller:
                 await self._task
 
     async def poll_once(self) -> Snapshot:
+        requested_at = dt.datetime.now(dt.UTC)
         result = await self.fetcher.fetch(self.target.url)
         at = dt.datetime.now(dt.UTC)
         playlist: MediaPlaylist | None = None
@@ -148,6 +162,7 @@ class PlaylistPoller:
             playlist=playlist,
             raw=raw,
             parse_error=parse_error,
+            requested_at=requested_at,
         )
         self.target.history.append(snapshot)
         if len(self.target.history) > self.history_limit:
@@ -175,5 +190,80 @@ class PlaylistPoller:
                 )
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self.interval_s)
+            except TimeoutError:
+                continue
+
+
+RoundHandler = Callable[[int, list[tuple["PlaylistPoller", Snapshot]]], Awaitable[None]]
+
+
+class LadderPoller:
+    """Polls every rendition of one layer together, one round at a time.
+
+    A round requests every playlist at once and hands the whole round to `on_round`, which
+    handles each snapshot and then compares the renditions with each other. Rounds start on a
+    fixed cadence — the shortest poll interval of the ladder, measured from the start of the
+    previous round — so handling a round never pushes the next one later than it has to be; a
+    round that takes longer than the interval is followed immediately by the next.
+
+    Each rendition keeps its own `PlaylistPoller` for its history, its interval and its count
+    of handler failures, which `AnalysisSession.sampling_state()` reports.
+    """
+
+    def __init__(self, pollers: list[PlaylistPoller], *, on_round: RoundHandler) -> None:
+        self.pollers = pollers
+        self.on_round = on_round
+        self.rounds = 0
+        self.failures = 0
+        self.last_failure = ""
+        self._task: asyncio.Task[None] | None = None
+        self._stop = asyncio.Event()
+
+    @property
+    def interval_s(self) -> float:
+        if not self.pollers:
+            return DEFAULT_POLL_INTERVAL_S
+        return max(MIN_POLL_INTERVAL_S, min(p.interval_s for p in self.pollers))
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._run(), name="poll:ladder")
+
+    async def stop(self) -> None:
+        self._stop.set()
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._task
+
+    async def poll_round(self) -> list[tuple[PlaylistPoller, Snapshot]]:
+        """Request every playlist of the ladder at once."""
+        self.rounds += 1
+        snapshots = await asyncio.gather(*(poller.poll_once() for poller in self.pollers))
+        for snapshot in snapshots:
+            snapshot.round = self.rounds
+        return list(zip(self.pollers, snapshots, strict=True))
+
+    async def _run(self) -> None:
+        loop = asyncio.get_running_loop()
+        while not self._stop.is_set():
+            started = loop.time()
+            try:
+                polled = await self.poll_round()
+                await self.on_round(self.rounds, polled)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A round that fails is counted and logged, never swallowed; the next round
+                # runs on schedule.
+                self.failures += 1
+                self.last_failure = traceback.format_exc()
+                log.exception(
+                    "Ladder poll round %d failed (failure %d)", self.rounds, self.failures
+                )
+            remaining = self.interval_s - (loop.time() - started)
+            if remaining <= 0:
+                continue
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=remaining)
             except TimeoutError:
                 continue

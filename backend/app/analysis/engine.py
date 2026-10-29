@@ -12,15 +12,26 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import datetime as dt
 import logging
+import time
+import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.analysis import attribution, av_pairing, correlate, vpb
 from app.analysis import evidence as evidence_store
-from app.analysis.collectors.playlist_poller import PlaylistPoller, PollTarget, Snapshot
+from app.analysis import recorder as recorder_module
+from app.analysis import replay as replay_module
+from app.analysis.collectors.playlist_poller import (
+    MIN_POLL_INTERVAL_S,
+    LadderPoller,
+    PlaylistPoller,
+    PollTarget,
+    Snapshot,
+)
 from app.analysis.collectors.segment_sampler import (
     RungSampling,
     SampledSegment,
@@ -38,6 +49,7 @@ from app.analysis.rules import sequence as sequence_rules
 from app.analysis.rules import subtitles as subtitle_rules
 from app.analysis.rules import transport as transport_rules
 from app.analysis.rules.base import Finding, FindingCollector, Severity, StreamLayer
+from app.analysis.self_check import SelfCheck
 from app.analysis.verdict import Verdict
 from app.analysis.verdict import build as build_verdict
 from app.config import (
@@ -54,14 +66,21 @@ from app.drm.settings import DrmSettings
 from app.hls import scte35
 from app.hls.playlist import MasterPlaylist, MediaPlaylist, is_master, parse_master, parse_media
 from app.hls.uri import host_of
+from app.jobs.manifest_log import ManifestLog, PollRef
 from app.media import ffprobe
 from app.net import dns as dns_module
 from app.net import tls_inspect
-from app.net.fetcher import Fetcher
+from app.net.fetcher import Fetcher, FetchResult
 
 logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+# The poll being handled, per asyncio task. Each rendition's poller runs in its own task, so a
+# finding raised while one poll is handled can never be labelled with another rendition's.
+_CURRENT_POLL: contextvars.ContextVar[PollRef | None] = contextvars.ContextVar(
+    "rba_current_poll", default=None
+)
 
 LAYER_FIELDS = (
     ("playback_url", StreamLayer.PLAYBACK),
@@ -90,6 +109,13 @@ class SessionOptions:
     nth_segment_sampling: int | None = None
     max_segment_samples: int = 5000
     snapshot_mode: bool = False
+    # Every segment of every analysed rendition written to RBA_RECORDINGS_DIR: the whole run
+    # ("full", realtime), or a rolling pre-roll kept only around incidents ("incidents",
+    # aging), because a day of every rung is well over a hundred gigabytes.
+    record_stream: bool = False
+    record_mode: str = "full"
+    # The run this one re-analyses from its poll log and recording, instead of the network.
+    replay_of: str | None = None
 
     def enabled(self, name: str) -> bool:
         return name in self.check_sets
@@ -106,6 +132,9 @@ class SessionOptions:
             "check_sets": list(self.check_sets),
             "renditions": list(self.renditions) if self.renditions else None,
             "record_evidence": self.record_evidence,
+            "record_stream": self.record_stream,
+            "record_mode": self.record_mode,
+            "replay_of": self.replay_of,
             "vpb_mode": self.vpb_mode,
             "nth_segment_sampling": self.nth_segment_sampling,
             "snapshot_mode": self.snapshot_mode,
@@ -176,6 +205,15 @@ class LayerContext:
     master_final_url: str = ""
     targets: dict[str, PollTarget] = field(default_factory=dict)
     pollers: list[PlaylistPoller] = field(default_factory=list)
+    # Polls every rendition of this layer in the same round (see `LadderPoller`).
+    ladder: LadderPoller | None = None
+    # Consecutive rounds each cross-variant rule has fired in; a rule is recorded only once
+    # it has held for `cross_variant_confirm_rounds` rounds in a row.
+    xvar_streak: dict[str, int] = field(default_factory=dict)
+    # Per rendition, the recent poll pairs as (from, to, media added), for MED-015.
+    publication: dict[str, list[tuple[dt.datetime, dt.datetime, float]]] = field(
+        default_factory=dict
+    )
     samplers: dict[str, SegmentSampler] = field(default_factory=dict)
     state_machines: dict[str, media_rules.PlaylistStateMachine] = field(default_factory=dict)
     histories: dict[str, segment_rules.RungHistory] = field(default_factory=dict)
@@ -214,6 +252,10 @@ class AnalysisResult:
     # key material: what the system was, which identifier, whether a key was obtained, and
     # how many segments were decrypted.
     drm: dict[str, Any] = field(default_factory=dict)
+    # Whether the analyzer kept its own schedule over the window (`app/analysis/self_check.py`).
+    self_check: dict[str, Any] = field(default_factory=dict)
+    # For a replay: what was served from the original run and what was not re-measured.
+    replay: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -232,6 +274,8 @@ class AnalysisResult:
             "event_log": self.event_log[-500:],
             "owner_summary": self.owner_summary,
             "drm": self.drm,
+            "self_check": self.self_check,
+            "replay": self.replay,
         }
 
 
@@ -251,8 +295,14 @@ class AnalysisSession:
         thresholds: Thresholds | None = None,
         drm: DrmSettings | None = None,
         on_event: EventHandler | None = None,
+        poll_log: ManifestLog | None = None,
+        replay: replay_module.ReplaySource | None = None,
     ) -> None:
         self.session_id = session_id
+        self.replay = replay
+        # Every playlist fetch is numbered here and, when the job keeps a log, written down.
+        # A run without one (the CLI) still numbers its polls, so findings name them.
+        self.poll_log = poll_log or ManifestLog(job_id=session_id, enabled=False)
         self.channel_name = channel_name or "(unnamed channel)"
         self.urls = {
             "playback_url": playback_url,
@@ -284,6 +334,11 @@ class AnalysisSession:
             if self.options.record_evidence
             else None
         )
+        # Every segment of every analysed rendition, on disk, when the run was asked to record.
+        self.recorder: recorder_module.StreamRecorder | None = None
+        self.recording: dict[str, Any] | None = None
+        # The analyzer's own timing: a late poll reads as a late stream unless it is measured.
+        self.self_check = SelfCheck(lag_threshold_s=self.thresholds.selfcheck_loop_lag_ms / 1000)
         self.layers: dict[StreamLayer, LayerContext] = {}
         self.event_log: list[dict[str, Any]] = []
         self.stalls: list[correlate.StallEvent] = []
@@ -299,6 +354,7 @@ class AnalysisSession:
         self._stop = asyncio.Event()
         self._fetcher: Fetcher | None = None
         self._sample_budget = self.options.max_segment_samples
+        self._budget_spent_at: dt.datetime | None = None
         self._last_ladder_sweep = self.started_at
         self._last_master_poll = self.started_at
         self._segment_queue: asyncio.Queue[tuple[LayerContext, str, Any]] = asyncio.Queue()
@@ -375,18 +431,54 @@ class AnalysisSession:
         if findings is None:
             return
         items = findings if isinstance(findings, list) else [findings]
+        poll = _CURRENT_POLL.get()
         for finding in items:
+            if poll is not None:
+                # The poll this occurrence was measured on, carried by its own evidence
+                # sample: a finding merges many occurrences, each from its own poll.
+                ref = poll.as_dict()
+                if not finding.evidence:
+                    finding.evidence = [{}]
+                for sample in finding.evidence:
+                    if isinstance(sample, dict):
+                        sample.setdefault("poll", ref)
+            # Each occurrence keeps its own sentence: the finding's `detail` is the latest
+            # one, and an earlier sample shown beside it has to say what it measured.
+            for sample in finding.evidence:
+                if isinstance(sample, dict):
+                    sample.setdefault("detail", finding.detail)
+                    sample.setdefault("at", finding.first_seen.isoformat())
             merged = self.collector.add(finding)
             if merged is not None and merged.count == 1:
                 await self._emit("finding", {"data": merged.as_dict()})
 
     async def run(self) -> AnalysisResult:
         settings = get_settings()
-        self._fetcher = Fetcher(
-            ua_profile=self.options.ua_profile,
-            timeout_s=self.thresholds.request_timeout_s,
-            per_host_connections=settings.rba_per_host_connections,
-        )
+        if self.replay is not None:
+            # Every response comes from the replayed run's poll log and recording.
+            self._fetcher = replay_module.ReplayFetcher(
+                self.replay,
+                ua_profile=self.options.ua_profile,
+                timeout_s=self.thresholds.request_timeout_s,
+                per_host_connections=settings.rba_per_host_connections,
+            )
+        else:
+            self._fetcher = Fetcher(
+                ua_profile=self.options.ua_profile,
+                timeout_s=self.thresholds.request_timeout_s,
+                per_host_connections=settings.rba_per_host_connections,
+            )
+        if self.options.record_stream and self.replay is None:
+            self.recorder = recorder_module.StreamRecorder(
+                job_id=self.session_id,
+                root=settings.rba_recordings_dir,
+                fetcher=self._fetcher,
+                mode=self.options.record_mode,
+                preroll_s=self.thresholds.recording_preroll_s,
+                postroll_s=self.thresholds.recording_postroll_s,
+                quota_bytes=int(settings.rba_recordings_quota_gb * 1024**3),
+                drm=lambda: self.drm,
+            )
         try:
             await self._emit("status", {"state": "RESOLVING", "channel": self.channel_name})
             await self._bootstrap_layers()
@@ -394,6 +486,13 @@ class AnalysisSession:
             await self._collect()
         finally:
             await self._shutdown_pollers()
+            if self.recorder is not None:
+                # Before the fetcher closes: the recorder finishes what it has queued with it.
+                self.recorder.set_windows(self._incident_windows())
+                try:
+                    self.recording = await self.recorder.close()
+                except Exception:
+                    logger.exception("the recording of %s did not close cleanly", self.session_id)
             if self._fetcher is not None:
                 await self._fetcher.aclose()
         return await self._finalise()
@@ -408,7 +507,10 @@ class AnalysisSession:
                 continue
             context = LayerContext(layer=layer, url=url)
             self.layers[layer] = context
-            await self._bootstrap_layer(context)
+            try:
+                await self._bootstrap_layer(context)
+            finally:
+                _CURRENT_POLL.set(None)
 
         if len(self.layers) == 1:
             await self._record(
@@ -429,10 +531,8 @@ class AnalysisSession:
                 )
             )
 
-    async def _bootstrap_layer(self, context: LayerContext) -> None:
-        assert self._fetcher is not None
+    async def _check_name_and_certificate(self, context: LayerContext) -> None:
         layer = context.layer
-
         dns_result = await dns_module.resolve(context.url)
         await self._record(
             transport_rules.check_dns(dns_result, layer=layer, thresholds=self.thresholds)
@@ -448,8 +548,29 @@ class AnalysisSession:
                 "event", {"kind": "tls", "layer": layer.value, "data": tls_result.as_dict()}
             )
 
+    async def _bootstrap_layer(self, context: LayerContext) -> None:
+        assert self._fetcher is not None
+        layer = context.layer
+
+        if self.replay is None:
+            # A replay answers from stored responses: name resolution and the certificate
+            # chain belong to the network, which it does not re-measure.
+            await self._check_name_and_certificate(context)
+
         result = await self._fetcher.fetch(context.url)
         context.playlist_count += 1
+        text_head = result.text if result.ok else ""
+        root_variant = "master" if result.ok and is_master(text_head) else "media"
+        _CURRENT_POLL.set(
+            await self._log_poll(
+                layer=layer,
+                variant=root_variant,
+                kind="master" if root_variant == "master" else "video",
+                url=context.url,
+                result=result,
+                at=dt.datetime.now(dt.UTC),
+            )
+        )
         self.redirect_chains.append({"layer": layer.value, **result.as_dict()})
         await self._record(
             transport_rules.check_http(
@@ -649,18 +770,29 @@ class AnalysisSession:
         assert self._fetcher is not None
         for context in self.layers.values():
             for target in context.targets.values():
-                poller = PlaylistPoller(
-                    target,
-                    self._fetcher,
-                    on_snapshot=self._make_snapshot_handler(context),
+                context.pollers.append(
+                    PlaylistPoller(
+                        target,
+                        self._fetcher,
+                        on_snapshot=self._make_snapshot_handler(context),
+                    )
                 )
-                context.pollers.append(poller)
-                poller.start()
+            if not context.pollers:
+                continue
+            # Every rendition of the layer is requested in the same round, so the ladder is
+            # compared with itself at one moment rather than across seconds of drift.
+            context.ladder = LadderPoller(
+                context.pollers, on_round=self._make_round_handler(context)
+            )
+            context.ladder.start()
 
         deadline = self.started_at + dt.timedelta(seconds=self.options.duration_s)
         while not self._stop.is_set() and dt.datetime.now(dt.UTC) < deadline:
+            waited_from = time.monotonic()
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), timeout=1.0)
+            if not self._stop.is_set():
+                self.self_check.tick(1.0, time.monotonic() - waited_from)
             await self._periodic()
             await self._emit(
                 "metric",
@@ -672,6 +804,10 @@ class AnalysisSession:
                         "findings": len(self.collector),
                         "counts": self.collector.counts(),
                         "sampling": self.sampling_state(),
+                        "self_check": {
+                            "kept_time": self.self_check.kept_time,
+                            "lag_max_ms": round(self.self_check.lag_max_s * 1000, 1),
+                        },
                     },
                 },
             )
@@ -684,7 +820,92 @@ class AnalysisSession:
 
         return handler
 
+    def _make_round_handler(
+        self, context: LayerContext
+    ) -> Callable[[int, list[tuple[PlaylistPoller, Snapshot]]], Awaitable[None]]:
+        async def handle_one(poller: PlaylistPoller, snapshot: Snapshot) -> None:
+            try:
+                await self._on_snapshot(context, snapshot)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A handler that raises is the analyzer's defect: counted on the rendition's
+                # poller, where `sampling_state()` names it, and logged with its traceback.
+                poller.failures += 1
+                poller.last_failure = traceback.format_exc()
+                logger.exception(
+                    "Playlist poll handling failed for %s (failure %d)",
+                    poller.target.variant,
+                    poller.failures,
+                )
+
+        async def handler(round_no: int, polled: list[tuple[PlaylistPoller, Snapshot]]) -> None:
+            await asyncio.gather(*(handle_one(poller, snapshot) for poller, snapshot in polled))
+            await self._check_cross_variant(
+                context, [snapshot for _, snapshot in polled], round_no=round_no
+            )
+
+        return handler
+
+    async def _log_poll(
+        self,
+        *,
+        layer: StreamLayer,
+        variant: str,
+        kind: str,
+        url: str,
+        result: FetchResult,
+        at: dt.datetime,
+        msn: int | None = None,
+        last_msn: int | None = None,
+    ) -> PollRef:
+        """Number one playlist fetch and hand it to the poll log."""
+        seq = self.poll_log.next_seq()
+        try:
+            await self.poll_log.record(
+                seq=seq,
+                at=at,
+                layer=layer.value,
+                variant=variant,
+                kind=kind,
+                url=url,
+                result=result,
+                msn=msn,
+                last_msn=last_msn,
+            )
+        except Exception:
+            # The log is evidence; a failure to write it never stops the measurement.
+            logger.exception("poll %d of %s could not be logged", seq, variant)
+        return PollRef(seq=seq, layer=layer.value, variant=variant, at=at, msn=msn)
+
     async def _on_snapshot(self, context: LayerContext, snapshot: Snapshot) -> None:
+        playlist = snapshot.playlist
+        ref = await self._log_poll(
+            layer=context.layer,
+            variant=snapshot.variant,
+            kind=context.targets[snapshot.variant].kind,
+            url=snapshot.url,
+            result=snapshot.result,
+            at=snapshot.at,
+            msn=playlist.media_sequence if playlist else None,
+            last_msn=playlist.last_msn if playlist else None,
+        )
+        snapshot.seq = ref.seq
+        # Every finding raised while this poll is handled names it — the segment checks
+        # included, since sampling runs inside the handler.
+        token = _CURRENT_POLL.set(ref)
+        started = time.monotonic()
+        try:
+            await self._handle_snapshot(context, snapshot)
+        finally:
+            _CURRENT_POLL.reset(token)
+            # The poller waits for this handler before it schedules the next poll, so a
+            # handler that outlasts the interval delays that rendition's next poll.
+            target_duration = context.target_duration_by_variant.get(snapshot.variant)
+            budget = max(MIN_POLL_INTERVAL_S, (target_duration or 6.0) / 2)
+            self.self_check.handled(snapshot.variant, time.monotonic() - started, budget)
+
+    async def _handle_snapshot(self, context: LayerContext, snapshot: Snapshot) -> None:
         layer = context.layer
         variant = snapshot.variant
         target = context.targets[variant]
@@ -806,6 +1027,7 @@ class AnalysisSession:
                     cdn_headers={
                         k.lower(): v for k, v in snapshot.result.cdn_fingerprint().items()
                     },
+                    elapsed_s=(snapshot.at - previous.at).total_seconds(),
                 )
             )
             await self._record(
@@ -819,18 +1041,36 @@ class AnalysisSession:
                         previous.playlist, playlist, variant=variant, layer=layer
                     )
                 )
-            added = _added_duration(previous.playlist, playlist)
-            elapsed = (snapshot.at - previous.at).total_seconds()
-            await self._record(
-                media_rules.check_publication_rate(
-                    added_duration_s=added,
-                    elapsed_wall_s=elapsed,
-                    variant=variant,
-                    layer=layer,
+            # Publication rate over a window of at least three target durations: one poll pair
+            # sees a whole segment land in half a segment's time on every ordinary refresh.
+            window = context.publication.setdefault(variant, [])
+            window.append((previous.at, snapshot.at, _added_duration(previous.playlist, playlist)))
+            horizon = 3 * target_duration
+            while len(window) > 1 and (snapshot.at - window[1][0]).total_seconds() >= horizon:
+                window.pop(0)
+            elapsed = (snapshot.at - window[0][0]).total_seconds()
+            if elapsed >= horizon:
+                await self._record(
+                    media_rules.check_publication_rate(
+                        added_duration_s=sum(added for _, _, added in window),
+                        elapsed_wall_s=elapsed,
+                        variant=variant,
+                        layer=layer,
+                        target_duration_s=target_duration,
+                    )
                 )
-            )
 
         await self._sample_new_segments(context, target, playlist, snapshot)
+        if self.recorder is not None:
+            # After sampling, so the segments the sampler just fetched are reused, not fetched
+            # twice. Queued for the recorder's own worker: this never waits on a download.
+            self.recorder.observe_playlist(
+                layer=layer.value,
+                variant=variant,
+                kind=target.kind,
+                playlist=playlist,
+                encrypted=bool(context.encrypted),
+            )
         # A refresh of the audio rendition is the event that could have published the segment
         # a deferred pair is waiting for, so the deferral clock advances here and nowhere
         # else. A video segment whose audio never arrives is given up on rather than measured
@@ -839,7 +1079,6 @@ class AnalysisSession:
             for pairing in context.pairings.values():
                 if pairing.audio_variant == variant:
                     pairing.expire()
-        await self._check_cross_variant(context, snapshot.at)
 
     async def _sample_new_segments(
         self,
@@ -902,8 +1141,14 @@ class AnalysisSession:
         history = context.histories.setdefault(
             target.variant, segment_rules.RungHistory(variant=target.variant)
         )
+        # The buffer model plays a rendition back from what was fetched, so it is only true of
+        # a rendition fetched segment by segment. A rung sampled every Nth segment would
+        # deliver a third of its media and "rebuffer" by construction, and a subtitle track
+        # does not feed the player's media queue at all.
+        modelled = sampler.sampling.full and target.kind in ("video", "audio")
         buffer = context.buffers.get(target.variant)
-        if buffer is None:
+        first_poll = buffer is None
+        if buffer is None and modelled:
             buffer = vpb.VirtualPlayerBuffer(
                 target.variant,
                 target_duration=context.target_duration_by_variant.get(target.variant, 6.0),
@@ -922,6 +1167,10 @@ class AnalysisSession:
                 continue
             report.eligible += 1
             self._sample_budget -= 1
+            if self._sample_budget == 0:
+                # Past this moment no rendition is fed, so the buffer model ends here rather
+                # than draining through the rest of the run and calling it a stall.
+                self._budget_spent_at = dt.datetime.now(dt.UTC)
 
             sample = await sampler.fetch_segment(
                 msn=segment.msn,
@@ -932,7 +1181,9 @@ class AnalysisSession:
             )
             context.segment_count += 1
             report.record_fetch()
-            await self._on_segment(context, target, sample, buffer, history, snapshot)
+            await self._on_segment(
+                context, target, sample, buffer, history, snapshot, backlog=first_poll
+            )
 
         if report.fetched == 0:
             policy = (
@@ -950,9 +1201,11 @@ class AnalysisSession:
         context: LayerContext,
         target: PollTarget,
         sample: SampledSegment,
-        buffer: vpb.VirtualPlayerBuffer,
+        buffer: vpb.VirtualPlayerBuffer | None,
         history: segment_rules.RungHistory,
         snapshot: Snapshot,
+        *,
+        backlog: bool = False,
     ) -> None:
         layer = context.layer
         variant = sample.variant
@@ -968,18 +1221,20 @@ class AnalysisSession:
             )
         )
 
-        buffer.feed(
-            vpb.SegmentDelivery(
-                msn=sample.msn,
-                completed_at=sample.completed_at,
-                duration_s=sample.declared_duration or 0.0,
-                available=sample.available,
-                download_ms=sample.download_ms,
-                uri=sample.uri,
-                # The byte cap is half the buffer model, so the measured size travels with it.
-                bytes=sample.result.bytes_received,
+        if buffer is not None:
+            buffer.feed(
+                vpb.SegmentDelivery(
+                    msn=sample.msn,
+                    completed_at=sample.completed_at,
+                    duration_s=sample.declared_duration or 0.0,
+                    available=sample.available,
+                    download_ms=sample.download_ms,
+                    uri=sample.uri,
+                    # The byte cap is half the buffer model, so the measured size travels with it.
+                    bytes=sample.result.bytes_received,
+                    backlog=backlog,
+                )
             )
-        )
 
         self.incidents.observe(
             kind="segment_delivery",
@@ -1036,7 +1291,13 @@ class AnalysisSession:
             )
         )
 
-        if sample.analysis.container == "webvtt":
+        if (
+            sample.analysis.container == "webvtt"
+            and not sample.analysis.encrypted
+            and "webvtt_head" in sample.analysis.raw
+        ):
+            # Judged only on text that was read. A body that was not read is INFO-001's to
+            # report, never a segment without the WEBVTT signature.
             await self._record(
                 subtitle_rules.check_webvtt(
                     sample.analysis.raw.get("webvtt_head", ""),
@@ -1087,6 +1348,8 @@ class AnalysisSession:
         decrypt already produced for the bitstream rules, and it is reused rather than
         decrypting a second time.
         """
+        if self.recorder is not None and sample.available:
+            self.recorder.offer(target.variant, sample.msn, sample.result.body)
         if self.evidence is None or not sample.available:
             return
         self.evidence.add(
@@ -1207,32 +1470,73 @@ class AnalysisSession:
                 )
             )
 
-    async def _check_cross_variant(self, context: LayerContext, at: dt.datetime) -> None:
-        snapshots: list[sequence_rules.VariantSnapshot] = []
-        for variant, target in context.targets.items():
-            latest = target.latest
-            if latest and latest.playlist:
-                snapshots.append(
-                    sequence_rules.VariantSnapshot(
-                        variant=variant, playlist=latest.playlist, at=latest.at, kind=target.kind
-                    )
-                )
+    async def _check_cross_variant(
+        self, context: LayerContext, polled: list[Snapshot], *, round_no: int
+    ) -> None:
+        """Compare the renditions of one round with each other.
+
+        Only the snapshots of this round are compared: they were requested together, so they
+        show the ladder at one moment. A rule is recorded only once it has fired in
+        `cross_variant_confirm_rounds` consecutive rounds — a packager that publishes one rung a
+        few hundred milliseconds before the next disagrees with itself for one round and agrees
+        in the next, while a ladder that genuinely disagrees still disagrees a round later.
+        """
+        snapshots = [
+            sequence_rules.VariantSnapshot(
+                variant=snapshot.variant,
+                playlist=snapshot.playlist,
+                at=snapshot.at,
+                kind=context.targets[snapshot.variant].kind,
+            )
+            for snapshot in polled
+            if snapshot.ok and snapshot.playlist is not None
+        ]
         if len(snapshots) < 2:
+            context.xvar_streak.clear()
             return
-        findings = sequence_rules.check_cross_variant(
+        at = max(s.at for s in snapshots)
+        candidates = sequence_rules.check_cross_variant(
             snapshots, layer=context.layer, thresholds=self.thresholds, at=at
         )
-        await self._record(findings)
+        fired = {finding.rule.id for finding in candidates}
+        for rule_id in list(context.xvar_streak):
+            if rule_id not in fired:
+                del context.xvar_streak[rule_id]
+        for rule_id in fired:
+            context.xvar_streak[rule_id] = context.xvar_streak.get(rule_id, 0) + 1
+
+        needed = max(1, self.thresholds.cross_variant_confirm_rounds)
+        spread_ms = (at - min(s.at for s in snapshots)).total_seconds() * 1000
+        confirmed: list[Finding] = []
+        for finding in candidates:
+            streak = context.xvar_streak.get(finding.rule.id, 0)
+            if streak < needed:
+                continue
+            for sample in finding.evidence:
+                if isinstance(sample, dict):
+                    sample.setdefault("round", round_no)
+                    sample.setdefault("confirmed_rounds", streak)
+                    sample.setdefault("round_spread_ms", round(spread_ms, 1))
+            confirmed.append(finding)
+        # The round's own polls: each finding names the poll of the rendition it was read on.
+        await self._record(confirmed)
         self.incidents.observe(
             kind="cross_variant",
             variant=None,
             at=at,
-            degraded=any(f.severity.rank >= 3 for f in findings),
-            cause_rule_ids=[f.rule.id for f in findings],
+            degraded=any(f.severity.rank >= 3 for f in confirmed),
+            cause_rule_ids=[f.rule.id for f in confirmed],
         )
+
+    def _incident_windows(self) -> list[tuple[str | None, dt.datetime, dt.datetime | None]]:
+        return [(i.variant, i.started_at, i.ended_at) for i in self.incidents.incidents]
 
     async def _periodic(self) -> None:
         now = dt.datetime.now(dt.UTC)
+
+        if self.recorder is not None:
+            self.recorder.set_windows(self._incident_windows())
+            await self.recorder.prune()
 
         if (
             now - self._last_master_poll
@@ -1252,25 +1556,43 @@ class AnalysisSession:
             if context.master is None:
                 continue
             result = await self._fetcher.fetch(context.url)
+            ref = await self._log_poll(
+                layer=context.layer,
+                variant="master",
+                kind="master",
+                url=context.url,
+                result=result,
+                at=dt.datetime.now(dt.UTC),
+            )
             if not result.ok:
                 continue
             text = result.text
-            if not is_master(text):
-                await self._record(
-                    R.MST_MEDIA_BECAME_MASTER.raise_finding(
-                        f"{context.url} no longer returns a master playlist.",
-                        evidence={"url": context.url},
-                        stream_layer=context.layer,
-                    )
-                )
-                continue
-            current = parse_master(text, result.final_url)
+            token = _CURRENT_POLL.set(ref)
+            try:
+                await self._check_repolled_master(context, result, text)
+            finally:
+                _CURRENT_POLL.reset(token)
+
+    async def _check_repolled_master(
+        self, context: LayerContext, result: FetchResult, text: str
+    ) -> None:
+        if not is_master(text):
             await self._record(
-                master_rules.check_master_changed(
-                    context.master, current, layer=context.layer, thresholds=self.thresholds
+                R.MST_MEDIA_BECAME_MASTER.raise_finding(
+                    f"{context.url} no longer returns a master playlist.",
+                    evidence={"url": context.url},
+                    stream_layer=context.layer,
                 )
             )
-            context.master = current
+            return
+        assert context.master is not None
+        current = parse_master(text, result.final_url)
+        await self._record(
+            master_rules.check_master_changed(
+                context.master, current, layer=context.layer, thresholds=self.thresholds
+            )
+        )
+        context.master = current
 
     async def _ladder_sweep(self) -> None:
         """Compare the same MSN across every rung, and the ladder's DPB footprints."""
@@ -1307,6 +1629,8 @@ class AnalysisSession:
 
     async def _shutdown_pollers(self) -> None:
         for context in self.layers.values():
+            if context.ladder is not None:
+                await context.ladder.stop()
             await asyncio.gather(
                 *(poller.stop() for poller in context.pollers), return_exceptions=True
             )
@@ -1371,7 +1695,8 @@ class AnalysisSession:
         vpb_results: dict[str, vpb.VpbResult] = {}
         for context in self.layers.values():
             for variant, buffer in context.buffers.items():
-                result = buffer.finish(self.ended_at)
+                # Fed only until the sample budget ran out; modelled up to that moment.
+                result = buffer.finish(min(self.ended_at, self._budget_spent_at or self.ended_at))
                 key = f"{context.layer.value}:{variant}" if len(self.layers) > 1 else variant
                 vpb_results[key] = result
                 await self._record(
@@ -1390,6 +1715,21 @@ class AnalysisSession:
 
         await self._record(self._player_ratio_finding())
         await self._check_demuxed_coverage()
+        replay_summary: dict[str, Any] = {}
+        if self.replay is not None and isinstance(self._fetcher, replay_module.ReplayFetcher):
+            replay_summary = self._fetcher.stats.as_dict(self.replay)
+            await self._record(
+                R.REPLAYED_RUN.raise_finding(
+                    replay_summary["statement"],
+                    evidence={k: v for k, v in replay_summary.items() if k != "statement"},
+                )
+            )
+        if not self.self_check.kept_time:
+            await self._record(
+                R.SELF_CHECK_LATE.raise_finding(
+                    self.self_check.statement(), evidence=self.self_check.as_dict()
+                )
+            )
 
         self.incidents.close_all(self.ended_at)
         findings = self.collector.all()
@@ -1441,6 +1781,8 @@ class AnalysisSession:
             event_log=self.event_log,
             owner_summary=attribution.owner_summary(findings),
             drm=self.drm.summary() if self.drm is not None else {},
+            self_check=self.self_check.as_dict(),
+            replay=replay_summary,
         )
 
     async def _check_demuxed_coverage(self) -> None:
@@ -1461,6 +1803,16 @@ class AnalysisSession:
                         audio_ranges=audio_ranges,
                         variant=pairing.video_variant,
                         layer=context.layer,
+                        pending=set(pairing.pending_video),
+                        unread_audio=pairing.unread_audio,
+                    )
+                )
+                await self._record(
+                    segment_rules.check_demuxed_drift(
+                        pairing.pairs,
+                        variant=pairing.video_variant,
+                        layer=context.layer,
+                        thresholds=self.thresholds,
                     )
                 )
 

@@ -18,6 +18,7 @@ from app.analysis.rules import catalogue as R
 from app.analysis.rules.base import Finding, StreamLayer
 from app.config import Thresholds
 from app.hls.playlist import MediaPlaylist
+from app.hls.uri import uri_path
 from app.net.fetcher import FetchResult
 
 ROUNDING_TOLERANCE_S = 0.5
@@ -559,11 +560,18 @@ def check_publication_rate(
     variant: str,
     layer: StreamLayer,
     factor: float = 1.5,
+    target_duration_s: float = 0.0,
 ) -> Finding | None:
-    """Segments published faster than real time push the player away from the live edge."""
+    """Segments published faster than real time push the player away from the live edge.
+
+    Media arrives a whole segment at a time while polls run every half segment, so one
+    segment landing between two polls three seconds apart reads as twice real time. The
+    caller measures over a window of several target durations, and one segment of that
+    quantisation (`target_duration_s`) is allowed on top of the factor.
+    """
     if elapsed_wall_s <= 0 or added_duration_s <= 0:
         return None
-    if added_duration_s <= elapsed_wall_s * factor:
+    if added_duration_s <= elapsed_wall_s * factor + target_duration_s:
         return None
     return R.MED_BUFFER_TOO_LONG.raise_finding(
         f"{variant} added {added_duration_s:.1f} s of media in {elapsed_wall_s:.1f} s of wall "
@@ -604,12 +612,16 @@ def check_subtitle_stuck(
 def check_segment_uri_changed(
     previous: MediaPlaylist, current: MediaPlaylist, *, variant: str, layer: StreamLayer
 ) -> list[Finding]:
-    """The same media sequence number served under a different URI between polls."""
+    """The same media sequence number served under a different URI between polls.
+
+    Compared without the query string: a CDN that re-signs every response hands out a new
+    token for the same segment on every poll, and that is not a different segment.
+    """
     findings: list[Finding] = []
     before = {s.msn: s.uri for s in previous.segments}
     for segment in current.segments:
         old = before.get(segment.msn)
-        if old is not None and old != segment.uri:
+        if old is not None and uri_path(old) != uri_path(segment.uri):
             findings.append(
                 R.MED_URI_CHANGED.raise_finding(
                     f"Media sequence {segment.msn} on {variant} was listed as {old} and is now "
