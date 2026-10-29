@@ -34,6 +34,8 @@ dependencies = [
     "lxml>=5.3",
     "signxml>=4.0",
     "pycryptodome>=3.21",
+    # Object storage (RBA_STORAGE_BACKEND=s3). Credentials come from the host's IAM role.
+    "boto3>=1.35",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +49,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "types-PyMySQL",
+    "moto[s3]>=5.0",
 ]
 
 [project.scripts]

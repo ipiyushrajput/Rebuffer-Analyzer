@@ -302,6 +302,8 @@ class Settings(BaseSettings):
     # Where a rendered report lives: "database" keeps the bytes in the reports table and
     # writes nothing to disk; "both" also mirrors a copy into RBA_REPORTS_DIR. Evidence and
     # bulk archives are built in memory and streamed either way.
+    # "storage" puts the bytes in object storage (RBA_STORAGE_BACKEND) and keeps the row as the
+    # index, which is what production uses.
     rba_report_storage: str = "database"
 
     rba_max_concurrent_jobs: int = 20
@@ -322,6 +324,45 @@ class Settings(BaseSettings):
     rba_recordings_quota_gb: float = 200.0
 
     rba_log_level: str = "INFO"
+
+    # Object storage for what a run produces as files: report bytes, recordings and the
+    # archives a finished run leaves (network log, evidence, recording). "local" writes them
+    # under RBA_STORAGE_DIR, for development; "s3" writes them to RBA_S3_BUCKET, laid out one
+    # folder per channel (`app/storage/keys.py`). Credentials come from the IAM role the host
+    # runs as — never from this file. Downloads go through the CloudFront distribution in
+    # RBA_CDN_BASE_URL when one is set, signed when RBA_CDN_KEY_PAIR_ID is set.
+    rba_storage_backend: str = "local"
+    rba_storage_dir: Path = BACKEND_ROOT / "var" / "storage"
+    rba_s3_bucket: str = ""
+    rba_s3_prefix: str = ""
+    rba_s3_region: str = ""
+    # Only for an S3-compatible endpoint (MinIO in a test rig); empty for AWS.
+    rba_s3_endpoint_url: str = ""
+    rba_cdn_base_url: str = ""
+    rba_cdn_key_pair_id: str = ""
+    # A path to the CloudFront signing key (PEM) on this host, never the key itself.
+    rba_cdn_private_key: str = ""
+    rba_cdn_url_ttl_s: int = 3600
+    # Write a finished run's network log, evidence and recording archives to storage, so a
+    # download is a file in the bucket rather than an archive rebuilt on request.
+    rba_archive_artifacts: bool = True
+
+    # Database connection pool. Every running job writes samples through it, so it is sized
+    # for RBA_MAX_CONCURRENT_JOBS plus the API, not left at the driver's default of five.
+    rba_db_pool_size: int = 20
+    rba_db_max_overflow: int = 20
+    rba_db_pool_timeout_s: float = 30.0
+
+    # Running more than one instance: a job is run by the instance holding its lease, renewed
+    # every third of this period. A lease that lapses — its instance stopped — is taken over by
+    # another instance, which resumes the job. Empty instance id means hostname and process id.
+    rba_instance_id: str = ""
+    rba_job_lease_s: int = 60
+
+    # Encrypts the secrets operators store through the Settings tab (the CASCADA session, the
+    # alert webhook) before they reach the settings table. A Fernet key; generate one with
+    # `python -m app.cli secret-key`. Empty stores them as they are.
+    rba_secrets_key: str = ""
 
     # CASCADA. The session cookies belong in `backend/.env`, never in git; `.env.example`
     # carries the names with empty values. An operator can paste a session in the Settings
@@ -401,6 +442,11 @@ class Settings(BaseSettings):
     def reports_in_database(self) -> bool:
         """True when the report bytes are stored in the reports table."""
         return self.rba_report_storage.lower() in ("database", "db", "both", "")
+
+    @property
+    def reports_in_storage(self) -> bool:
+        """True when the report bytes go to object storage (local or S3)."""
+        return self.rba_report_storage.lower() in ("storage", "s3", "object")
 
 
 @lru_cache(maxsize=1)
