@@ -79,6 +79,7 @@ backend/app/
   reports/    Jinja2 templates + HTML/PDF renderers + escalation blocks
   bulk/       csv/xlsx/json parsing with column alias mapping
   db/         SQLAlchemy models, repository, session factory
+  storage/    object storage: local disk or S3 behind CloudFront, per-channel key layout
   tvplus/     the live channel catalogue: country table, dbconnect mapping, row parser
   cascada/    the field metrics: auth, client, series, store, scan, exports, errors,
               historical (the daily source), providers (channel → provider map), sources
@@ -333,7 +334,34 @@ frontend/src/
   `mp4decrypt` — a bundle that is short of something never leaves a reader guessing.
   `cbcs` is decrypted only by Bento4's `mp4decrypt`, reported by `/api/health`; `cenc` stays
   in process. No key, private key or credential reaches a bundle.
-- **A recording is the one thing the analyzer host keeps.** "Record stream" on a run starts
+- **Files live in object storage, one folder per channel.** `app/storage/` is one interface with
+  two backends: `local` (`RBA_STORAGE_DIR`, development) and `s3` (`RBA_S3_BUCKET`, the host's
+  IAM role, never a key in `.env`). A run's folder is
+  `channels/<slug>-<hash of the URL without query>/<day>/<job>/`, fixed on `jobs.storage_prefix`
+  when first used. When a run ends, `app/reports/artifacts.py` writes `archives/network-log.zip`,
+  `archives/evidence.zip` (with the session's segment bytes, while they are still in memory)
+  and `recording/<full|clips>/` there in the background, and the recording leaves the host.
+  `RBA_REPORT_STORAGE=storage` puts report bytes there too, the row being the index. Every
+  object carries a `retention` tag (`standard` 30 d, `pinned` 180 d, `keep`) that the bucket's
+  lifecycle rules act on; local storage purges by the same classes. A download asks storage
+  first and answers with a signed CloudFront URL (`RBA_CDN_*`) or a stream, and builds the
+  file on request only for a run still going or one archived before this existed. Deleting a
+  run deletes its folder. Tests set `RBA_STORAGE_DIR` and `RBA_RECORDINGS_DIR` to a temporary
+  directory in `conftest.py`; S3 is tested against moto, never AWS.
+- **Several instances share one database, and a job runs on exactly one.** `app/jobs/lease.py`:
+  the owner holds `jobs.lease_owner` / `lease_expires_at`, renewed every `RBA_JOB_LEASE_S / 3`
+  with the job's progress; a lapsed lease is taken over by one conditional UPDATE, so exactly
+  one instance resumes the job, and every instance looks for lapsed jobs once per lease period.
+  A stop asked of any instance is `jobs.stop_requested`, read by the owner on renewal. An
+  owner whose lease was taken while it stalled stops its copy and writes nothing
+  (`JobHandle.lease_lost`). The batch scheduler claims each firing with a conditional UPDATE.
+  Realtime runs are pinned to their instance by the load balancer's sticky sessions.
+- **Operations.** The DB pool is sized by `RBA_DB_POOL_SIZE` / `RBA_DB_MAX_OVERFLOW`.
+  `GET /api/metrics` is Prometheus text read from memory only. `app/secret_store.py` encrypts
+  the CASCADA session and the alert webhook with `RBA_SECRETS_KEY` before they reach the
+  settings table; an unsealed value reads as it was. `deploy/backup.sh` dumps MySQL.
+  `docs/PRODUCTION_DEPLOYMENT.md` and `docs/INFRA_REQUEST.md` describe production.
+- **A recording is written on the analyzer host while its run writes it.** "Record stream" on a run starts
   `app/analysis/recorder.py`: a worker per rendition downloads every segment its playlist lists
   (reusing the bytes the sampler already fetched), writes it under
   `RBA_RECORDINGS_DIR/<job>/`, and — for a protected rung whose key the run holds — a decrypted

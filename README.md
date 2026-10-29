@@ -649,6 +649,12 @@ and primitives in `frontend/src/components/ui/`.
   HLSAnalyzer, Qosifire, the Dolby Stream Validator, the Akamai Stream Validator and
   THEOplayer Inspect Stream, with out-of-scope rows carrying their reason. A test fails if
   the matrix names a rule that no longer exists.
+- [`docs/PRODUCTION_DEPLOYMENT.md`](docs/PRODUCTION_DEPLOYMENT.md) — production: several
+  instances behind a load balancer, MySQL, S3 behind CloudFront, operations and verification.
+- [`docs/INFRA_REQUEST.md`](docs/INFRA_REQUEST.md) — what to ask the infrastructure team for,
+  and the values they send back.
+- [`docs/FALSE_POSITIVE_AUDIT.md`](docs/FALSE_POSITIVE_AUDIT.md) — every rule's standing on
+  false positives.
 - [`CLAUDE.md`](CLAUDE.md) — conventions, commands and the project's non-negotiables.
 
 ## Development
