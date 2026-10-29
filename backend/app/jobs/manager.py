@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app import alerts as alerts_module
 from app.analysis import recorder as recorder_module
@@ -30,7 +30,7 @@ from app.db.models import Incident as IncidentRow
 from app.db.models import Job as JobRow
 from app.db.models import PlaylistSample, PlaylistSnapshot, SegmentSample, VirtualBufferSample
 from app.drm import settings as drm_settings
-from app.jobs import manifest_log
+from app.jobs import lease, manifest_log
 from app.jobs.manifest_log import ManifestLog
 from app.jobs.manifest_log import last_seq as manifest_last_seq
 from app.jobs.samples import SampleRecorder
@@ -74,6 +74,9 @@ class JobHandle:
     # Set the moment a stop is asked for, so a cancel that arrives before the session is
     # built is not lost.
     stop_requested: bool = False
+    # Set when another instance took this job's lease over (this one stalled past it). The
+    # local copy then stops without writing anything: the job is the other instance's now.
+    lease_lost: bool = False
 
     @property
     def progress(self) -> float:
@@ -163,6 +166,7 @@ class JobManager:
         self._on_result: ResultHandler | None = None
         self._event_sink: Callable[[str, str, dict[str, Any]], Awaitable[None]] | None = None
         self._retention_task: asyncio.Task[None] | None = None
+        self._lease_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         if self._started:
@@ -171,11 +175,14 @@ class JobManager:
         self._semaphore = asyncio.Semaphore(settings.rba_max_concurrent_jobs)
         self._started = True
         self._retention_task = asyncio.create_task(self._retention_loop(), name="rba:retention")
+        self._lease_task = asyncio.create_task(self._lease_loop(), name="rba:leases")
 
     async def shutdown(self) -> None:
         """Stop every running job so the process exits cleanly and reports stay writable."""
         if self._retention_task is not None:
             self._retention_task.cancel()
+        if self._lease_task is not None:
+            self._lease_task.cancel()
         for handle in list(self.jobs.values()):
             if handle.status in ("RUNNING", "PENDING", "CANCELLING"):
                 handle.stop_requested = True
@@ -227,6 +234,8 @@ class JobManager:
 
         if persist:
             await self._persist_job(handle)
+        # A new job's row is free to take; a resumed one was acquired before it got here.
+        await lease.acquire(handle.id)
 
         handle.task = asyncio.create_task(self._run(handle), name=f"rba:{handle.type}:{handle.id}")
         return handle
@@ -327,11 +336,20 @@ class JobManager:
                 handle.finished_at = dt.datetime.now(dt.UTC)
                 # Before the job row is written: what the run measured in its last seconds is
                 # part of the run, and a cancelled or failed one keeps what it got to.
-                if recorder is not None:
+                if recorder is not None and not handle.lease_lost:
                     await recorder.flush()
-                await poll_log.flush()
+                if not handle.lease_lost:
+                    await poll_log.flush()
                 await self._persist_job(handle)
+                with contextlib.suppress(Exception):
+                    await lease.release(handle.id)
 
+            if handle.lease_lost:
+                logger.warning(
+                    "job %s was taken over by another instance; this copy stopped unrecorded",
+                    handle.id,
+                )
+                return result
             await self._persist_result(handle, result)
             # The polls a finding fired on and the polls an incident spanned outlive the
             # sample retention: they are the evidence a report and an escalation point at.
@@ -376,6 +394,8 @@ class JobManager:
         """Stop a job. The report is still produced from what was collected."""
         handle = self.jobs.get(job_id)
         if handle is None:
+            # Running on another instance: the owner reads the request on its next renewal.
+            await lease.request_stop(job_id)
             return None
         # Recorded first, and unconditionally. A cancel that arrives while the job is still
         # being built reaches a handle with no session yet, and stopping only the session
@@ -401,6 +421,8 @@ class JobManager:
     # -- persistence -----------------------------------------------------------
 
     async def _persist_job(self, handle: JobHandle) -> None:
+        if handle.lease_lost:
+            return
         try:
             async with db_session.session_scope() as session:
                 row = await session.get(JobRow, handle.id)
@@ -483,55 +505,129 @@ class JobManager:
             )
 
     async def resume_persisted_jobs(self) -> int:
-        """Restart aging and bulk jobs that were running when the process last stopped."""
+        """Take over aging and bulk jobs whose instance stopped, and resume them.
+
+        Run at startup and once per lease period. A job qualifies when it is still RUNNING or
+        PENDING in the database, no instance holds a live lease on it, and this instance is not
+        already running it; `lease.acquire` then lets exactly one instance have it.
+        """
         resumed = 0
+        now = dt.datetime.now(dt.UTC)
         try:
             async with db_session.session_scope() as session:
                 rows = (
-                    (
-                        await session.execute(
-                            select(JobRow).where(
-                                JobRow.status.in_(["RUNNING", "PENDING"]),
-                                JobRow.type.in_(["aging", "bulk"]),
-                            )
+                    await session.execute(
+                        select(
+                            JobRow.id,
+                            JobRow.type,
+                            JobRow.ends_at,
+                            JobRow.params,
+                            JobRow.playback_url,
+                            JobRow.origin_url,
+                            JobRow.cdn_url,
+                            JobRow.ssai_url,
+                            JobRow.channel_name,
+                            JobRow.parent_job_id,
+                        ).where(
+                            JobRow.status.in_(["RUNNING", "PENDING"]),
+                            JobRow.type.in_(["aging", "bulk"]),
+                            or_(
+                                JobRow.lease_owner.is_(None),
+                                JobRow.lease_expires_at.is_(None),
+                                JobRow.lease_expires_at < now,
+                            ),
                         )
                     )
-                    .scalars()
-                    .all()
-                )
-                now = dt.datetime.now(dt.UTC)
-                for row in rows:
-                    ends_at = row.ends_at
-                    if ends_at is not None and ends_at.tzinfo is None:
-                        ends_at = ends_at.replace(tzinfo=dt.UTC)
-                    remaining = (ends_at - now).total_seconds() if ends_at else 0.0
-                    if remaining <= 5:
-                        row.status = "COMPLETED"
-                        row.finished_at = now
-                        continue
-                    params = dict(row.params or {})
-                    params["duration_s"] = remaining
-                    options = _options_from_params(params)
-                    await self.submit(
-                        job_type=row.type,
-                        playback_url=row.playback_url or "",
-                        origin_url=row.origin_url,
-                        cdn_url=row.cdn_url,
-                        ssai_url=row.ssai_url,
-                        channel_name=row.channel_name,
-                        options=options,
-                        job_id=row.id,
-                        parent_job_id=row.parent_job_id,
-                        persist=False,
-                    )
-                    resumed += 1
+                ).all()
         except Exception as exc:
             logger.warning(
                 "persisted jobs could not be resumed: %s", db_session.describe_error(exc)
             )
+            return 0
+
+        for row in rows:
+            # A row with no playback URL is a bulk batch's own row: the batch is run by the
+            # instance that holds its lease, and is not an analysis to resume.
+            if not row.playback_url or row.id in self.jobs:
+                continue
+            if not await lease.acquire(row.id):
+                continue
+            ends_at = row.ends_at
+            if ends_at is not None and ends_at.tzinfo is None:
+                ends_at = ends_at.replace(tzinfo=dt.UTC)
+            remaining = (ends_at - now).total_seconds() if ends_at else 0.0
+            if remaining <= 5:
+                await self._close_overdue(row.id, now)
+                continue
+            params = dict(row.params or {})
+            params["duration_s"] = remaining
+            try:
+                await self.submit(
+                    job_type=row.type,
+                    playback_url=row.playback_url or "",
+                    origin_url=row.origin_url,
+                    cdn_url=row.cdn_url,
+                    ssai_url=row.ssai_url,
+                    channel_name=row.channel_name,
+                    options=_options_from_params(params),
+                    job_id=row.id,
+                    parent_job_id=row.parent_job_id,
+                    persist=False,
+                )
+            except Exception:
+                logger.exception("job %s could not be resumed", row.id)
+                await lease.release(row.id)
+                continue
+            resumed += 1
         if resumed:
-            logger.info("resumed %d job(s) after restart", resumed)
+            logger.info("resumed %d job(s) on instance %s", resumed, lease.instance_id())
         return resumed
+
+    async def _close_overdue(self, job_id: str, now: dt.datetime) -> None:
+        """A job whose window ended while no instance ran it is closed, not resumed."""
+        async with db_session.session_scope() as session:
+            row = await session.get(JobRow, job_id)
+            if row is not None:
+                row.status = "COMPLETED"
+                row.finished_at = now
+                row.lease_owner = None
+                row.lease_expires_at = None
+
+    # -- leases ----------------------------------------------------------------
+
+    async def _lease_loop(self) -> None:
+        """Renew this instance's leases, act on stop requests, take over lapsed jobs."""
+        ticks = 0
+        while True:
+            try:
+                await asyncio.sleep(lease.lease_period().total_seconds() / 3)
+                await self.renew_leases()
+                ticks += 1
+                if ticks % 3 == 0:
+                    await self.resume_persisted_jobs()
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.exception("lease renewal failed")
+
+    async def renew_leases(self) -> lease.Renewal:
+        running = {
+            handle.id: handle.progress
+            for handle in self.jobs.values()
+            if handle.status in ("RUNNING", "PENDING") and not handle.lease_lost
+        }
+        renewal = await lease.renew(running)
+        for job_id in renewal.stop_requested | renewal.lost:
+            handle = self.jobs.get(job_id)
+            if handle is None:
+                continue
+            if job_id in renewal.lost:
+                handle.lease_lost = True
+                logger.warning("job %s is now run by another instance; stopping here", job_id)
+            handle.stop_requested = True
+            if handle.session is not None:
+                handle.session.stop()
+        return renewal
 
     # -- retention -------------------------------------------------------------
 

@@ -24,7 +24,7 @@ from app.db import session as db_session
 from app.db.models import BulkItem
 from app.db.models import Job as JobRow
 from app.db.paging import newest_rows, sorted_rows
-from app.jobs import purge
+from app.jobs import lease, purge
 from app.jobs.manager import JobHandle, job_manager
 from app.reports import service
 
@@ -146,6 +146,8 @@ async def create_job(
     }
     job_manager.jobs[parent.id] = parent
     await job_manager._persist_job(parent)
+    # The batch runs on this instance: its lease keeps another instance from taking it over.
+    await lease.acquire(parent.id)
 
     async with db_session.session_scope() as db:
         for row in valid:
@@ -192,6 +194,9 @@ async def _run_bulk(
     async def analyse(row: parsers.BulkRow) -> None:
         nonlocal completed
         async with semaphore:
+            if parent.stop_requested:
+                # Stopped, here or from another instance: no further channel is started.
+                return
             child = await job_manager.submit(
                 job_type="bulk",
                 playback_url=row.playback_url,
@@ -228,7 +233,10 @@ async def _run_bulk(
         parent.error = f"{type(exc).__name__}: {exc}"
     finally:
         parent.finished_at = dt.datetime.now(dt.UTC)
+        if parent.stop_requested and parent.status == "COMPLETED":
+            parent.status = "CANCELLED"
         await job_manager._persist_job(parent)
+        await lease.release(parent.id)
         try:
             children = job_manager.children(parent.id)
             summary = await _build_rows(parent.id, children)
@@ -425,7 +433,11 @@ async def cancel_job(
         return {"deleted": True, "id": job_id, **purged.as_dict()}
     parent = job_manager.get(job_id)
     if parent is None:
-        raise HTTPException(status_code=404, detail="Bulk job not found")
+        # Running on another instance: ask its owner to stop the batch and every channel run.
+        if not await _request_batch_stop(job_id):
+            raise HTTPException(status_code=404, detail="Bulk job not found")
+        return {"id": job_id, "status": "CANCELLING", "stop_requested": True}
+    parent.stop_requested = True
     for child in job_manager.children(job_id):
         await job_manager.cancel(child.id)
     task = _bulk_tasks.get(job_id)
@@ -493,3 +505,17 @@ async def download_bundle(job_id: str) -> Response:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="bulk-{job_id[:8]}.zip"'},
     )
+
+
+async def _request_batch_stop(job_id: str) -> bool:
+    """Write a stop request on a batch run elsewhere, and on each of its channel runs."""
+    async with db_session.session_scope() as db:
+        children = (
+            (await db.execute(select(JobRow.id).where(JobRow.parent_job_id == job_id)))
+            .scalars()
+            .all()
+        )
+    asked = await lease.request_stop(job_id)
+    for child in children:
+        asked = await lease.request_stop(child) or asked
+    return asked

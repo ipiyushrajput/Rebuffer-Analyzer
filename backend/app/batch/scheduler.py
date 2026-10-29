@@ -17,7 +17,7 @@ import datetime as dt
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.batch import runner, store
@@ -198,6 +198,30 @@ async def _record(country: str, *, fired: bool, success: bool, reason: str) -> N
         row.last_reason = reason
 
 
+async def _claim(country: str, now: dt.datetime) -> bool:
+    """Take this firing for this instance. With several instances, exactly one wins.
+
+    One conditional UPDATE: the schedule's `last_fired_at` moves to now only if it is older
+    than the grace window, so the instance whose update lands first fires and every other one
+    finds the firing already taken.
+    """
+    window_start = now - dt.timedelta(minutes=GRACE_MINUTES + 1)
+    async with db_session.session_scope() as session:
+        result = await session.execute(
+            update(BatchSchedule)
+            .where(
+                BatchSchedule.country == country,
+                or_(
+                    BatchSchedule.last_fired_at.is_(None),
+                    BatchSchedule.last_fired_at < window_start,
+                ),
+            )
+            .values(last_fired_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        return int(getattr(result, "rowcount", 0) or 0) == 1
+
+
 async def tick(now: dt.datetime | None = None) -> list[dict[str, str]]:
     """One pass over the schedules. Returns what was done, which is what the tests read."""
     moment = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
@@ -212,6 +236,9 @@ async def tick(now: dt.datetime | None = None) -> list[dict[str, str]]:
 
     for country, due, soon, enabled in candidates:
         if not enabled or not due:
+            continue
+        if not await _claim(country, moment):
+            # Another instance fired this one, or this instance already did this window.
             continue
 
         if soon:

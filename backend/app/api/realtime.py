@@ -82,6 +82,14 @@ async def read_session(session_id: str) -> dict[str, Any]:
 async def stop_session(session_id: str) -> dict[str, Any]:
     handle = await job_manager.cancel(session_id)
     if handle is None:
+        # Run by another instance: `cancel` wrote a stop request its owner reads.
+        from app.db import session as db_session
+        from app.db.models import Job as JobRow
+
+        async with db_session.session_scope() as db:
+            row = await db.get(JobRow, session_id)
+        if row is not None and row.stop_requested:
+            return {"id": session_id, "status": "CANCELLING", "stop_requested": True}
         raise HTTPException(status_code=404, detail="Session not found")
     return handle.summary()
 
