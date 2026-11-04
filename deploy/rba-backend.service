@@ -12,6 +12,8 @@ WorkingDirectory=/opt/rba/backend
 
 # Credentials live only in this file, which is root-owned and mode 0600.
 EnvironmentFile=/opt/rba/backend/.env
+# Chromium for PDF export, installed here by install.sh: ProtectHome hides root's cache.
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/rba/browsers
 
 ExecStart=/opt/rba/backend/.venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 \
@@ -20,8 +22,8 @@ ExecStart=/opt/rba/backend/.venv/bin/uvicorn app.main:app \
     --timeout-graceful-shutdown 30 \
     --no-access-log
 
-# One worker on purpose: jobs are held in process and resumed from the database on
-# restart, so a second worker would run each aging job twice.
+# One worker on purpose: a realtime run and its WebSocket live in the process that started
+# it. To run more, add instances behind the load balancer; job leases keep each job on one.
 
 Restart=on-failure
 RestartSec=5s

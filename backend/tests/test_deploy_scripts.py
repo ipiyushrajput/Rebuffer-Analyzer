@@ -123,3 +123,51 @@ def test_the_readme_points_at_the_setup_guide() -> None:
     readme = _read(ROOT / "README.md")
     assert "docs/SETUP.md" in readme
     assert "rba.cmd" in readme, "the README quick start must name the Windows runner"
+
+
+def test_the_makefile_offers_every_windows_target() -> None:
+    """`rba.cmd` mirrors the Makefile target for target; Ubuntu gets the same commands."""
+    import re
+
+    run = _read(WINDOWS / "run.ps1")
+    declared = re.search(r"ValidateSet\(([^)]*)\)", run)
+    assert declared is not None
+    targets = {name.strip().strip("'") for name in declared.group(1).split(",")}
+    makefile = _read(ROOT / "Makefile")
+    # `setup` re-runs the Windows installer; the Makefile's name for that is `install`.
+    for target in [*sorted(targets - {"setup"}), "install"]:
+        assert re.search(rf"^{target}:", makefile, re.M), f"the Makefile has no `{target}` target"
+
+
+def test_the_ubuntu_installer_keeps_the_host_env_and_fails_loudly() -> None:
+    install = _read(ROOT / "deploy" / "install.sh")
+    # An upgrade copies the checkout over /opt/rba/backend with --delete; the host's .env,
+    # which the checkout does not carry, would go with it.
+    assert "--exclude '.env'" in install
+    assert 'if [ ! -f "$PREFIX/backend/.env" ]' in install
+    # `nginx -t && reload` under `set -e` reports Done over a site nginx refused.
+    assert "nginx -t || fail" in install
+    # The page calls /api on its own origin, so one build serves the IP, a hostname and HTTPS.
+    assert "107.109.131.68:${FRONTEND_PORT}/api" not in install
+    assert "sys.version_info < (3, 11)" in install, "the installer must refuse Python < 3.11"
+
+
+def test_chromium_is_installed_where_the_service_can_read_it() -> None:
+    """ProtectHome hides root's ~/.cache/ms-playwright from the service."""
+    install = _read(ROOT / "deploy" / "install.sh")
+    unit = _read(ROOT / "deploy" / "rba-backend.service")
+    assert 'BROWSERS="$PREFIX/browsers"' in install
+    assert 'PLAYWRIGHT_BROWSERS_PATH="$BROWSERS"' in install
+    assert "ProtectHome=yes" in unit
+    assert "Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/rba/browsers" in unit
+
+
+def test_the_ubuntu_prerequisites_meet_the_documented_versions() -> None:
+    prereqs = ROOT / "deploy" / "prereqs-ubuntu.sh"
+    text = _read(prereqs)
+    assert prereqs.stat().st_mode & 0o111, "deploy/prereqs-ubuntu.sh must be executable"
+    assert "sys.version_info < (3, 11)" in text
+    assert "deadsnakes" in text, "Ubuntu 22.04's python3 is 3.10"
+    assert "setup_22.x" in text, "Ubuntu's own nodejs is older than 20"
+    for token in ("prereqs-ubuntu.sh", "deploy/install.sh", "systemctl", "journalctl"):
+        assert token in _read(ROOT / "docs" / "SETUP.md"), f"docs/SETUP.md must document {token}"

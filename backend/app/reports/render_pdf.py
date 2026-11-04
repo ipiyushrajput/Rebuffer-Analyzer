@@ -47,10 +47,13 @@ def chromium_executable() -> str | None:
     if configured and Path(configured).exists():
         return configured
 
-    # Playwright names the directory after the platform it built for.
+    # Playwright names the directory after the platform it built for; builds from Chrome for
+    # Testing (Playwright 1.49 on) add the word size: chrome-linux64, chrome-win64.
     if sys.platform == "win32":
         patterns = [
+            "chromium-*/chrome-win64/chrome.exe",
             "chromium-*/chrome-win/chrome.exe",
+            "chromium_headless_shell-*/chrome-headless-shell-win64/*.exe",
             "chromium_headless_shell-*/chrome-win/*.exe",
         ]
     elif sys.platform == "darwin":
@@ -59,7 +62,12 @@ def chromium_executable() -> str | None:
             "chromium_headless_shell-*/chrome-mac/*",
         ]
     else:
-        patterns = ["chromium-*/chrome-linux/chrome", "chromium_headless_shell-*/chrome-linux/*"]
+        patterns = [
+            "chromium-*/chrome-linux64/chrome",
+            "chromium-*/chrome-linux/chrome",
+            "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell",
+            "chromium_headless_shell-*/chrome-linux/*",
+        ]
 
     for root in _browser_roots():
         if not root.is_dir():

@@ -1,16 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Vite runs this file in Node; the project carries no Node typings for one variable.
+declare const process: { env: Record<string, string | undefined> }
+
+// The backend's port: RBA_PORT, as `make` and `rba.cmd` pass it, or 8010.
+const backend = `127.0.0.1:${process.env.RBA_PORT || 8010}`
+
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     host: true,
     proxy: {
-      // In development the Vite server forwards to the backend on 8010, so the app uses the
-      // same relative paths it uses behind nginx in production.
-      '/api': { target: 'http://127.0.0.1:8010', changeOrigin: true },
-      '/ws': { target: 'ws://127.0.0.1:8010', ws: true },
+      // In development the Vite server forwards to the backend (8010 by default), so the app
+      // uses the same relative paths it uses behind nginx in production.
+      '/api': { target: `http://${backend}`, changeOrigin: true },
+      '/ws': { target: `ws://${backend}`, ws: true },
     },
   },
   preview: {
@@ -20,8 +26,8 @@ export default defineConfig({
     port: 8080,
     host: true,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8010', changeOrigin: true },
-      '/ws': { target: 'ws://127.0.0.1:8010', ws: true },
+      '/api': { target: `http://${backend}`, changeOrigin: true },
+      '/ws': { target: `ws://${backend}`, ws: true },
     },
   },
   build: {

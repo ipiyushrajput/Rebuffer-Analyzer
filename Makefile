@@ -1,10 +1,14 @@
 SHELL := /bin/bash
+# Ubuntu 22.04's python3 is 3.10: make install PYTHON=python3.12
+PYTHON ?= python3
 PY    := backend/.venv/bin/python
 PIP   := backend/.venv/bin/pip
 PORT  ?= 8010
+FRONTEND_PORT ?= 8080
 
 .PHONY: help venv install dev backend frontend test test-backend test-frontend lint \
-        lint-backend lint-frontend build up down logs rules migrate clean hooks
+        lint-backend lint-frontend build serve analyse diagnose up down logs rules migrate \
+        clean hooks
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -15,7 +19,7 @@ hooks: ## Install the commit-msg hook that strips AI attribution trailers
 	git config core.hooksPath .githooks
 
 venv: ## Create the backend virtualenv
-	python3 -m venv backend/.venv
+	$(PYTHON) -m venv backend/.venv
 	$(PIP) install --upgrade pip
 
 install: venv ## Install backend and frontend dependencies
@@ -32,7 +36,7 @@ backend: ## Run the backend with reload
 	cd backend && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port $(PORT) --reload
 
 frontend: ## Run the Vite dev server
-	cd frontend && npm run dev
+	cd frontend && RBA_PORT=$(PORT) npm run dev
 
 test: test-backend test-frontend ## Run every test
 
@@ -55,6 +59,23 @@ lint-frontend: ## eslint + tsc
 
 build: ## Build the frontend bundle
 	cd frontend && npm run build
+
+serve: ## Build the bundle and serve it on FRONTEND_PORT (8080) with the backend
+	@if [ "$(PORT)" = 8001 ] || [ "$(FRONTEND_PORT)" = 8001 ]; then \
+	  echo "Port 8001 belongs to the Metanalyser backend and is never used."; exit 1; fi
+	$(MAKE) build
+	@trap 'kill 0' EXIT; \
+	(cd backend && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port $(PORT)) & \
+	(cd frontend && RBA_PORT=$(PORT) npm run preview -- --port $(FRONTEND_PORT) --host) & \
+	wait
+
+analyse: ## Analyse one channel headlessly: make analyse URL=... ARGS="--duration 5m --html out.html"
+	@test -n "$(URL)" || { echo 'usage: make analyse URL=<playback url> [ARGS="--duration 5m --html out.html"]'; exit 2; }
+	cd backend && .venv/bin/python -m app.cli analyse "$(URL)" $(ARGS)
+
+diagnose: ## Say what segment sampling did for one channel: make diagnose URL=...
+	@test -n "$(URL)" || { echo 'usage: make diagnose URL=<playback url>'; exit 2; }
+	cd backend && .venv/bin/python -m app.cli diagnose "$(URL)" $(ARGS)
 
 rules: ## Regenerate docs/RULES.md from the rule registry
 	cd backend && .venv/bin/python -m app.cli rules --markdown > ../docs/RULES.md
