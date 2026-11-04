@@ -97,7 +97,9 @@ developers is in [`SETUP.md`](SETUP.md).
 
 ### Software
 
-**Bare metal (`deploy/install.sh`):**
+**Bare metal (`deploy/install.sh`):** `sudo deploy/prereqs-ubuntu.sh` installs all of these on
+Ubuntu 22.04 or 24.04 (Python 3.12 from deadsnakes on 22.04, Node 22 from NodeSource), and
+`install.sh` installs Chromium with its libraries.
 
 | Tool | Version | Notes |
 |---|---|---|
@@ -107,8 +109,8 @@ developers is in [`SETUP.md`](SETUP.md).
 | ffmpeg / ffprobe | — | |
 | `rsync`, `iproute2` | — | |
 | MySQL client | — | Needed for `deploy/backup.sh`. |
-| Chromium for PDF export | — | `python -m playwright install chromium` and `playwright install-deps chromium`. |
-| Bento4 `mp4decrypt` | — | Optional, for `cbcs` DRM. |
+| Chromium for PDF export | — | Installed by `install.sh` into `/opt/rba/browsers` (`playwright install --with-deps chromium`). |
+| Bento4 `mp4decrypt` | — | Optional, for `cbcs` DRM: `prereqs-ubuntu.sh --with-bento4`. Ubuntu does not package it. |
 | AWS CLI | — | Optional, only for `BACKUP_S3_URI`. |
 
 **Docker:** Docker Engine 24+ with the Compose v2 plugin. The images carry Python, ffmpeg,
@@ -289,18 +291,39 @@ CPIX_SERVER_CERT=/etc/streamlens/cpix/server.crt
 
 ## 6. Deploying
 
-### 6.1 Bare metal (per instance)
+### 6.1 Bare metal on Ubuntu (per instance)
 
 ```bash
-sudo deploy/install.sh                       # venv, packages, frontend build, units, nginx
-sudo install -o rba -g rba -m 600 backend.env /opt/rba/backend/.env
-sudo -u rba /opt/rba/backend/.venv/bin/python -m playwright install chromium
-sudo /opt/rba/backend/.venv/bin/python -m playwright install-deps chromium
-sudo -u rba /opt/rba/backend/.venv/bin/alembic -c /opt/rba/backend/alembic.ini upgrade head
-sudo systemctl restart rba-backend
+sudo apt-get update && sudo apt-get install -y git
+sudo git clone https://github.com/ipiyushrajput/Rebuffer-Analyzer.git /srv/streamlens
+cd /srv/streamlens
+sudo deploy/prereqs-ubuntu.sh                # Python 3.11+, Node 22, nginx, ffmpeg, rsync, mysql-client
+sudo install -d -m 755 /opt/rba/backend
+sudo install -m 600 /path/to/backend.env /opt/rba/backend/.env   # the values of §5, from a secure channel
+sudo deploy/install.sh                       # venv, Chromium, migrations, bundle, systemd unit, nginx site
+```
+
+`install.sh` keeps a `.env` that is already in place, so putting it there first makes the
+first run apply the migrations against the real database. Without it, the installer writes
+one from `.env.example`: fill it in and run `sudo deploy/install.sh` again.
+
+Check and operate:
+
+```bash
+curl -s http://127.0.0.1:8010/api/health | python3 -m json.tool
+curl -s http://127.0.0.1:8080/healthz
+sudo systemctl status rba-backend
+sudo systemctl restart rba-backend           # after editing .env
+journalctl -u rba-backend -f
 ```
 
 Run the migration once, from one instance, before restarting the others on a new build.
+[`SETUP.md`](SETUP.md#ubuntu--production-server) has the full walk-through, with the
+firewall, backups, removal and troubleshooting.
+
+**Windows** is supported for development and single-host use (`deploy\windows\rba.cmd
+serve`, registered as a startup task), not as a production instance behind the load
+balancer: the service unit, nginx site and lease-based multi-instance layout are Linux.
 
 ### 6.2 Docker
 
@@ -314,7 +337,9 @@ metadata service. Keep IMDSv2 hop limit ≥ 2 for containers.
 
 ### 6.3 Upgrading
 
-1. Deploy the new build to one instance and run `alembic upgrade head` there.
+1. Deploy the new build to one instance and run `alembic upgrade head` there. On bare metal
+   that is `cd /srv/streamlens && sudo git pull && sudo deploy/install.sh`, which migrates
+   and restarts.
 2. Restart the remaining instances one at a time. Their running jobs are taken over by the
    others within `RBA_JOB_LEASE_S` and resumed when they come back.
 

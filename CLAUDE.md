@@ -39,7 +39,21 @@ make build        # frontend production build + backend wheel
 make up / make down   # docker compose
 make rules        # regenerate docs/RULES.md from the rule registry
 make migrate      # alembic upgrade head
+make serve        # build the bundle, serve it on :8080 with the backend (no nginx)
+make analyse URL=… ARGS="…"   /   make diagnose URL=…
 ```
+
+On an Ubuntu server (22.04 / 24.04), as root, from the checkout:
+
+```
+deploy/prereqs-ubuntu.sh            # Python 3.11+, Node 22, nginx, ffmpeg, rsync, mysql-client
+deploy/install.sh                   # /opt/rba + systemd rba-backend + nginx :8080; re-run = upgrade
+```
+
+`install.sh` never replaces `/opt/rba/backend/.env`, installs Chromium into `/opt/rba/browsers`
+(the unit sets `PLAYWRIGHT_BROWSERS_PATH`; `ProtectHome` hides root's cache), builds the
+frontend without an API base so it calls `/api` on its own origin, and stops when `nginx -t`
+fails.
 
 On Windows the same tasks run through PowerShell, since there is no `make`:
 

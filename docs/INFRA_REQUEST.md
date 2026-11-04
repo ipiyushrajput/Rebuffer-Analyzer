@@ -23,7 +23,7 @@ analyses live HLS channels:
 | Time | NTP / Amazon Time Sync enabled |
 | Inbound | TCP 8080 from the load balancer only. SSH/SSM for administration. **Port 8001 must stay free** (Metanalyser). |
 | Outbound | Unrestricted HTTPS/HTTP to the internet (see §8), S3 and the database |
-| Packages | Python 3.11, Node 22, nginx, ffmpeg, rsync, MySQL client. `deploy/install.sh` installs the application. |
+| Packages | Python 3.11+, Node 22, nginx, ffmpeg, rsync, MySQL client — `deploy/prereqs-ubuntu.sh` installs them. `deploy/install.sh` installs the application. |
 
 ## 2. Load balancer (ALB)
 

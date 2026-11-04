@@ -5,20 +5,32 @@ things: a virtualenv with the backend installed, `node_modules` for the frontend
 `backend/.env` naming the database. Everything below does those three things; they differ only
 in the shell.
 
-| | Linux / macOS | Windows |
+| | Ubuntu (and macOS) | Windows |
 |---|---|---|
-| Install | `make install` | `deploy\windows\setup.cmd -Dev` |
-| Run both | `make dev` | `deploy\windows\rba.cmd dev` |
+| System packages | `sudo deploy/prereqs-ubuntu.sh` | `winget install …` (below) |
+| Install for development | `make install` | `deploy\windows\setup.cmd -Dev` |
+| Run both, with reload | `make dev` | `deploy\windows\rba.cmd dev` |
 | Backend only | `make backend` | `deploy\windows\rba.cmd backend` |
-| Production bundle | `deploy/install.sh` (nginx) | `deploy\windows\rba.cmd serve` |
+| Frontend dev server only | `make frontend` | `deploy\windows\rba.cmd frontend` |
+| Production bundle, no nginx | `make serve` | `deploy\windows\rba.cmd serve` |
+| Production server (systemd + nginx) | `sudo deploy/install.sh` | — (`serve` as a scheduled task) |
+| Build the bundle | `make build` | `deploy\windows\rba.cmd build` |
+| Database migrations | `make migrate` | `deploy\windows\rba.cmd migrate` |
 | Tests | `make test` | `deploy\windows\rba.cmd test` |
 | Linters | `make lint` | `deploy\windows\rba.cmd lint` |
-| Headless analysis | `python -m app.cli analyse …` | `deploy\windows\rba.cmd analyse …` |
-| Why no segments were sampled | `python -m app.cli diagnose …` | `deploy\windows\rba.cmd diagnose …` |
+| Rule catalogue | `make rules` | `deploy\windows\rba.cmd rules` |
+| Headless analysis | `make analyse URL=… ARGS="…"` | `deploy\windows\rba.cmd analyse … ` |
+| Why no segments were sampled | `make diagnose URL=…` | `deploy\windows\rba.cmd diagnose …` |
+| Clean build artefacts | `make clean` | `deploy\windows\rba.cmd clean` |
+| List every command | `make help` | `deploy\windows\rba.cmd help` |
 
 Ports are the same on both: backend **8010**, Vite dev server **5173**, production bundle
 **8080**. **8001 is never used** — it belongs to the existing Metanalyser backend, and both
 installers refuse it outright.
+
+Ubuntu has two paths. [**Development**](#ubuntu--development) runs from the checkout with
+`make`. [**Production server**](#ubuntu--production-server) installs into `/opt/rba` with a
+systemd service and an nginx site, and is what `107.109.131.68` runs.
 
 ---
 
@@ -37,24 +49,231 @@ and the backend keeps its state in `backend/var/rba.db`.
 
 ---
 
-## Linux and macOS
+## Ubuntu — development
+
+Ubuntu 22.04 and 24.04. macOS works the same way from step 2, with Python, Node and ffmpeg
+from Homebrew.
+
+### 1. System packages
 
 ```bash
 git clone https://github.com/ipiyushrajput/Rebuffer-Analyzer.git
 cd Rebuffer-Analyzer
 
-make install                            # virtualenv + backend + node_modules
+sudo deploy/prereqs-ubuntu.sh
+```
+
+That installs Python 3.11+ with `venv`, Node 22, nginx, ffmpeg, rsync, curl and the MySQL
+client, and keeps anything already present at a usable version. Ubuntu's own packages are not
+enough on their own: 22.04's `python3` is 3.10, so the script adds 3.12 from the deadsnakes
+PPA, and both releases' `nodejs` is older than 20, so Node 22 comes from NodeSource. The same
+by hand, on 24.04:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3 python3-venv python3-dev build-essential git rsync curl ffmpeg
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+On 22.04, add `sudo add-apt-repository -y ppa:deadsnakes/ppa` and install `python3.12
+python3.12-venv python3.12-dev`, then run step 2's install as `make install PYTHON=python3.12`.
+
+Confirm:
+
+```bash
+python3 --version    # 3.11 or newer (or python3.12 --version on 22.04)
+node --version       # v20 or newer
+```
+
+### 2. Install, configure, run
+
+```bash
+make install                            # backend/.venv + backend + node_modules
+backend/.venv/bin/python -m playwright install --with-deps chromium   # PDF export (optional)
 cp backend/.env.example backend/.env    # then fill it in, see "Connecting your database"
+make migrate                            # create or upgrade the schema
 make dev                                # backend :8010, frontend :5173
 ```
 
-Open <http://localhost:5173>.
+For a purely local run, `DB_ENGINE=sqlite` in `backend/.env` is enough. Open
+<http://localhost:5173>. `make dev` runs both with reload and stops both on Ctrl+C.
 
-`make dev` runs both with reload and stops both on Ctrl+C. `make help` lists every target.
+### Every Ubuntu command
 
-For the deployment host, `sudo deploy/install.sh` does the whole thing — virtualenv,
-migrations, frontend build, a systemd unit and an nginx site. See
-[the README](../README.md#deployment-on-10710913168).
+```bash
+make dev          # backend + Vite dev server, both with reload
+make backend      # backend only, on PORT (8010)
+make frontend     # Vite dev server only, on 5173
+make serve        # build the bundle, serve it on FRONTEND_PORT (8080) with the backend
+make build        # build the bundle only
+make migrate      # alembic upgrade head
+make test         # pytest + vitest
+make lint         # ruff + mypy + eslint + tsc
+make rules        # regenerate docs/RULES.md
+make clean        # remove build and cache artefacts
+make help         # this list
+```
+
+Headless, no UI:
+
+```bash
+make analyse URL="https://cdn.example/live/ch1/master.m3u8" ARGS="--duration 5m --html out.html --pdf out.pdf"
+make diagnose URL="https://cdn.example/live/ch1/master.m3u8"
+
+# or straight from the venv
+cd backend && .venv/bin/python -m app.cli analyse "https://cdn.example/live/ch1/master.m3u8" --duration 5m
+```
+
+`analyse` exits **0** when no stream-side defect was found and **2** when one was;
+`diagnose` exits **0** when segments were sampled and **1** when none were. Paths in `ARGS`
+are relative to `backend/`.
+
+Other ports: `make backend PORT=8011`, `make serve PORT=8011 FRONTEND_PORT=8081`. Port 8001
+is refused.
+
+---
+
+## Ubuntu — production server
+
+What `107.109.131.68` runs, and what every instance behind a load balancer runs: the backend
+installed in `/opt/rba` as a systemd service (`rba-backend`, user `rba`) on **8010**, and the
+built frontend served by nginx on **8080**, which also proxies `/api` and `/ws` to the backend.
+Data the backend writes lives in `/var/lib/rba`. For the AWS side — load balancer, RDS, S3,
+CloudFront — see [`PRODUCTION_DEPLOYMENT.md`](PRODUCTION_DEPLOYMENT.md).
+
+### 1. Check the ports
+
+```bash
+sudo ss -ltnp | grep -E ':(8001|8010|8080)\b'
+```
+
+8001 is Metanalyser's and stays as it is. If 8010 or 8080 is taken, pick the next free port,
+pass it to the installer as `RBA_PORT=` / `RBA_FRONTEND_PORT=`, and record it in
+`README.md` and `backend/.env`. The installer checks again and stops rather than binding over
+anything.
+
+### 2. System packages and the checkout
+
+```bash
+sudo apt-get update && sudo apt-get install -y git
+sudo git clone https://github.com/ipiyushrajput/Rebuffer-Analyzer.git /srv/streamlens
+cd /srv/streamlens
+sudo deploy/prereqs-ubuntu.sh                 # add --with-bento4 for cbcs DRM channels
+```
+
+### 3. Install
+
+```bash
+sudo deploy/install.sh
+```
+
+The installer:
+
+- creates the `rba` system user;
+- copies the backend to `/opt/rba/backend` and builds its virtualenv with the newest Python
+  3.11+ on the host;
+- installs Chromium for PDF export into `/opt/rba/browsers`, with its system libraries;
+- writes `/opt/rba/backend/.env` from `.env.example` if there is none (mode 600, data paths
+  under `/var/lib/rba`);
+- runs the migrations and builds the frontend;
+- installs `/etc/systemd/system/rba-backend.service` and `/etc/nginx/conf.d/rba.conf`;
+- starts both and prints the health status.
+
+The frontend is built to call `/api` and `/ws` on whatever address served the page, so the
+same build works on the IP, on a hostname and behind an HTTPS load balancer. Set
+`VITE_API_BASE` / `VITE_WS_BASE` in the environment only to point it somewhere else.
+
+`PREFIX=` (default `/opt/rba`), `DATA_DIR=` (default `/var/lib/rba`) and `PYTHON=` (e.g.
+`PYTHON=python3.12`) override the defaults: `sudo PYTHON=python3.12 deploy/install.sh`.
+
+### 4. Fill in `.env`, then run the installer again
+
+On a first install the database is not configured yet, so the health line reads
+`degraded - database`. Fill it in and re-run:
+
+```bash
+sudo nano /opt/rba/backend/.env     # DB_*, and for production RBA_STORAGE_BACKEND=s3 etc.
+sudo deploy/install.sh              # applies the migrations and restarts with the settings
+```
+
+[Connecting your database](#connecting-your-database) lists the `DB_*` values;
+[`PRODUCTION_DEPLOYMENT.md`](PRODUCTION_DEPLOYMENT.md) §5 lists the S3, CloudFront, instance
+and secrets values. Generate `RBA_SECRETS_KEY` once and use the same value on every instance:
+
+```bash
+sudo -u rba /opt/rba/backend/.venv/bin/python -m app.cli secret-key
+```
+
+(Run it from `/opt/rba/backend`.)
+
+### 5. Check it
+
+```bash
+curl -s http://127.0.0.1:8010/api/health | python3 -m json.tool   # "status": "ok"
+curl -s http://127.0.0.1:8080/healthz                             # ok
+```
+
+Then open `http://<host>:8080`.
+
+### Running it
+
+```bash
+sudo systemctl status rba-backend          # state, PID, memory
+sudo systemctl restart rba-backend         # after editing /opt/rba/backend/.env
+sudo systemctl stop rba-backend            # running jobs resume on the next start
+journalctl -u rba-backend -f               # backend log
+journalctl -u rba-backend --since "1 hour ago"
+sudo tail -f /var/log/nginx/rba-access.log /var/log/nginx/rba-error.log
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### Upgrading
+
+```bash
+cd /srv/streamlens
+git pull
+sudo deploy/install.sh
+```
+
+A re-run is an upgrade. It knows its own ports are already bound and does not stop on them.
+It keeps `/opt/rba/backend/.env`, the virtualenv, `/var/lib/rba` and the database. It
+replaces the code and the bundle, applies the migrations, and restarts the backend. With
+several instances, upgrade one first (that one runs the migration), then the others one at
+a time: their running jobs move to the other instances while each restarts.
+
+### Backups
+
+`deploy/backup.sh` dumps the MySQL database (RDS has its own snapshots too). Nightly, from
+root's crontab (`sudo crontab -e`):
+
+```
+30 2 * * * BACKUP_DIR=/var/backups/streamlens /srv/streamlens/deploy/backup.sh >> /var/log/streamlens-backup.log 2>&1
+```
+
+It reads the connection from `/opt/rba/backend/.env`. See the comments at the top of the
+script for retention and the optional copy to S3.
+
+### Firewall
+
+If `ufw` is enabled, open the frontend port to the networks that use it and keep the backend
+port local, since nginx reaches it over `127.0.0.1`:
+
+```bash
+sudo ufw allow from 10.0.0.0/8 to any port 8080 proto tcp     # your office / VPN / LB range
+sudo ufw deny 8010/tcp
+```
+
+### Removing it
+
+```bash
+sudo systemctl disable --now rba-backend
+sudo rm /etc/systemd/system/rba-backend.service /etc/nginx/conf.d/rba.conf
+sudo systemctl daemon-reload && sudo systemctl reload nginx
+sudo rm -rf /opt/rba            # code, venv, browsers, .env
+sudo rm -rf /var/lib/rba        # local data — skip to keep it
+sudo userdel rba
+```
 
 ---
 
@@ -189,8 +408,9 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 Register-ScheduledTask -TaskName 'RBA' -Action $action -Trigger $trigger -RunLevel Highest
 ```
 
-Run **one instance only**. Jobs are held in the backend process and resumed from the database
-on restart, so a second instance would run every aging job twice.
+One instance per machine. Several instances on different machines can share one MySQL
+database: each job runs on exactly one of them (job leases), and a job whose instance stops
+is taken over by another. SQLite is for a single instance only.
 
 ---
 
@@ -364,9 +584,12 @@ Plus channel measured so far, and nothing below is needed for one.
 Bento4's `mp4decrypt`. Install it and it is used automatically for those tracks:
 
 ```bash
-sudo apt-get install -y bento4            # Debian and Ubuntu
-brew install bento4                       # macOS
+sudo deploy/prereqs-ubuntu.sh --with-bento4   # Ubuntu: Ubuntu does not package Bento4
+brew install bento4                           # macOS
 ```
+
+By hand on Ubuntu, take the Linux SDK zip from <https://www.bento4.com/downloads/> and copy
+its `bin/mp4decrypt` to `/usr/local/bin/`.
 
 On Windows, download the Bento4 binaries from <https://www.bento4.com/downloads/> and put
 the folder holding `mp4decrypt.exe` on `PATH`.
@@ -394,13 +617,24 @@ the reasons applies when it holds no decrypted media.
 
 ## With Docker
 
-The same on both platforms, and the shortest path if Docker Desktop is already installed:
+The same on both platforms, and the shortest path if Docker is already installed:
 
 ```bash
-docker compose up -d --build     # backend :8010, frontend :8080
-docker compose logs -f
-docker compose down
+docker compose up -d --build     # backend :8010, frontend :8080   (Ubuntu: make up)
+docker compose exec backend alembic upgrade head
+docker compose logs -f           #                                 (Ubuntu: make logs)
+docker compose down              #                                 (Ubuntu: make down)
 ```
+
+Docker Engine with the Compose plugin on Ubuntu, from Docker's own repository:
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER"      # then log out and back in
+docker compose version
+```
+
+On Windows, install Docker Desktop and run the same `docker compose` commands in PowerShell.
 
 ---
 
@@ -420,6 +654,44 @@ appears once the first playlist and segment measurements complete.
 ---
 
 ## When something does not start
+
+### Ubuntu
+
+**`Python 3.11 or newer is not installed`.** Ubuntu 22.04's `python3` is 3.10. Run
+`sudo deploy/prereqs-ubuntu.sh`, which adds 3.12 from the deadsnakes PPA; the installer
+picks `python3.12` up on its own. For `make`, use `make install PYTHON=python3.12`.
+
+**`The virtual environment was not created successfully because ensurepip is not
+available`.** The `venv` package is separate on Ubuntu: `sudo apt-get install -y
+python3-venv` (or `python3.12-venv`).
+
+**`Node v18… is too old`.** Ubuntu's `nodejs` package is older than 20. Install Node 22 from
+NodeSource with `sudo deploy/prereqs-ubuntu.sh`, or by hand as in step 1 above.
+
+**`Port 8010 is already bound`.** `sudo ss -ltnp | grep :8010` names the process. A re-run
+of `deploy/install.sh` on a host where it is already installed does not stop on its own
+ports.
+
+**The backend does not start.** `journalctl -u rba-backend -n 100 --no-pager` shows why;
+the usual causes are a typo in `/opt/rba/backend/.env` or a database the host cannot reach.
+`sudo systemctl restart rba-backend` after fixing it.
+
+**`502 Bad Gateway` on :8080.** nginx is up and the backend is not:
+`systemctl status rba-backend`. If the backend runs on a port other than 8010, re-run the
+installer with that `RBA_PORT` so the nginx site points at it.
+
+**`nginx rejected its configuration`.** `sudo nginx -t` names the file and line. On a host
+without IPv6, Ubuntu's default site (`listen [::]:80`) fails the test; remove
+`/etc/nginx/sites-enabled/default` if nothing else uses it.
+
+**PDF export fails, HTML works.** Chromium is missing or cannot load its libraries:
+`sudo PLAYWRIGHT_BROWSERS_PATH=/opt/rba/browsers /opt/rba/backend/.venv/bin/python -m
+playwright install --with-deps chromium`, then `sudo chown -R rba:rba /opt/rba/browsers`.
+
+**`Permission denied` under `/var/lib/rba` or `/opt/rba`.** Files created by hand as root:
+`sudo chown -R rba:rba /opt/rba /var/lib/rba`.
+
+### Windows
 
 **`python` opens the Microsoft Store.** Turn off the execution alias under Settings → Apps →
 Advanced app settings → App execution aliases, or install Python from python.org.
@@ -448,7 +720,7 @@ for quarantined files, and keep the checkout out of a OneDrive-synced folder.
 **`Port 8010 is already bound by …`.** The script names the process. Stop it, or set
 `$env:RBA_PORT` to the next free port and record it.
 
-**PDF export fails, HTML works.** The Playwright browser is missing. Run
+**PDF export fails, HTML works (Windows).** The Playwright browser is missing. Run
 `backend\.venv\Scripts\python.exe -m playwright install chromium`, or point
 `RBA_CHROMIUM_EXECUTABLE` at a Chrome you already have.
 

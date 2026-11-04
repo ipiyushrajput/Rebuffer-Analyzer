@@ -156,13 +156,17 @@ decode-error and quality detectors do not run and every other check does. Full i
 including the `.env` file and the troubleshooting list, are in
 [`docs/SETUP.md`](docs/SETUP.md).
 
-**Linux and macOS**
+**Ubuntu (and macOS)**
 
 ```bash
+sudo deploy/prereqs-ubuntu.sh           # Ubuntu only: Python 3.11+, Node 22, nginx, ffmpeg
 make install                            # backend venv + frontend node_modules
 cp backend/.env.example backend/.env    # fill in DB_*, or set DB_ENGINE=sqlite
+make migrate                            # create or upgrade the schema
 make dev                                # backend on :8010, frontend on :5173
 ```
+
+On Ubuntu 22.04, whose `python3` is 3.10, use `make install PYTHON=python3.12`.
 
 **Windows**
 
@@ -171,14 +175,17 @@ make dev                                # backend on :8010, frontend on :5173
 .\deploy\windows\rba.cmd dev            # backend on :8010, frontend on :5173
 ```
 
-`rba.cmd` is the Makefile's counterpart — `dev`, `serve`, `build`, `test`, `lint`, `rules`,
-`analyse`, `clean`, `help`. `serve` builds the bundle and serves it on :8080 next to the
+`rba.cmd` is the Makefile's counterpart, target for target — `dev`, `backend`, `frontend`,
+`serve`, `build`, `test`, `lint`, `rules`, `migrate`, `analyse`, `diagnose`, `clean`, `help`. `serve` builds the bundle and serves it on :8080 next to the
 backend, which is the Windows stand-in for nginx. Neither script changes the machine's
 execution policy, and both refuse port 8001.
 
 Headless, without the UI:
 
 ```bash
+make analyse URL="https://cdn.example/live/ch1/master.m3u8" ARGS="--duration 5m --html out.html --pdf out.pdf"
+
+# or from the venv
 cd backend
 .venv/bin/python -m app.cli analyse "https://cdn.example/live/ch1/master.m3u8" \
     --duration 5m --html out.html --pdf out.pdf
@@ -194,7 +201,7 @@ per rendition, the HTTP status, how many segments the playlist listed, how many 
 sampled, and any handler failure with its traceback:
 
 ```bash
-.venv/bin/python -m app.cli diagnose "https://cdn.example/live/ch1/master.m3u8"
+make diagnose URL="https://cdn.example/live/ch1/master.m3u8"
 ```
 
 ```powershell
@@ -227,24 +234,39 @@ ss -ltnp | grep -E ':(8010|8080)\b'
 If either port is taken, take the next free one and record it here and in `backend/.env`.
 `deploy/install.sh` performs this check itself and stops rather than binding over something.
 
-Frontend build variables:
+The frontend is built without `VITE_API_BASE` / `VITE_WS_BASE`, so the page calls `/api`
+and `/ws` on whatever address served it — `http://107.109.131.68:8080`, a hostname, or an
+HTTPS load balancer — and nginx proxies both to the backend.
 
-```
-VITE_API_BASE=http://107.109.131.68:8080/api
-VITE_WS_BASE=ws://107.109.131.68:8080/ws
-```
-
-Without Docker:
+**On Ubuntu (22.04 / 24.04), without Docker** — the full walk-through, with upgrades,
+backups, the firewall and troubleshooting, is in
+[`docs/SETUP.md`](docs/SETUP.md#ubuntu--production-server):
 
 ```bash
-sudo deploy/install.sh      # venv, migrations, frontend build, systemd unit, nginx site
+sudo git clone https://github.com/ipiyushrajput/Rebuffer-Analyzer.git /srv/streamlens
+cd /srv/streamlens
+sudo deploy/prereqs-ubuntu.sh           # Python 3.11+, Node 22, nginx, ffmpeg, rsync, mysql-client
+sudo deploy/install.sh                  # /opt/rba: venv, Chromium, migrations, bundle, systemd, nginx
+sudo nano /opt/rba/backend/.env         # DB_*, storage, secrets — then:
+sudo deploy/install.sh                  # migrations + restart with the settings
+
+curl -s http://127.0.0.1:8010/api/health
+sudo systemctl status rba-backend
 journalctl -u rba-backend -f
 ```
 
-The systemd unit runs a **single worker on purpose**: jobs are held in process and resumed
-from the database on restart, so a second worker would run each aging job twice. It caps
-memory at 6 GB, which holds the 20 concurrent aging jobs the analyzer is sized for with
-room to spare — the figure the load test in `backend/tests/test_load.py` measures against.
+Upgrading is `git pull && sudo deploy/install.sh`: a re-run keeps `.env`, the venv, the data
+and the database, and replaces the code and the bundle.
+
+**On Windows**, `deploy\windows\rba.cmd serve` builds the bundle and serves it on :8080 next
+to the backend; register it as a startup task to run it unattended (see
+[`docs/SETUP.md`](docs/SETUP.md#running-it-unattended)).
+
+The systemd unit runs a **single worker on purpose**: a realtime run and its WebSocket live
+in the process that started it. To run more, add instances behind the load balancer; job
+leases keep each job on one of them. It caps memory at 6 GB, which holds the 20 concurrent
+aging jobs the analyzer is sized for with room to spare — the figure the load test in
+`backend/tests/test_load.py` measures against.
 
 ## Database
 
@@ -663,6 +685,12 @@ and primitives in `frontend/src/components/ui/`.
 make test      # pytest + vitest
 make lint      # ruff, ruff format, mypy, eslint, tsc
 make rules     # regenerate docs/RULES.md
+```
+
+```powershell
+.\deploy\windows\rba.cmd test
+.\deploy\windows\rba.cmd lint
+.\deploy\windows\rba.cmd rules
 ```
 
 Tests run against a **fault-injecting fixture origin**: a pure-Python TS muxer and playlist
