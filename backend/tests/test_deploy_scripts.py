@@ -171,3 +171,73 @@ def test_the_ubuntu_prerequisites_meet_the_documented_versions() -> None:
     assert "setup_22.x" in text, "Ubuntu's own nodejs is older than 20"
     for token in ("prereqs-ubuntu.sh", "deploy/install.sh", "systemctl", "journalctl"):
         assert token in _read(ROOT / "docs" / "SETUP.md"), f"docs/SETUP.md must document {token}"
+
+
+SNIPPET = ROOT / "frontend" / "nginx" / "streamlens-locations.conf.template"
+
+
+def test_one_nginx_snippet_serves_every_streamlens_path_under_the_prefix() -> None:
+    """The UI, the API, the WebSockets and both health paths live below the base path, and
+    nginx strips it on the way to the backend, which serves /api and /ws unprefixed."""
+    snippet = _read(SNIPPET)
+    base = "${STREAMLENS_BASE_PATH}"
+    backend = "http://${STREAMLENS_BACKEND}"
+    for location in (
+        f"location = {base} {{",
+        f"location = {base}/healthz {{",
+        f"location = {base}/health {{",
+        f"location {base}/api/ {{",
+        f"location {base}/ws/ {{",
+        f"location {base}/ {{",
+    ):
+        assert location in snippet, f"the snippet must declare `{location}`"
+    assert f"proxy_pass {backend}/api/;" in snippet
+    assert f"proxy_pass {backend}/ws/;" in snippet
+    assert f"proxy_pass {backend}/api/health;" in snippet
+    assert 'proxy_set_header Connection "upgrade";' in snippet
+    # The backend's address is a parameter, never a fixed host: the two machines may be apart.
+    directives = [line for line in snippet.splitlines() if not line.lstrip().startswith("#")]
+    assert not any("127.0.0.1" in line for line in directives)
+    # Behind an HTTPS load balancer or a mapped container port, an absolute redirect names the
+    # wrong scheme or port.
+    assert snippet.count("absolute_redirect off;") >= 2
+
+
+def test_every_layout_mounts_the_same_snippet_and_none_serves_the_ui_at_the_root() -> None:
+    site = _read(ROOT / "deploy" / "rba-frontend.nginx.conf")
+    docker_site = _read(ROOT / "frontend" / "nginx.conf")
+    dockerfile = _read(ROOT / "frontend" / "Dockerfile")
+    install = _read(ROOT / "deploy" / "install.sh")
+
+    assert "include /etc/nginx/snippets/streamlens.conf;" in site
+    assert "include /etc/nginx/streamlens/locations.conf;" in docker_site
+    assert "frontend/nginx/streamlens-locations.conf.template" in install
+    assert "nginx/streamlens-locations.conf.template /etc/nginx/templates/" in dockerfile
+    # The image's entrypoint refuses to render into a directory that is absent.
+    assert "mkdir -p /etc/nginx/streamlens" in dockerfile
+    for text in (site, docker_site):
+        assert "return 302 /streamlens/;" in text
+        assert "try_files" not in text, "the UI is served by the snippet only, under the prefix"
+
+
+def test_the_installer_supports_one_machine_and_two() -> None:
+    install = _read(ROOT / "deploy" / "install.sh")
+    for option in ("--role", "--backend", "--base-path", "--snippet-only"):
+        assert option in install, f"install.sh must accept {option}"
+    assert "all|backend|frontend" in install
+    assert 'BACKEND="127.0.0.1:${BACKEND_PORT}"' in install, "one machine stays the default"
+    assert "--role frontend needs --backend" in install
+    assert 'VITE_BASE_PATH="${BASE_PATH}/" npm run build' in install
+    # A reload returns before the new workers answer; checking at once reads the old config.
+    reload_at = install.index("\n  systemctl reload nginx\n")
+    assert "\n  sleep " in install[reload_at : reload_at + 300]
+
+
+def test_the_frontend_is_built_under_streamlens_by_default() -> None:
+    vite = _read(ROOT / "frontend" / "vite.config.ts")
+    assert "process.env.VITE_BASE_PATH || '/streamlens/'" in vite
+    assert "rewrite: strip" in vite, "the dev proxies strip the prefix as nginx does"
+    compose = _read(ROOT / "docker-compose.yml")
+    assert "VITE_BASE_PATH: /streamlens/" in compose
+    assert "STREAMLENS_BACKEND: ${STREAMLENS_BACKEND:-backend:8010}" in compose
+    assert "107.109.131.68" not in compose, "no address is built into the bundle"

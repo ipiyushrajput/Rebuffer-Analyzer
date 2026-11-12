@@ -2,7 +2,11 @@
 
 import type { PlaylistSnapshotData, SegmentResultData } from '../ws/messages'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+// The path the app is served under (`/streamlens/` by default, from VITE_BASE_PATH), without
+// its trailing slash. The API and the WebSockets sit below it, so the page reaches them on its
+// own origin wherever it is mounted.
+const BASE_PATH = import.meta.env.BASE_URL.replace(/\/$/, '')
+const API_BASE = import.meta.env.VITE_API_BASE || `${BASE_PATH}/api`
 
 export class ApiError extends Error {
   constructor(
@@ -51,11 +55,24 @@ export const api = {
   url: (path: string) => `${API_BASE}${path}`,
 }
 
+/**
+ * Where the page reaches a path the backend handed it. The backend names its own routes
+ * (`/api/proxy?u=…`, `/api/drm/license`) and knows nothing of the prefix nginx serves it
+ * under, so a backend path is re-rooted on this page's API base. An absolute URL — a licence
+ * server in `direct` mode — is returned unchanged.
+ */
+export function publicPath(path: string): string {
+  if (path === '/api' || path.startsWith('/api/') || path.startsWith('/api?')) {
+    return `${API_BASE}${path.slice('/api'.length)}`
+  }
+  return path
+}
+
 export function wsUrl(path: string): string {
   const configured = import.meta.env.VITE_WS_BASE
   if (configured) return `${configured}${path.replace(/^\/ws/, '')}`
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}${path}`
+  return `${protocol}//${window.location.host}${BASE_PATH}${path}`
 }
 
 // --- typed endpoints --------------------------------------------------------

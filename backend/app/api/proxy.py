@@ -85,6 +85,17 @@ def proxied(url: str) -> str:
     return f"{PROXY_PATH}?u={quote(url, safe='')}"
 
 
+def _proxied_relative(url: str) -> str:
+    """A proxy URI relative to the playlist that carries it.
+
+    The player resolves it against the playlist's own URL, so a playlist served at
+    ``/streamlens/api/proxy?u=…`` names children at ``/streamlens/api/proxy?u=…`` and one served
+    at ``/api/proxy`` names them there: the proxy never needs to know the prefix nginx put in
+    front of it.
+    """
+    return f"proxy?u={quote(url, safe='')}"
+
+
 def rewrite_playlist(text: str, final_url: str) -> str:
     """Rewrite every URI in a playlist to route back through the proxy.
 
@@ -101,14 +112,18 @@ def rewrite_playlist(text: str, final_url: str) -> str:
             if line.startswith(URI_ATTRIBUTE_TAGS):
                 out.append(
                     _URI_ATTR.sub(
-                        lambda m: m.group(1) + proxied(resolve(final_url, m.group(2))) + m.group(3),
+                        lambda m: (
+                            m.group(1)
+                            + _proxied_relative(resolve(final_url, m.group(2)))
+                            + m.group(3)
+                        ),
                         raw_line,
                     )
                 )
             else:
                 out.append(raw_line)
             continue
-        out.append(proxied(resolve(final_url, line)))
+        out.append(_proxied_relative(resolve(final_url, line)))
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 

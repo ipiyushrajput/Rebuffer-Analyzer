@@ -190,7 +190,7 @@ export const IconTrend = (p: IconProps) => (
 export function BrandMark({ size = 34 }: { size?: number }) {
   return (
     <img
-      src="/tvplus-logo.png"
+      src={`${import.meta.env.BASE_URL}tvplus-logo.png`}
       width={size}
       height={size}
       alt="Samsung TV Plus"

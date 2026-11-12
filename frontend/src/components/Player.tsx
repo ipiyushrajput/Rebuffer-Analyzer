@@ -32,7 +32,7 @@ import { useEffect, useRef, useState } from 'react'
 import { PLAYER_METRICS_NOTE } from '../lib/constants'
 import { kbps } from '../lib/format'
 import { useSessionStore } from '../store/session'
-import type { PlayerDrm } from '../api/client'
+import { publicPath, type PlayerDrm } from '../api/client'
 import type { PlayerEventOut } from '../ws/messages'
 
 interface Props {
@@ -184,7 +184,7 @@ export function Player({ src, onEvent, drm }: Props) {
           ? {
               drmSystems: {
                 [drm!.key_system]: {
-                  licenseUrl: drm!.license_path,
+                  licenseUrl: publicPath(drm!.license_path),
                   /*
                    * hls.js defaults both to '', which asks the CDM for its own idea of a
                    * minimum. Naming them makes the request reproducible across browsers and
@@ -212,7 +212,7 @@ export function Player({ src, onEvent, drm }: Props) {
       })
       hlsRef.current = hls
       hls.attachMedia(video)
-      hls.loadSource(src)
+      hls.loadSource(publicPath(src))
 
       hls.on(Events.MANIFEST_PARSED, () => {
         void video.play().catch(() => {
@@ -283,7 +283,7 @@ export function Player({ src, onEvent, drm }: Props) {
         })
       })
     } else if (video.canPlayType('application/vnd.apple.mpegurl') && !protectedStream) {
-      video.src = src
+      video.src = publicPath(src)
     } else if (protectedStream) {
       setError(
         `This browser plays HLS natively rather than through hls.js, and a ${drm!.system_label} ` +

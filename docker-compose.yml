@@ -45,11 +45,16 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE: ${VITE_API_BASE:-http://107.109.131.68:8080/api}
-        VITE_WS_BASE: ${VITE_WS_BASE:-ws://107.109.131.68:8080/ws}
+        # The UI is served under /streamlens/; the page calls /streamlens/api and /streamlens/ws
+        # on its own origin, so no address is built into it.
+        VITE_BASE_PATH: /streamlens/
     image: rba-frontend:1.0.0
     container_name: rba-frontend
     restart: unless-stopped
+    environment:
+      # The backend as nginx reaches it. Running only the frontend here with the backend on
+      # another machine: STREAMLENS_BACKEND=10.0.0.5:8010 docker compose up -d --no-deps frontend
+      STREAMLENS_BACKEND: ${STREAMLENS_BACKEND:-backend:8010}
     depends_on:
       - backend
     ports:

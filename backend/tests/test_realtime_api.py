@@ -23,7 +23,9 @@ def test_a_playlist_is_rewritten_to_route_every_uri_through_the_proxy() -> None:
     )
     rewritten = rewrite_playlist(text, "https://edge.example/live/ch1/master.m3u8?hdnts=xyz")
 
-    assert "/api/proxy?u=" in rewritten
+    # Every URI routes back through the proxy, relative to the playlist that names it.
+    uris = [line for line in rewritten.splitlines() if line and not line.startswith("#")]
+    assert uris and all(uri.startswith("proxy?u=") for uri in uris)
     # Children resolve against the final URL's directory, not the requested one.
     assert quote("https://edge.example/live/ch1/720p/index.m3u8", safe="") in rewritten
     assert quote("https://edge.example/live/ch1/audio/en.m3u8", safe="") in rewritten
@@ -49,7 +51,26 @@ def test_the_proxy_fetches_a_playlist_and_adds_cors(origin: FixtureServer) -> No
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "*"
     assert response.headers["x-rba-playlist-kind"] == "master"
-    assert "/api/proxy?u=" in response.text
+    assert "\nproxy?u=" in response.text
+
+
+def test_a_rewritten_uri_stays_under_the_prefix_the_playlist_was_served_from() -> None:
+    """nginx serves the app under /streamlens and strips it; the player resolves each child
+    against the playlist's own URL, so the prefix survives without the backend knowing it."""
+    from urllib.parse import urljoin
+
+    rewritten = rewrite_playlist("#EXTM3U\n#EXTINF:6,\ns0.ts\n", "https://cdn.example/live/v.m3u8")
+    child = rewritten.splitlines()[-1]
+    served = (
+        "https://dev.samsungtv/streamlens/api/proxy?u=https%3A%2F%2Fcdn.example%2Flive%2Fv.m3u8"
+    )
+    assert urljoin(served, child) == (
+        "https://dev.samsungtv/streamlens/api/proxy?u="
+        + quote("https://cdn.example/live/s0.ts", safe="")
+    )
+    assert urljoin("http://127.0.0.1:8010/api/proxy?u=x", child).startswith(
+        "http://127.0.0.1:8010/api/proxy?u="
+    )
 
 
 def test_the_proxy_follows_a_redirect_and_reports_the_final_url(origin: FixtureServer) -> None:

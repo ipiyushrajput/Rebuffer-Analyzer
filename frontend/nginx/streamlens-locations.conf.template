@@ -1,0 +1,85 @@
+# StreamLens under ${STREAMLENS_BASE_PATH} — the locations only, to be included inside a
+# `server { }` block. One file serves every layout:
+#
+#   bare metal : deploy/install.sh renders it to /etc/nginx/snippets/streamlens.conf, and the
+#                StreamLens site on :8080 (deploy/rba-frontend.nginx.conf) includes it. On a
+#                host whose own site already owns `/`, add the same include line inside that
+#                site's server block (install.sh --snippet-only).
+#   Docker     : the nginx image renders it from /etc/nginx/templates at start-up and
+#                frontend/nginx.conf includes it.
+#
+# ${STREAMLENS_BACKEND}  the backend as host:port — 127.0.0.1:8010 on the same machine, the
+#                        backend machine's address when the two are apart.
+# ${STREAMLENS_WEBROOT}  the directory holding the bundle in ${STREAMLENS_BASE_PATH}/.
+#
+# The backend serves /api and /ws with no prefix; each proxy_pass below names the backend
+# path, so nginx strips ${STREAMLENS_BASE_PATH} on the way through.
+# Port 8001 belongs to the existing Metanalyser backend and is never used here.
+
+# Redirects carry a path only: behind a load balancer that terminates HTTPS, or a container
+# whose port is mapped, the scheme and port nginx sees are not the ones the browser used.
+location = ${STREAMLENS_BASE_PATH} {
+    absolute_redirect off;
+    return 301 ${STREAMLENS_BASE_PATH}/;
+}
+
+# Liveness of the frontend itself, answered by nginx: what a load balancer checks.
+location = ${STREAMLENS_BASE_PATH}/healthz {
+    access_log off;
+    default_type text/plain;
+    return 200 "ok\n";
+}
+
+# The backend's health, through the same path the page uses.
+location = ${STREAMLENS_BASE_PATH}/health {
+    proxy_pass http://${STREAMLENS_BACKEND}/api/health;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix ${STREAMLENS_BASE_PATH};
+}
+
+location ${STREAMLENS_BASE_PATH}/api/ {
+    proxy_pass http://${STREAMLENS_BACKEND}/api/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix ${STREAMLENS_BASE_PATH};
+
+    client_max_body_size 64m;
+    # Reports and evidence bundles stream; buffering would hold them in memory.
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ${STREAMLENS_BASE_PATH}/ws/ {
+    proxy_pass http://${STREAMLENS_BACKEND}/ws/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+    # An aging job streams for up to 24 hours.
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+}
+
+# The page. There is no client-side router, so every other path under the prefix is the app.
+location ${STREAMLENS_BASE_PATH}/ {
+    absolute_redirect off;
+    root ${STREAMLENS_WEBROOT};
+    index index.html;
+    try_files $uri $uri/ ${STREAMLENS_BASE_PATH}/index.html;
+
+    # Built assets carry a content hash in their name; index.html does not and is never cached.
+    location ~* \.(js|css|png|jpg|jpeg|svg|ico|woff2?)$ {
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+}

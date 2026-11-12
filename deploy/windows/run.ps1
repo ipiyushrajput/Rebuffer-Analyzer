@@ -11,7 +11,7 @@
 .PARAMETER Command
     dev       Backend and frontend together, both with reload. The default.
     backend   Backend only, on RBA_PORT (8010).
-    frontend  Vite dev server only, on 5173, proxying /api and /ws to the backend.
+    frontend  Vite dev server only, on 5173 under /streamlens/, proxying its api and ws to the backend.
     serve     Production bundle: builds the frontend, then serves it on RBA_FRONTEND_PORT
               (8080) next to the backend. This is the Windows stand-in for nginx.
     build     Build the frontend bundle only.
@@ -46,6 +46,13 @@ $ErrorActionPreference = 'Stop'
 
 $BackendPort = if ($env:RBA_PORT) { [int]$env:RBA_PORT } else { 8010 }
 $FrontendPort = if ($env:RBA_FRONTEND_PORT) { [int]$env:RBA_FRONTEND_PORT } else { 8080 }
+# The UI is served under this path (VITE_BASE_PATH, default /streamlens/); the API and the
+# WebSockets sit below it. The Vite dev server and preview both read the same variable.
+$BasePath = if ($env:VITE_BASE_PATH) { '/' + $env:VITE_BASE_PATH.Trim('/') + '/' } else { '/streamlens/' }
+if ($BasePath -eq '//') { $BasePath = '/' }
+$env:VITE_BASE_PATH = $BasePath
+# The Vite proxies forward to this port.
+$env:RBA_PORT = "$BackendPort"
 
 function Start-Child {
     param(
@@ -145,7 +152,7 @@ switch ($Command) {
 
     'frontend' {
         Assert-PortFree -Port 5173 -Role 'frontend dev server'
-        Write-Step 'Frontend on http://127.0.0.1:5173'
+        Write-Step "Frontend on http://127.0.0.1:5173$BasePath"
         Push-Location (Join-Path $RepoRoot 'frontend')
         try {
             npm run dev
@@ -160,7 +167,7 @@ switch ($Command) {
         Assert-PortFree -Port 5173 -Role 'frontend dev server'
 
         Write-Step "Backend  : http://127.0.0.1:$BackendPort/api/health"
-        Write-Step 'Frontend : http://127.0.0.1:5173'
+        Write-Step "Frontend : http://127.0.0.1:5173$BasePath"
         Write-Detail 'Ctrl+C stops both.'
 
         $backend = Start-Child -File $python `
@@ -200,7 +207,7 @@ switch ($Command) {
         }
 
         Write-Step "Backend  : http://127.0.0.1:$BackendPort/api/health"
-        Write-Step "Frontend : http://127.0.0.1:$FrontendPort"
+        Write-Step "Frontend : http://127.0.0.1:$FrontendPort$BasePath"
         Write-Detail 'Ctrl+C stops both.'
 
         # No --reload here: jobs are held in process, and a reload would restart them.
