@@ -47,12 +47,17 @@ On an Ubuntu server (22.04 / 24.04), as root, from the checkout:
 
 ```
 deploy/prereqs-ubuntu.sh            # Python 3.11+, Node 22, nginx, ffmpeg, rsync, mysql-client
-deploy/install.sh                   # /opt/rba + systemd rba-backend + nginx :8080; re-run = upgrade
+deploy/install.sh                   # one machine: /opt/rba + systemd rba-backend + nginx :8080
+deploy/install.sh --role backend                        # two machines: the backend one
+deploy/install.sh --role frontend --backend IP:8010     # two machines: the nginx one
+deploy/install.sh --role frontend --backend IP:8010 --snippet-only   # inside a site owning /
 ```
+
+Re-running any of them is an upgrade.
 
 `install.sh` never replaces `/opt/rba/backend/.env`, installs Chromium into `/opt/rba/browsers`
 (the unit sets `PLAYWRIGHT_BROWSERS_PATH`; `ProtectHome` hides root's cache), builds the
-frontend without an API base so it calls `/api` on its own origin, and stops when `nginx -t`
+frontend for `/streamlens/` without an API base so it calls `/streamlens/api` on its own origin, and stops when `nginx -t`
 fails.
 
 On Windows the same tasks run through PowerShell, since there is no `make`:
@@ -165,6 +170,20 @@ frontend/src/
   licensed solely by a number both playlists carry for moments that do not overlap. A video
   segment whose audio never arrives produces no pair at all, and `AUD-006` reports it. `AUD-006` and
   `AUD-007` run once at the end over everything sampled.
+- **StreamLens lives under `/streamlens/`, never at `/`.** The frontend machine serves other
+  things, so the UI, the API and the WebSockets are `/streamlens/`, `/streamlens/api/…` and
+  `/streamlens/ws/…`, plus `/streamlens/health` (the backend's health) and
+  `/streamlens/healthz` (nginx liveness). The prefix belongs to nginx alone: the backend keeps
+  `/api` and `/ws` and never learns it. `frontend/nginx/streamlens-locations.conf.template` is
+  the one set of locations, strips the prefix in every `proxy_pass`, and takes the backend as
+  `${STREAMLENS_BACKEND}`, so it serves one machine or two. Bare metal renders it to
+  `/etc/nginx/snippets/streamlens.conf` and Docker through the nginx image's templates. The
+  bundle is built with `base` = `VITE_BASE_PATH` (default `/streamlens/`), and the Vite dev and
+  preview proxies strip the prefix as nginx does. A URL the backend hands to the page goes
+  through `publicPath()` in `src/api/client.ts`. A URI inside a proxied playlist is relative
+  (`proxy?u=…`) and resolves under whatever prefix served the playlist. Redirects are
+  relative (`absolute_redirect off`), since behind TLS termination or a mapped port nginx
+  does not see the scheme and port the browser used.
 - Thresholds are never inlined. They live in `app/config.py` (`Thresholds`), are editable
   in the Settings tab, and are persisted in the DB.
 - **The User-Agent is a measurement condition, not a constant.** A CDN and a packager both
@@ -443,7 +462,10 @@ frontend/src/
 
 ## Deployment
 
-`107.109.131.68` — backend (uvicorn) on **8010**, frontend (nginx) on **8080**.
+`107.109.131.68` — backend (uvicorn) on **8010**, frontend (nginx) on **8080**, UI at
+`/streamlens/`. Frontend and backend may run on separate machines: then only TCP 8010 from
+the frontend machine to the backend machine is opened between them
+(`docs/INFRA_REQUEST.md` §0).
 Port **8001 is reserved by the existing Metanalyser backend and is never used.**
 Check with `ss -ltnp` before binding; if a port is taken, take the next free one and record
 it in `README.md` and `backend/.env`.

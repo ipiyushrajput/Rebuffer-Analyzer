@@ -16,10 +16,10 @@ developers is in [`SETUP.md`](SETUP.md).
 
 ```
                          Operators' browsers
-                                 │ https://streamlens.<domain>
+                                 │ https://<host>/streamlens/
                                  ▼
                 ┌────────────────────────────────┐
-                │ Load balancer (TLS, sticky)     │  /api/*, /ws/* → instance :8080
+                │ Load balancer (TLS, sticky)     │  /streamlens/* → instance :8080
                 └───────┬────────────────┬───────┘
                         ▼                ▼
         ┌──────────────────────┐  ┌──────────────────────┐
@@ -126,19 +126,26 @@ Chromium and nginx.
 
 ---
 
+The UI, API and WebSockets all live under `/streamlens/` (`/streamlens/api/*`,
+`/streamlens/ws/*`). nginx strips the prefix on the way to the backend, which serves `/api` and
+`/ws`. Each box above can also be split in two, nginx on a frontend machine and the backend on
+its own machine: `deploy/install.sh --role frontend --backend <ip>:8010` and
+`--role backend`. [`INFRA_REQUEST.md`](INFRA_REQUEST.md) §0 lists the ports and paths for that
+layout.
+
 ## 3. Load balancer
 
 - HTTPS listener with the certificate for the StreamLens hostname. HTTPS is also what makes the
   DRM preview's EME work in Chrome.
 - Target: every instance on **8080**.
-- Health check: `GET /healthz` on 8080, which returns `ok`. For readiness behind it, use
-  `GET /api/health/ready`.
+- Health check: `GET /streamlens/healthz` on 8080, which returns `ok`. For readiness behind
+  it, use `GET /streamlens/api/health/ready`.
 - **Stickiness: on**, cookie-based (application or LB cookie), duration ≥ 24 h.
-- **WebSocket support** on `/ws/*`, with an idle timeout of at least 1 hour. An aging run's
+- **WebSocket support** on `/streamlens/ws/*`, with an idle timeout of at least 1 hour. An aging run's
   progress stream can stay open for up to 24 hours; the UI reconnects if it drops.
 - Request body limit ≥ 64 MB (bulk uploads).
-- Response timeout ≥ 300 s for `/api/*`: report and archive generation streams.
-- Restrict `/api/metrics` to the monitoring network (an LB rule or a WAF rule).
+- Response timeout ≥ 300 s for `/streamlens/api/*`: report and archive generation streams.
+- Restrict `/streamlens/api/metrics` to the monitoring network (an LB rule or a WAF rule).
 
 ---
 
@@ -240,8 +247,9 @@ RBA_DB_MAX_OVERFLOW=20
 
 # Service
 RBA_PORT=8010
-RBA_PUBLIC_ORIGIN=https://streamlens.<domain>
-RBA_CORS_ORIGINS=https://streamlens.<domain>
+# Where alert links point: the UI's address, prefix included.
+RBA_PUBLIC_ORIGIN=https://<host>/streamlens
+RBA_CORS_ORIGINS=https://<host>
 RBA_MAX_CONCURRENT_JOBS=20
 
 # Storage: S3 behind CloudFront
@@ -303,6 +311,12 @@ sudo install -m 600 /path/to/backend.env /opt/rba/backend/.env   # the values of
 sudo deploy/install.sh                       # venv, Chromium, migrations, bundle, systemd unit, nginx site
 ```
 
+With the backend and nginx on separate machines, run `sudo deploy/install.sh --role backend` on
+the backend machine (with the `.env` as above), and
+`sudo deploy/install.sh --role frontend --backend <backend-ip>:8010` on the frontend machine.
+Inside an existing site that owns `/`, add `--snippet-only` and include
+`/etc/nginx/snippets/streamlens.conf` in its server block.
+
 `install.sh` keeps a `.env` that is already in place, so putting it there first makes the
 first run apply the migrations against the real database. Without it, the installer writes
 one from `.env.example`: fill it in and run `sudo deploy/install.sh` again.
@@ -311,7 +325,8 @@ Check and operate:
 
 ```bash
 curl -s http://127.0.0.1:8010/api/health | python3 -m json.tool
-curl -s http://127.0.0.1:8080/healthz
+curl -s http://127.0.0.1:8080/streamlens/healthz
+curl -s http://127.0.0.1:8080/streamlens/health
 sudo systemctl status rba-backend
 sudo systemctl restart rba-backend           # after editing .env
 journalctl -u rba-backend -f
@@ -352,8 +367,8 @@ This release adds `reports.storage_key`, `jobs.storage_prefix` and the lease col
 
 | Area | What to do |
 |---|---|
-| Health | LB checks `/healthz`. `/api/health` reports the database, schema drift, storage (backend, bucket, CDN, reachable), ffmpeg, Chromium and mp4decrypt. |
-| Metrics | Scrape `GET /api/metrics` (Prometheus text) on each instance. Series to alert on are listed below the table. |
+| Health | LB checks `/streamlens/healthz`. `/streamlens/health` (the backend's `/api/health`) reports the database, schema drift, storage (backend, bucket, CDN, reachable), ffmpeg, Chromium and mp4decrypt. |
+| Metrics | Scrape `GET /streamlens/api/metrics` (or the backend's own `:8010/api/metrics`; Prometheus text) on each instance. Series to alert on are listed below the table. |
 | Logs | JSON lines on stdout → journald (`journalctl -u rba-backend`) or Docker's json-file driver (rotated: 50 MB × 10). Ship them with the CloudWatch agent or Fluent Bit. Set `SystemMaxUse=2G` in `/etc/systemd/journald.conf`. nginx logs rotate with the distro's logrotate. |
 | Backups | RDS automated backups. On a self-managed server, `deploy/backup.sh` daily from cron, with `BACKUP_S3_URI` set. S3 versioning covers stored files. Keep `RBA_SECRETS_KEY` with the backups. |
 | Retention | Database: samples and polls by the retention purge, hourly. S3: the lifecycle rules. |
@@ -372,9 +387,9 @@ Series to alert on:
 
 | Check | Expected |
 |---|---|
-| `curl https://streamlens.<domain>/healthz` | `ok` |
-| `curl https://streamlens.<domain>/api/health` | `status: ok`; `checks.storage.backend = "s3"`, `ok: true`, `cdn: true`, `cdn_signed: true`; no schema drift |
-| `curl http://<instance>:8080/api/metrics` | Prometheus text with `instance="<RBA_INSTANCE_ID>"` |
+| `curl https://<host>/streamlens/healthz` | `ok` |
+| `curl https://<host>/streamlens/health` | `status: ok`; `checks.storage.backend = "s3"`, `ok: true`, `cdn: true`, `cdn_signed: true`; no schema drift |
+| `curl http://<instance>:8080/streamlens/api/metrics` | Prometheus text with `instance="<RBA_INSTANCE_ID>"` |
 | Run a 2-minute realtime analysis with **Record stream** on, then stop it | Under Analysed channels: Network log, Evidence and Recording download through a `*.cloudfront.net` URL |
 | In S3 | `channels/<channel>/<day>/<job>/archives/…` and `recording/full/…` exist, tagged |
 | Stop an aging job from a browser pinned to another instance | The job ends `CANCELLED` within `RBA_JOB_LEASE_S / 3` |

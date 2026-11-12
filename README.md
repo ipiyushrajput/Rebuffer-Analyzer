@@ -163,7 +163,7 @@ sudo deploy/prereqs-ubuntu.sh           # Ubuntu only: Python 3.11+, Node 22, ng
 make install                            # backend venv + frontend node_modules
 cp backend/.env.example backend/.env    # fill in DB_*, or set DB_ENGINE=sqlite
 make migrate                            # create or upgrade the schema
-make dev                                # backend on :8010, frontend on :5173
+make dev                                # backend on :8010, UI on http://localhost:5173/streamlens/
 ```
 
 On Ubuntu 22.04, whose `python3` is 3.10, use `make install PYTHON=python3.12`.
@@ -172,7 +172,7 @@ On Ubuntu 22.04, whose `python3` is 3.10, use `make install PYTHON=python3.12`.
 
 ```powershell
 .\deploy\windows\setup.cmd -Dev         # venv, backend, Playwright, node_modules, .env
-.\deploy\windows\rba.cmd dev            # backend on :8010, frontend on :5173
+.\deploy\windows\rba.cmd dev            # backend on :8010, UI on http://localhost:5173/streamlens/
 ```
 
 `rba.cmd` is the Makefile's counterpart, target for target — `dev`, `backend`, `frontend`,
@@ -214,7 +214,7 @@ into a monitoring cron — or a Windows scheduled task — without further glue.
 With Docker, on either platform:
 
 ```bash
-make up             # backend :8010, frontend :8080
+make up             # backend :8010, UI at http://localhost:8080/streamlens/
 ```
 
 ## Deployment on 107.109.131.68
@@ -222,7 +222,7 @@ make up             # backend :8010, frontend :8080
 | Service | Port |
 |---|---|
 | Backend (uvicorn) | **8010** |
-| Frontend (nginx, reverse-proxies `/api` and `/ws`) | **8080** |
+| Frontend (nginx: the UI at `/streamlens/`, reverse-proxies `/streamlens/api` and `/streamlens/ws`) | **8080** |
 | *Reserved — never used by RBA* | 8001 (existing Metanalyser backend) |
 
 Check the host before binding:
@@ -234,9 +234,11 @@ ss -ltnp | grep -E ':(8010|8080)\b'
 If either port is taken, take the next free one and record it here and in `backend/.env`.
 `deploy/install.sh` performs this check itself and stops rather than binding over something.
 
-The frontend is built without `VITE_API_BASE` / `VITE_WS_BASE`, so the page calls `/api`
-and `/ws` on whatever address served it — `http://107.109.131.68:8080`, a hostname, or an
-HTTPS load balancer — and nginx proxies both to the backend.
+The UI is served **under `/streamlens/`** — `http://<frontend>:8080/streamlens/`, or
+`https://dev.samsungtv/streamlens/` inside an existing site — and never takes `/`. The page calls
+`/streamlens/api` and `/streamlens/ws` on whatever address served it. nginx forwards both to the
+backend, which serves `/api` and `/ws` unprefixed. Backend health is `…/streamlens/health`;
+frontend liveness for a load balancer is `…/streamlens/healthz`.
 
 **On Ubuntu (22.04 / 24.04), without Docker** — the full walk-through, with upgrades,
 backups, the firewall and troubleshooting, is in
@@ -251,15 +253,27 @@ sudo nano /opt/rba/backend/.env         # DB_*, storage, secrets — then:
 sudo deploy/install.sh                  # migrations + restart with the settings
 
 curl -s http://127.0.0.1:8010/api/health
+curl -s http://127.0.0.1:8080/streamlens/health
 sudo systemctl status rba-backend
 journalctl -u rba-backend -f
+```
+
+Frontend and backend on **separate machines** (TCP 8010 open from the frontend machine to the
+backend machine, see [`docs/INFRA_REQUEST.md`](docs/INFRA_REQUEST.md) §0):
+
+```bash
+sudo deploy/install.sh --role backend                                   # backend machine
+sudo deploy/install.sh --role frontend --backend 10.0.0.5:8010          # frontend machine
+sudo deploy/install.sh --role frontend --backend 10.0.0.5:8010 --snippet-only
+#   ^ inside a site that already owns `/`: then add
+#     `include /etc/nginx/snippets/streamlens.conf;` to that site's server block
 ```
 
 Upgrading is `git pull && sudo deploy/install.sh`: a re-run keeps `.env`, the venv, the data
 and the database, and replaces the code and the bundle.
 
-**On Windows**, `deploy\windows\rba.cmd serve` builds the bundle and serves it on :8080 next
-to the backend; register it as a startup task to run it unattended (see
+**On Windows**, `deploy\windows\rba.cmd serve` builds the bundle and serves it at
+`http://localhost:8080/streamlens/` next to the backend; register it as a startup task to run it unattended (see
 [`docs/SETUP.md`](docs/SETUP.md#running-it-unattended)).
 
 The systemd unit runs a **single worker on purpose**: a realtime run and its WebSocket live

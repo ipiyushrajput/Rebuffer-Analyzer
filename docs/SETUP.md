@@ -97,7 +97,7 @@ make dev                                # backend :8010, frontend :5173
 ```
 
 For a purely local run, `DB_ENGINE=sqlite` in `backend/.env` is enough. Open
-<http://localhost:5173>. `make dev` runs both with reload and stops both on Ctrl+C.
+<http://localhost:5173/streamlens/>. `make dev` runs both with reload and stops both on Ctrl+C.
 
 ### Every Ubuntu command
 
@@ -136,11 +136,24 @@ is refused.
 
 ## Ubuntu — production server
 
-What `107.109.131.68` runs, and what every instance behind a load balancer runs: the backend
-installed in `/opt/rba` as a systemd service (`rba-backend`, user `rba`) on **8010**, and the
-built frontend served by nginx on **8080**, which also proxies `/api` and `/ws` to the backend.
-Data the backend writes lives in `/var/lib/rba`. For the AWS side — load balancer, RDS, S3,
-CloudFront — see [`PRODUCTION_DEPLOYMENT.md`](PRODUCTION_DEPLOYMENT.md).
+Two parts:
+- **The backend**, installed in `/opt/rba` as a systemd service (`rba-backend`, user `rba`) on
+  **8010**. Data it writes lives in `/var/lib/rba`.
+- **The frontend**, the built UI served by nginx **under `/streamlens/`**. nginx also forwards
+  `/streamlens/api/` and `/streamlens/ws/` to the backend, stripping the prefix. StreamLens
+  never takes `/`, so it can share a host whose `/` belongs to something else.
+
+They run on **one machine** (the default) or on **two** (§3). For the AWS side — load
+balancer, RDS, S3, CloudFront — see [`PRODUCTION_DEPLOYMENT.md`](PRODUCTION_DEPLOYMENT.md);
+for the firewall rules between the two machines, [`INFRA_REQUEST.md`](INFRA_REQUEST.md) §0.
+
+| URL | What it is |
+|---|---|
+| `http://<frontend>:8080/streamlens/` (or `https://<site>/streamlens/`) | The UI |
+| `…/streamlens/api/…` | The API |
+| `…/streamlens/ws/…` | WebSockets |
+| `…/streamlens/health` | Backend health (JSON) |
+| `…/streamlens/healthz` | Frontend liveness (`ok`), for a load balancer |
 
 ### 1. Check the ports
 
@@ -164,11 +177,59 @@ sudo deploy/prereqs-ubuntu.sh                 # add --with-bento4 for cbcs DRM c
 
 ### 3. Install
 
+**One machine** (backend and frontend together):
+
 ```bash
 sudo deploy/install.sh
 ```
 
-The installer:
+**Two machines.** First the backend machine, then the frontend machine, giving it the backend
+machine's private IP:
+
+```bash
+# on the backend machine
+sudo deploy/install.sh --role backend
+
+# on the frontend machine
+sudo deploy/install.sh --role frontend --backend 10.0.0.5:8010
+```
+
+The frontend machine needs TCP 8010 to the backend machine opened first ([`INFRA_REQUEST.md`](INFRA_REQUEST.md)
+§0). Until it is, the installer says the backend does not answer, and the UI loads but its API
+calls fail with 502.
+
+**Inside a site that already owns `/`** on the frontend machine (e.g. `https://dev.samsungtv`),
+install the locations only and include them in that site:
+
+```bash
+sudo deploy/install.sh --role frontend --backend 10.0.0.5:8010 --snippet-only
+```
+
+Then add this line inside that site's `server { }` block and reload nginx:
+
+```
+include /etc/nginx/snippets/streamlens.conf;
+```
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+The UI is then at `https://dev.samsungtv/streamlens/`. Without `--snippet-only`, the
+installer's own site on 8080 serves it at `http://<frontend>:8080/streamlens/`; its `/` only
+redirects there.
+
+| Option | Default | |
+|---|---|---|
+| `--role all\|backend\|frontend` | `all` | What this machine runs |
+| `--backend HOST[:PORT]` | `127.0.0.1:8010` | Where nginx finds the backend; required with `--role frontend` |
+| `--base-path /streamlens` | `/streamlens` | The path the UI is served under |
+| `--snippet-only` | off | Install the nginx locations only, not the 8080 site |
+
+Moving from two machines to one later is `sudo deploy/install.sh` (role `all`) on the one
+machine; from one to two, the two commands above.
+
+The installer, for the backend:
 
 - creates the `rba` system user;
 - copies the backend to `/opt/rba/backend` and builds its virtualenv with the newest Python
@@ -176,12 +237,20 @@ The installer:
 - installs Chromium for PDF export into `/opt/rba/browsers`, with its system libraries;
 - writes `/opt/rba/backend/.env` from `.env.example` if there is none (mode 600, data paths
   under `/var/lib/rba`);
-- runs the migrations and builds the frontend;
-- installs `/etc/systemd/system/rba-backend.service` and `/etc/nginx/conf.d/rba.conf`;
-- starts both and prints the health status.
+- runs the migrations;
+- installs and starts `/etc/systemd/system/rba-backend.service`.
 
-The frontend is built to call `/api` and `/ws` on whatever address served the page, so the
-same build works on the IP, on a hostname and behind an HTTPS load balancer. Set
+For the frontend:
+
+- builds the UI for `/streamlens/` and copies it to `/opt/rba/www/streamlens/`;
+- renders `/etc/nginx/snippets/streamlens.conf` (from
+  `frontend/nginx/streamlens-locations.conf.template`) with the backend's address;
+- installs `/etc/nginx/conf.d/rba.conf`, the site on 8080 that includes it (unless
+  `--snippet-only`);
+- reloads nginx and prints what the UI and the API answer through it.
+
+The UI calls `/streamlens/api` and `/streamlens/ws` on whatever address served the page, so the
+same build works on an IP, on a host name and behind an HTTPS load balancer. Set
 `VITE_API_BASE` / `VITE_WS_BASE` in the environment only to point it somewhere else.
 
 `PREFIX=` (default `/opt/rba`), `DATA_DIR=` (default `/var/lib/rba`) and `PYTHON=` (e.g.
@@ -210,11 +279,16 @@ sudo -u rba /opt/rba/backend/.venv/bin/python -m app.cli secret-key
 ### 5. Check it
 
 ```bash
-curl -s http://127.0.0.1:8010/api/health | python3 -m json.tool   # "status": "ok"
-curl -s http://127.0.0.1:8080/healthz                             # ok
+# on the backend machine
+curl -s http://127.0.0.1:8010/api/health | python3 -m json.tool              # "status": "ok"
+
+# on the frontend machine
+curl -s http://<backend-ip>:8010/api/health                                  # the firewall is open
+curl -s http://127.0.0.1:8080/streamlens/healthz                             # ok
+curl -s http://127.0.0.1:8080/streamlens/health | python3 -m json.tool       # through nginx
 ```
 
-Then open `http://<host>:8080`.
+Then open `http://<frontend>:8080/streamlens/` (or `https://<site>/streamlens/`).
 
 ### Running it
 
@@ -227,6 +301,8 @@ journalctl -u rba-backend --since "1 hour ago"
 sudo tail -f /var/log/nginx/rba-access.log /var/log/nginx/rba-error.log
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+The service commands are for the backend machine; the nginx ones for the frontend machine.
 
 ### Upgrading
 
@@ -338,14 +414,14 @@ DB_ENGINE=sqlite
 .\deploy\windows\rba.cmd dev
 ```
 
-Backend on <http://localhost:8010/api/health>, frontend on <http://localhost:5173>. Ctrl+C
+Backend on <http://localhost:8010/api/health>, frontend on <http://localhost:5173/streamlens/>. Ctrl+C
 stops both.
 
 To run the production bundle instead of the dev server — the closest thing to how it runs
 behind nginx, and what to use when showing it to someone:
 
 ```powershell
-.\deploy\windows\rba.cmd serve      # builds, then serves on :8080 next to the backend
+.\deploy\windows\rba.cmd serve      # builds, then serves http://localhost:8080/streamlens/ next to the backend
 ```
 
 ### Every Windows command
@@ -561,7 +637,7 @@ Three ways to get one, in the order they cost anything:
 
 | Route | Certificate | What it takes |
 |---|---|---|
-| Open the app at `http://localhost:8080` **on the deployment host itself** | none | Nothing. `localhost` and `127.0.0.1` are secure contexts by definition. |
+| Open the app at `http://localhost:8080/streamlens/` **on the deployment host itself** | none | Nothing. `localhost` and `127.0.0.1` are secure contexts by definition. |
 | Trust the origin in Chrome: `--unsafely-treat-insecure-origin-as-secure=http://107.109.131.68:8080`, or the `OverrideSecurityRestrictionsOnInsecureOrigin` enterprise policy | none | A flag per machine, or one policy for the fleet. Designed for internal deployments. |
 | Serve the page over HTTPS | self-signed or an internal CA | An nginx `listen 443` block and a certificate the browsers trust. |
 
@@ -620,7 +696,7 @@ the reasons applies when it holds no decrypted media.
 The same on both platforms, and the shortest path if Docker is already installed:
 
 ```bash
-docker compose up -d --build     # backend :8010, frontend :8080   (Ubuntu: make up)
+docker compose up -d --build     # backend :8010, UI at http://localhost:8080/streamlens/   (Ubuntu: make up)
 docker compose exec backend alembic upgrade head
 docker compose logs -f           #                                 (Ubuntu: make logs)
 docker compose down              #                                 (Ubuntu: make down)
@@ -635,6 +711,14 @@ docker compose version
 ```
 
 On Windows, install Docker Desktop and run the same `docker compose` commands in PowerShell.
+
+On two machines, run each service on its own machine. The frontend container finds the backend
+through `STREAMLENS_BACKEND`:
+
+```bash
+docker compose up -d --build backend                                        # backend machine
+STREAMLENS_BACKEND=10.0.0.5:8010 docker compose up -d --build --no-deps frontend   # frontend machine
+```
 
 ---
 
@@ -676,9 +760,15 @@ ports.
 the usual causes are a typo in `/opt/rba/backend/.env` or a database the host cannot reach.
 `sudo systemctl restart rba-backend` after fixing it.
 
-**`502 Bad Gateway` on :8080.** nginx is up and the backend is not:
-`systemctl status rba-backend`. If the backend runs on a port other than 8010, re-run the
-installer with that `RBA_PORT` so the nginx site points at it.
+**`502 Bad Gateway` on `/streamlens/api/…`.** nginx is up and cannot reach the backend.
+On one machine: `systemctl status rba-backend`. On two: from the frontend machine,
+`curl http://<backend-ip>:8010/api/health`; if that times out, TCP 8010 is not open between
+the machines. `grep proxy_pass /etc/nginx/snippets/streamlens.conf` shows the address nginx
+uses; re-run the installer with the right `--backend` (or `RBA_PORT`) to change it.
+
+**The UI loads at `/` but not at `/streamlens/`, or the other way round.** Since this release the
+UI lives under `/streamlens/` only, and `/api` at the root answers 404. Open
+`…/streamlens/`. A bookmark to the old root URL redirects there on the StreamLens site on 8080.
 
 **`nginx rejected its configuration`.** `sudo nginx -t` names the file and line. On a host
 without IPv6, Ubuntu's default site (`listen [::]:80`) fails the test; remove
