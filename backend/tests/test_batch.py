@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import re
 from typing import Any
 
 import pytest
@@ -171,6 +172,7 @@ def test_the_columns_are_in_the_order_the_specification_fixes() -> None:
         "Country",
         "Avg Rebuffering Ratio (7 days)",
         "Week [start date - end date]",
+        "Issues",
         "Analysis Summary",
     )
 
@@ -308,59 +310,196 @@ def test_the_filename_names_the_country_and_the_day() -> None:
     )
 
 
-# -- the summary cell --------------------------------------------------------
+# -- the issues and analysis summary cells --------------------------------------------
 
 
-def test_a_channel_with_no_findings_says_so_rather_than_leaving_the_cell_blank() -> None:
+def _finding(rule_id: str, severity: str, title: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "rule_id": rule_id,
+        "severity": severity,
+        "title": title,
+        "root_cause": extra.pop("root_cause", f"Root cause of {title.lower()}."),
+        "detail": extra.pop("detail", f"Evidence for {title.lower()}."),
+        "variant": extra.pop("variant", "v720p@1500k"),
+        "count": extra.pop("count", 1),
+        "first_seen": extra.pop("first_seen", "2026-11-09T00:00:00+00:00"),
+        **extra,
+    }
+
+
+def test_a_channel_with_no_error_or_critical_issue_says_so() -> None:
     """An empty cell reads as an oversight; this reads as a result."""
-    assert summary.build(status="ANALYSED", findings=[], incidents=[]) == summary.NOTHING_FOUND
+    cells = summary.build(
+        status="ANALYSED",
+        findings=[_finding("SEG-099", "WARN", "A warning"), _finding("INF-001", "INFO", "x")],
+    )
+    assert cells.issues == summary.NO_ISSUES
+    assert cells.analysis == summary.NOTHING_FOUND
 
 
-def test_a_summary_counts_the_findings_by_severity_worst_first() -> None:
+def test_only_error_and_critical_issues_are_listed_one_per_line_worst_first() -> None:
     findings = [
-        {"rule_id": "MED-004", "title": "Playlist is stale", "severity": "WARN"},
-        {"rule_id": "SEG-001", "title": "Segment returned HTTP 404", "severity": "ERROR"},
-        {"rule_id": "SEG-002", "title": "Segment timed out", "severity": "ERROR"},
+        _finding("SEG-001", "ERROR", "Segment returned HTTP 404"),
+        _finding("MED-020", "WARN", "A warning nobody acts on"),
+        _finding("AUD-001", "INFO", "An informational note"),
+        _finding("OK-001", "PASS", "A check that passed"),
+        _finding(
+            "SEG-010", "CRITICAL", "Presentation timestamps reset without a discontinuity tag"
+        ),
     ]
 
-    text = summary.build(status="ANALYSED", findings=findings, incidents=[])
+    cells = summary.build(status="ANALYSED", findings=findings)
 
-    assert "3 finding(s) — 2 ERROR, 1 WARN" in text
-    assert text.index("SEG-001") < text.index("MED-004")
+    assert cells.issues.splitlines() == [
+        "Issue 1 - Presentation timestamps reset without a discontinuity tag",
+        "Issue 2 - Segment returned HTTP 404",
+    ]
+    for hidden in ("warning", "informational", "passed", "WARN", "INFO", "PASS"):
+        assert hidden not in cells.issues + cells.analysis
+
+
+def test_a_rule_that_fired_on_several_renditions_is_one_issue() -> None:
+    findings = [
+        _finding(
+            "SEG-010",
+            "CRITICAL",
+            "Timestamps reset",
+            variant="v480p@750k",
+            count=3,
+            detail="Segment 86376 on v480p@750k starts at PTS 3880814632.",
+        ),
+        _finding(
+            "SEG-010",
+            "CRITICAL",
+            "Timestamps reset",
+            variant="v720p@1500k",
+            count=1,
+            detail="Segment 90001 on v720p@1500k starts at PTS 1.",
+        ),
+    ]
+
+    cells = summary.build(status="ANALYSED", findings=findings)
+
+    assert cells.issues == "Issue 1 - Timestamps reset"
+    # The occurrence seen most is the one quoted, and the renditions are named.
+    assert "Segment 86376 on v480p@750k" in cells.analysis
+    assert "Seen on 2 renditions: v480p@750k, v720p@1500k." in cells.analysis
+
+
+def test_the_analysis_summary_explains_each_issue_under_the_same_number() -> None:
+    findings = [
+        _finding(
+            "SEG-010",
+            "CRITICAL",
+            "Presentation timestamps reset without a discontinuity tag",
+            root_cause=(
+                "The timestamp base changed with no discontinuity declared, so the player maps "
+                "the new media onto a position it has already played."
+            ),
+            detail="Segment 86376 on v480p@750k starts at PTS 3880814632 (see SEG-010)",
+        ),
+        _finding("SEQ-001", "ERROR", "Media sequence number advanced by a different amount"),
+    ]
+
+    cells = summary.build(status="ANALYSED", findings=findings)
+    paragraphs = cells.analysis.split("\n\n")
+
+    assert paragraphs[0] == (
+        "Issue 1 - The timestamp base changed with no discontinuity declared, so the player "
+        "maps the new media onto a position it has already played. Segment 86376 on "
+        "v480p@750k starts at PTS 3880814632."
+    )
+    assert paragraphs[1].startswith("Issue 2 - Root cause of media sequence number")
+
+
+def test_no_rule_identifier_reaches_either_cell() -> None:
+    findings = [
+        _finding(
+            "SEG-010",
+            "ERROR",
+            "Timestamps reset (SEG-010)",
+            root_cause="As INFO-005 records, a boundary was skipped.",
+        )
+    ]
+
+    cells = summary.build(status="ANALYSED", findings=findings)
+
+    assert not re.search(r"[A-Z]{2,5}-\d{3}", cells.issues + cells.analysis)
+
+
+def test_the_excluded_rules_are_left_out_of_the_report() -> None:
+    """A stale playlist, a rung leaving LIVE and a re-signed URI describe the live window, not
+    a packaging defect, so the partner report leaves them out by default."""
+    findings = [
+        _finding("MED-004", "ERROR", "Live playlist is stale"),
+        _finding("MED-014", "ERROR", "Media playlist left the LIVE state"),
+        _finding("MED-016", "ERROR", "Segment URI changed for an unchanged media sequence number"),
+        _finding("SEG-001", "ERROR", "Segment returned HTTP 404"),
+    ]
+
+    cells = summary.build(
+        status="ANALYSED", findings=findings, excluded_rules=DEFAULTS.report_excluded_rules
+    )
+
+    assert cells.issues == "Issue 1 - Segment returned HTTP 404"
+    assert "stale" not in cells.analysis.lower()
+    # Only what the setting names is left out: emptied, every issue is back.
+    assert len(summary.build(status="ANALYSED", findings=findings).issues.splitlines()) == 4
+
+
+def test_the_cells_say_nothing_about_spikes_or_aging() -> None:
+    """The correlation stays on the item and in its own sheet; the partner never sees it."""
+    cells = summary.build(
+        status="ANALYSED", findings=[_finding("SEG-001", "ERROR", "Segment returned HTTP 404")]
+    )
+    for internal in ("spike", "aging", "rebuffering", "correlat", "finding(s)", "incident"):
+        assert internal not in (cells.issues + cells.analysis).lower()
+
+
+def test_the_excluded_rules_setting_is_normalised() -> None:
+    settings = BatchSettings(report_excluded_rules=[" med-004", "MED-004", "seg-010 ", ""])
+    assert settings.report_excluded_rules == ["MED-004", "SEG-010"]
+    assert DEFAULTS.report_excluded_rules == ["MED-004", "MED-014", "MED-016"]
+
+
+def test_the_report_puts_issues_and_their_summary_in_their_own_columns() -> None:
+    row = item(service_id="GB1", name="Worst", average=2.4, text="Issue 1 - Why it happens.")
+    row["issues"] = "Issue 1 - Segment returned HTTP 404\nIssue 2 - Timestamps reset"
+
+    lines = list(csv.reader(io.StringIO(exports.csv_bytes(batch([row])).decode())))
+
+    assert lines[0][-2:] == ["Issues", "Analysis Summary"]
+    assert lines[1][-2] == "Issue 1 - Segment returned HTTP 404\nIssue 2 - Timestamps reset"
+    assert lines[1][-1] == "Issue 1 - Why it happens."
+
+
+def test_the_workbook_wraps_the_text_columns_so_each_issue_reads_on_its_own_line() -> None:
+    from openpyxl import load_workbook
+
+    row = item(service_id="GB1", name="Worst", average=2.4, text="Issue 1 - Why.")
+    row["issues"] = "Issue 1 - A\nIssue 2 - B"
+    book = load_workbook(io.BytesIO(exports.xlsx_bytes(batch([row]))))
+    sheet = book[exports.REPORT_SHEET]
+    header = [cell.value for cell in sheet[1]]
+    issues_cell = sheet.cell(row=2, column=header.index("Issues") + 1)
+
+    assert issues_cell.value == "Issue 1 - A\nIssue 2 - B"
+    assert issues_cell.alignment.wrap_text is True
 
 
 def test_a_failed_channel_says_what_failed() -> None:
-    text = summary.build(status="FAILED", error="the playlist did not parse")
-    assert text == "The analysis failed: the playlist did not parse."
+    cells = summary.build(status="FAILED", error="the playlist did not parse")
+    assert cells.analysis == "The analysis failed: the playlist did not parse."
+    assert cells.issues == ""
 
 
 def test_a_channel_with_no_playback_url_says_why_it_could_not_be_analysed() -> None:
-    assert summary.build(status="NO_URL") == summary.NO_URL
+    assert summary.build(status="NO_URL").analysis == summary.NO_URL
 
 
 def test_a_channel_the_batch_did_not_reach_says_so() -> None:
-    text = summary.build(status="SKIPPED", error="the batch reached its maximum runtime")
-    assert "selected but not reached" in text
-
-
-def test_the_summary_carries_the_spike_windows_without_explaining_them() -> None:
-    correlation = {
-        "matched_count": 1,
-        "windows": [
-            {"sentence": "Spike at 03:00-03:02 UTC: 2 aging event(s) in window.", "matched": True},
-            {
-                "sentence": "Spike at 07:10-07:10 UTC: no aging event was captured in window.",
-                "matched": False,
-            },
-        ],
-    }
-
-    text = summary.build(status="ANALYSED", findings=[], incidents=[], correlation=correlation)
-
-    assert "2 rebuffering spike window(s)" in text
-    assert "1 with an aging event captured in them" in text
-    assert "no aging event was captured in window" in text
-    assert "because" not in text.lower()
+    cells = summary.build(status="SKIPPED", error="the batch reached its maximum runtime")
+    assert "selected but not reached" in cells.analysis
 
 
 # -- selection ---------------------------------------------------------------

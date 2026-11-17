@@ -468,6 +468,9 @@ class BatchItem(Base):
     aging_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # The report's two partner-facing cells: one line per ERROR/CRITICAL issue, and the
+    # explanation of each (`app/batch/summary.py`).
+    issues: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Spike windows matched against aging events, computed when the next report is generated.
     correlation: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

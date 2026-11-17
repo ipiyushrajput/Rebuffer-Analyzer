@@ -326,6 +326,13 @@ frontend/src/
   (historical). A batch's spike correlation reads the aging runs the **previous** batch
   started, because those watched the week this batch measured, from realtime per-minute data
   read at report time; an aging run that started before that window is stated, not correlated.
+- **The batch report is written for the content partner.** Its `Issues` and `Analysis
+  Summary` columns (`app/batch/summary.py`) carry ERROR and CRITICAL findings only, one issue
+  per rule however many renditions it fired on. `Issues` is one `Issue N - <title>` line each;
+  `Analysis Summary` is root cause + detail of the worst occurrence under the same number.
+  Rule identifiers are scrubbed from both, the rules in `report_excluded_rules` (batch
+  settings, default MED-004 / MED-014 / MED-016) are left out, and nothing about spikes,
+  aging or correlation enters them. The correlation stays on the item and in its own sheet.
 - **A batch calls the engines, it does not reimplement them.** `app/batch/` composes what
   already exists: `app.cascada.service` for the country listing, the scan and the averaging,
   `app.analysis` through `job_manager.submit()` for every analysis and aging run. A second

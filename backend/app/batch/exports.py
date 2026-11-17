@@ -3,7 +3,11 @@
 The column order is fixed by the specification and nothing may reorder it:
 
     Channel Name | Service ID | Country | Avg Rebuffering Ratio (<window>) |
-    Week [start date - end date] | Analysis Summary
+    Week [start date - end date] | Issues | Analysis Summary
+
+`Issues` lists each ERROR and CRITICAL defect on its own line, and `Analysis Summary` explains
+each one under the same number (`app/batch/summary.py`). The report goes to the content
+partner, so neither carries this tool's rule identifiers, the spike correlation or aging.
 
 The window in the fourth heading is not a constant. It is written from the window the batch
 actually measured, read back from the batch row, so a report can never claim seven days while
@@ -74,6 +78,7 @@ def headings(
         "Country",
         f"Avg Rebuffering Ratio ({label})",
         "Week [start date - end date]",
+        "Issues",
         "Analysis Summary",
     )
 
@@ -129,6 +134,7 @@ def _rows(batch: dict[str, Any]) -> list[list[Any]]:
             item["country"],
             _pct(item.get("average_pct")),
             dates,
+            item.get("issues") or "",
             item.get("summary") or "",
         ]
         for item in analysed
@@ -287,6 +293,7 @@ def xlsx_bytes(batch: dict[str, Any]) -> bytes:
     for row in _rows(batch):
         sheet.append(row)
     sheet.freeze_panes = "A2"
+    _wrap_text_columns(sheet)
 
     failed = _failed_rows(batch)
     if failed:
@@ -319,6 +326,26 @@ def xlsx_bytes(batch: dict[str, Any]) -> bytes:
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
+
+
+# The two text columns and how wide they open, in characters. Each issue is its own line, so
+# the cells wrap rather than run off the screen.
+TEXT_COLUMN_WIDTHS = {"Issues": 70, "Analysis Summary": 110}
+
+
+def _wrap_text_columns(sheet: Any) -> None:
+    from openpyxl.styles import Alignment
+    from openpyxl.utils import get_column_letter
+
+    header = [cell.value for cell in sheet[1]]
+    for index, name in enumerate(header, start=1):
+        width = TEXT_COLUMN_WIDTHS.get(str(name))
+        if width is None:
+            continue
+        letter = get_column_letter(index)
+        sheet.column_dimensions[letter].width = width
+        for (cell,) in sheet.iter_rows(min_row=2, min_col=index, max_col=index):
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
 def filename(country: str, fmt: str, now: dt.datetime | None = None) -> str:

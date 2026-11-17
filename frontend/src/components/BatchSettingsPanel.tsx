@@ -121,8 +121,12 @@ export function BatchSettingsPanel() {
   const effective = data.effective as Record<string, number>
   const edited = FIELDS.some((field) => draft[field.key] !== data.settings[field.key])
   const agingEdited = draft.aging_enabled !== data.settings.aging_enabled
-  const dirty = edited || agingEdited
-  const offDefault = (key: keyof BatchSettings) => draft[key] !== data.defaults[key]
+  const sourceEdited = draft.scheduled_data_source !== data.settings.scheduled_data_source
+  const excludedEdited =
+    draft.report_excluded_rules.join(',') !== data.settings.report_excluded_rules.join(',')
+  const dirty = edited || agingEdited || sourceEdited || excludedEdited
+  const offDefault = (key: keyof BatchSettings) =>
+    JSON.stringify(draft[key]) !== JSON.stringify(data.defaults[key])
 
   return (
     <div className="space-y-4">
@@ -211,6 +215,23 @@ export function BatchSettingsPanel() {
                 ` · default ${String(data.defaults.scheduled_data_source)}`}
             </p>
           </Field>
+
+          <Field
+            label="Rules left out of the partner report"
+            htmlFor="batch-report-excluded"
+            hint="Rule ids, comma separated. Still measured and shown in the analysis."
+          >
+            <ExcludedRulesInput
+              value={draft.report_excluded_rules}
+              highlighted={offDefault('report_excluded_rules')}
+              onChange={(rules) => setDraft({ ...draft, report_excluded_rules: rules })}
+            />
+            <p className="mt-1 font-mono text-[10px] text-ink-faint">
+              report_excluded_rules
+              {offDefault('report_excluded_rules') &&
+                ` · default ${data.defaults.report_excluded_rules.join(', ')}`}
+            </p>
+          </Field>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 card-divider px-5 py-3">
@@ -251,6 +272,51 @@ export function BatchSettingsPanel() {
 
       <ScheduleTable />
     </div>
+  )
+}
+
+/**
+ * The rule ids as typed. The text is kept as typed while it is edited, so a trailing comma
+ * does not vanish under the cursor; the list it stands for goes to the draft on every change.
+ */
+function ExcludedRulesInput({
+  value,
+  highlighted,
+  onChange,
+}: {
+  value: string[]
+  highlighted: boolean
+  onChange: (rules: string[]) => void
+}) {
+  const [text, setText] = useState(value.join(', '))
+
+  useEffect(() => {
+    const parsed = text
+      .split(',')
+      .map((rule) => rule.trim().toUpperCase())
+      .filter(Boolean)
+    if (parsed.join(',') !== value.join(',')) setText(value.join(', '))
+    // Only an outside change (load, Restore defaults) rewrites the text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+
+  return (
+    <input
+      id="batch-report-excluded"
+      className={cx('input-mono', highlighted && 'border-violet-300')}
+      type="text"
+      value={text}
+      placeholder="MED-004, MED-014, MED-016"
+      onChange={(e) => {
+        setText(e.target.value)
+        onChange(
+          e.target.value
+            .split(',')
+            .map((rule) => rule.trim().toUpperCase())
+            .filter(Boolean),
+        )
+      }}
+    />
   )
 }
 

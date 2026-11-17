@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.batch import exports, reporting, runner, store
+from app.batch import exports, reporting, runner, store, summary
 from app.batch.settings import DEFAULTS, BatchSettings
 from app.cascada import service as cascada
 from app.cascada.series import Point, Stats, Window
@@ -410,9 +410,97 @@ def test_a_report_that_never_built_is_built_when_it_is_downloaded(api: TestClien
 
     response = api.get("/api/batch/batches/unbuilt/report.csv")
     assert response.status_code == 200, response.text
-    assert "The analysis completed and recorded no finding." in response.text
+    assert summary.NOTHING_FOUND in response.text
+    assert summary.NO_ISSUES in response.text
 
     after = api.get("/api/batch/batches/unbuilt").json()
     assert after["items"][0]["summary"]
+    assert after["items"][0]["issues"] == summary.NO_ISSUES
     log = api.get("/api/batch/batches/unbuilt/log").json()["lines"]
     assert any("never built" in line["message"] for line in log)
+
+
+def test_the_partner_report_lists_each_defect_once_and_nothing_internal(api: TestClient) -> None:
+    """Stored findings as an analysis writes them — one row per rendition, every severity —
+    become one numbered line per ERROR or CRITICAL defect, with its explanation beside it."""
+    import csv as csv_module
+
+    from app.db.models import Finding, Job
+
+    def finding(rule_id: str, severity: str, title: str, variant: str, **extra: Any) -> Finding:
+        return Finding(
+            job_id="partner-job",
+            rule_id=rule_id,
+            severity=severity,
+            layer="segment",
+            owner="PACKAGER",
+            variant=variant,
+            title=title,
+            detail=extra.get("detail", f"Measured on {variant}."),
+            root_cause=extra.get("root_cause", f"Why {title.lower()}."),
+            fix="Fix it.",
+            count=extra.get("count", 1),
+        )
+
+    async def seed() -> None:
+        async with db_session.session_scope() as session:
+            session.add(Job(id="partner-job", type="analysis", status="COMPLETED", params={}))
+            await session.flush()
+            session.add_all(
+                [
+                    finding(
+                        "SEG-010",
+                        "CRITICAL",
+                        "Presentation timestamps reset without a discontinuity tag",
+                        "v480p@750k",
+                        count=4,
+                        root_cause="The timestamp base changed with no discontinuity declared.",
+                        detail="Segment 86376 on v480p@750k starts at PTS 3880814632.",
+                    ),
+                    finding(
+                        "SEG-010",
+                        "CRITICAL",
+                        "Presentation timestamps reset without a discontinuity tag",
+                        "v720p@1500k",
+                    ),
+                    finding(
+                        "SEQ-001",
+                        "ERROR",
+                        "Media sequence number advanced by a different amount than the "
+                        "segments that rolled off",
+                        "v480p@750k",
+                    ),
+                    finding("MED-004", "ERROR", "Live playlist is stale", "v480p@750k"),
+                    finding("MED-020", "WARN", "A warning", "v480p@750k"),
+                    finding("INF-001", "INFO", "A note", "v480p@750k"),
+                ]
+            )
+        await store.create(batch_id="partner", country="GB", kind=store.MANUAL, snapshot={})
+        await store.add_items(
+            "partner",
+            [{"service_id": "GB1", "channel_name": "Worst", "country": "GB", "average_pct": 0.9}],
+        )
+        await store.update_item("partner", "GB1", status="ANALYSED", job_id="partner-job")
+        await store.update("partner", status=store.COMPLETED)
+        await reporting.build("partner")
+
+    api.portal.call(seed)  # type: ignore[attr-defined]
+    response = api.get("/api/batch/batches/partner/report.csv")
+    assert response.status_code == 200, response.text
+    rows = list(csv_module.reader(io.StringIO(response.text)))
+    header, row = rows[0], rows[1]
+
+    assert header[-2:] == ["Issues", "Analysis Summary"]
+    assert row[-2].splitlines() == [
+        "Issue 1 - Presentation timestamps reset without a discontinuity tag",
+        "Issue 2 - Media sequence number advanced by a different amount than the segments "
+        "that rolled off",
+    ]
+    assert row[-1].startswith(
+        "Issue 1 - The timestamp base changed with no discontinuity declared. Segment 86376 "
+        "on v480p@750k starts at PTS 3880814632. Seen on 2 renditions"
+    )
+    assert "\n\nIssue 2 - " in row[-1]
+    cells = row[-2] + row[-1]
+    for internal in ("SEG-010", "SEQ-001", "MED-004", "stale", "warning", "note", "spike", "aging"):
+        assert internal not in cells

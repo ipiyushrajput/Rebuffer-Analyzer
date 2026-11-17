@@ -58,6 +58,7 @@ def item_payload(row: BatchItem) -> dict[str, Any]:
         "job_id": row.job_id,
         "aging_job_id": row.aging_job_id,
         "error": row.error,
+        "issues": row.issues,
         "summary": row.summary,
         "correlation": row.correlation or {},
     }

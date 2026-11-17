@@ -632,7 +632,7 @@ export function AutomatedBatchTab() {
                           {dateOnly(detail.data.window_from)} → {dateOnly(detail.data.window_to)})
                         </th>
                         <th>Status</th>
-                        <th>What the analysis found</th>
+                        <th>Issues</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -658,8 +658,11 @@ export function AutomatedBatchTab() {
                               {row.status}
                             </span>
                           </td>
-                          <td className="max-w-160 text-small text-ink-soft">
-                            {row.summary || row.error || '—'}
+                          <td
+                            className="max-w-160 whitespace-pre-line text-small text-ink-soft"
+                            title={row.summary ?? undefined}
+                          >
+                            {row.issues || row.summary || row.error || '—'}
                           </td>
                         </tr>
                       ))}

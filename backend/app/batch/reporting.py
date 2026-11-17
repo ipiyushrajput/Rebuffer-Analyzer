@@ -200,7 +200,7 @@ async def build(batch_id: str) -> dict[str, Any]:
     aging_batch_id, previous_aging = await _previous_aging(current)
 
     for item in current.get("items", []):
-        findings, incidents = await _job_evidence(item.get("job_id"))
+        findings, _incidents = await _job_evidence(item.get("job_id"))
         # A channel the historical scan could not judge has no spikes to look for.
         judged = item["status"] not in exports.NOT_JUDGED
         aging_job_id = item.get("aging_job_id") or previous_aging.get(item["service_id"])
@@ -217,14 +217,21 @@ async def build(batch_id: str) -> dict[str, Any]:
             if window and judged
             else {}
         )
-        text = summary.build(
+        # The partner-facing cells carry the defects only; the correlation is kept on the item
+        # and in its own sheet for the team.
+        cells = summary.build(
             status=item["status"],
             findings=findings,
-            incidents=incidents,
-            correlation=correlation,
+            excluded_rules=settings.report_excluded_rules,
             error=item.get("error"),
         )
-        await store.update_item(batch_id, item["service_id"], summary=text, correlation=correlation)
+        await store.update_item(
+            batch_id,
+            item["service_id"],
+            issues=cells.issues,
+            summary=cells.analysis,
+            correlation=correlation,
+        )
 
     # Read back, so the report is rendered from what was written rather than from memory.
     finished = await store.read(batch_id, with_items=True)

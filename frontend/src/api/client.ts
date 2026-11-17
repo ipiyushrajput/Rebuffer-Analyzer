@@ -672,6 +672,8 @@ export interface BatchSettings {
   retention_per_country: number
   /** Where a scheduled batch reads rebuffering from. A batch started by hand names its own. */
   scheduled_data_source: DataSource
+  /** Rules the report's Issues and Analysis Summary columns leave out, by rule id. */
+  report_excluded_rules: string[]
 }
 
 export interface BatchItem {
@@ -686,6 +688,9 @@ export interface BatchItem {
   job_id: string | null
   aging_job_id: string | null
   error: string | null
+  /** The report's Issues cell: one line per ERROR or CRITICAL issue. */
+  issues: string | null
+  /** The report's Analysis Summary cell: each issue explained under the same number. */
   summary: string | null
   correlation: Record<string, unknown>
 }

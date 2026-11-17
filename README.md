@@ -603,7 +603,20 @@ every one of them is above threshold.
 
 **The report** is written as a table, the same way the CASCADA reports are: `Channel Name`,
 `Service ID`, `Country`, `Avg Rebuffering Ratio (7 days)` labelled from the window actually
-used, `Week [start date - end date]`, `Analysis Summary`. A workbook carries the
+used, `Week [start date - end date]`, `Issues`, `Analysis Summary`.
+
+The last two columns are written for the content partner the report goes to:
+- **Content.** Only ERROR and CRITICAL findings appear, with no rule identifiers and nothing
+  about spikes or aging. A rule that fired on several renditions is listed once.
+- **`Issues`** has one line per defect, worst first: `Issue 1 - <title>`.
+- **`Analysis Summary`** explains each one under the same number, with the rule's root cause
+  followed by the measured evidence. It is the sentence the analysis report leads with.
+- **Exclusions.** The rules in `report_excluded_rules` (Settings → Automated batches) are left
+  out of both cells. By default these are MED-004 *Live playlist is stale*, MED-014
+  *Media playlist left the LIVE state* and MED-016 *Segment URI changed for an unchanged
+  media sequence number*. They are still measured and shown in the analysis itself.
+
+A workbook carries the
 above-threshold channels, the channels that failed with the reason, the spike-to-aging
 correlation, and an `about` sheet with the window, the threshold and the settings the batch
 ran with. Reports live in `reports.content` like every other report, so a second analyzer

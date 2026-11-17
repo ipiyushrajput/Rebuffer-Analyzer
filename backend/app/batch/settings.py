@@ -20,7 +20,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import Thresholds, get_thresholds
 from app.db import session as db_session
@@ -65,6 +65,26 @@ class BatchSettings(BaseModel):
     # value per day; realtime is the rolling per-minute window. A batch started by hand names
     # its source on the button, so this governs scheduled and automated runs only.
     scheduled_data_source: Literal["realtime", "historical"] = Field(default="historical")
+
+    # Rules the report's Issues and Analysis Summary columns leave out. The report goes to the
+    # content partner, and these describe how the live window behaved while it was watched —
+    # a stale playlist, a rung leaving LIVE, a URI re-signed for the same segment — rather
+    # than a defect in what was packaged. They are still measured and still listed in the
+    # analysis itself.
+    report_excluded_rules: list[str] = Field(
+        default_factory=lambda: ["MED-004", "MED-014", "MED-016"], max_length=200
+    )
+
+    @field_validator("report_excluded_rules")
+    @classmethod
+    def _rule_ids(cls, value: list[str]) -> list[str]:
+        """Upper-case, trimmed, each once, in the order given."""
+        seen: list[str] = []
+        for raw in value:
+            rule_id = raw.strip().upper()
+            if rule_id and rule_id not in seen:
+                seen.append(rule_id)
+        return seen
 
     def analysis_duration_s(self) -> float:
         return self.analysis_duration_minutes * 60.0
